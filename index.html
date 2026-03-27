@@ -7,55 +7,94 @@
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;900&display=swap" rel="stylesheet">
     <style>
         :root { --fp-yellow: #ffde00; --fp-bg: #000; }
-        body { background: var(--fp-bg); color: white; font-family: 'Roboto', sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        body { background: var(--fp-bg); color: white; font-family: 'Roboto', sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; overflow-x: hidden; }
         
-        .logo { width: 300px; margin-bottom: 20px; }
+        .logo { width: 300px; margin-bottom: 20px; margin-top: 20px; }
         .title { font-family: 'Oswald'; text-transform: uppercase; font-size: 2.5rem; text-align: center; margin-bottom: 40px; }
 
-        /* CONTENEUR DE LA ROUE */
-        .wheel-box { position: relative; width: 350px; height: 350px; border: 5px solid #222; border-radius: 50%; }
-        
-        #wheel {
-            width: 100%; height: 100%; border-radius: 50%;
-            position: relative; overflow: hidden;
+        /* --- LA ROUE EN CSS PUR --- */
+        .wheel-container {
+            position: relative;
+            width: 350px;
+            height: 350px;
+            margin-bottom: 40px;
+        }
+
+        .main-wheel {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            position: relative;
+            overflow: hidden;
+            border: 8px solid #222;
             transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
             background: #111;
+            box-shadow: 0 0 30px rgba(255, 222, 0, 0.1);
         }
 
-        /* FLECHE A DROITE */
-        .arrow {
-            position: absolute; right: -30px; top: 50%; transform: translateY(-50%);
-            width: 0; height: 0; border-top: 20px solid transparent; border-bottom: 20px solid transparent;
-            border-right: 40px solid var(--fp-yellow); z-index: 10;
+        /* L'aiguille à droite */
+        .right-arrow {
+            position: absolute;
+            right: -40px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0; height: 0;
+            border-top: 25px solid transparent;
+            border-bottom: 25px solid transparent;
+            border-right: 50px solid var(--fp-yellow);
+            z-index: 100;
         }
 
-        .spin-btn { margin-top: 40px; background: var(--fp-yellow); border: none; padding: 15px 40px; font-family: 'Oswald'; font-size: 1.5rem; font-weight: bold; cursor: pointer; text-transform: uppercase; }
-        .spin-btn:disabled { background: #444; cursor: not-allowed; }
+        .segment {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            clip-path: polygon(50% 50%, 100% 19%, 100% 81%); /* Pour 10 segments */
+        }
 
-        /* FORMULAIRE */
-        #form-win { display: none; background: #111; padding: 20px; border: 1px solid var(--fp-yellow); margin-top: 20px; width: 320px; text-align: center; }
-        input { width: 100%; padding: 10px; margin: 5px 0; background: #222; border: 1px solid #444; color: white; box-sizing: border-box; }
+        .segment-text {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 10px;
+            font-weight: 900;
+            width: 120px;
+            text-align: right;
+            pointer-events: none;
+        }
+
+        /* Boutons et Formulaire */
+        .spin-btn { background: var(--fp-yellow); border: none; padding: 20px 50px; font-family: 'Oswald'; font-size: 1.8rem; font-weight: bold; cursor: pointer; text-transform: uppercase; box-shadow: 0 5px 0 #bfa700; transition: 0.2s; }
+        .spin-btn:active { transform: translateY(3px); box-shadow: none; }
+        .spin-btn:disabled { background: #444; box-shadow: none; cursor: not-allowed; }
+
+        #form-win { display: none; background: #111; padding: 30px; border: 2px solid var(--fp-yellow); margin-top: 20px; width: 320px; text-align: center; z-index: 200; }
+        input { width: 100%; padding: 12px; margin: 10px 0; background: #222; border: 1px solid #444; color: white; box-sizing: border-box; border-radius: 4px; }
+        .save-btn { background: var(--fp-yellow); border: none; width: 100%; padding: 15px; font-weight: bold; text-transform: uppercase; cursor: pointer; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <img src="https://d1nwmbf35sn2fq.cloudfront.net/s3fs-public/2025-12/LOGO_FITNESS%20PARK_WHITE_2020_FR%20%281%29%20%281%29.svg?VersionId=c9xFUFsleMk4wk4mV8FfPEzY8KueB1XW" class="logo">
+    
     <div class="title">TENTE TA <span style="color:var(--fp-yellow)">CHANCE</span></div>
 
-    <div class="wheel-box">
-        <div class="arrow"></div>
-        <canvas id="wheelCanvas" width="350" height="350"></canvas>
+    <div class="wheel-container">
+        <div class="right-arrow"></div>
+        <div id="wheel" class="main-wheel">
+            </div>
     </div>
 
     <button class="spin-btn" id="spinBtn">Lancer la roue</button>
 
     <div id="form-win">
-        <h2 style="font-family:'Oswald'; color:var(--fp-yellow)">GAGNÉ !</h2>
-        <p id="lot-name"></p>
+        <h2 style="font-family:'Oswald'; color:var(--fp-yellow); margin-top:0;">GAGNÉ !</h2>
+        <p id="lot-display" style="font-size: 1.2rem; font-weight: bold;"></p>
         <input type="text" id="nom" placeholder="Nom">
         <input type="text" id="prenom" placeholder="Prénom">
         <input type="tel" id="tel" placeholder="Téléphone">
-        <button class="spin-btn" id="saveBtn" style="font-size: 1rem; width: 100%">Valider</button>
+        <button class="save-btn" id="saveBtn">Recevoir mon lot</button>
     </div>
 
     <script type="module">
@@ -74,30 +113,33 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        const canvas = document.getElementById("wheelCanvas");
-        const ctx = canvas.getContext("2d");
+        const wheel = document.getElementById("wheel");
         const rewards = [
             { label: "SERVIETTE FP", weight: 60 }, { label: "T-SHIRT FP", weight: 30 },
             { label: "SAC À DOS FP", weight: 10 }, { label: "3M ULTIMATE", weight: 1 },
             { label: "3M ACCESS", weight: 0.5 }, { label: "1 MOIS GRATUIT", weight: 0.1 },
             { label: "2 MOIS GRATUIT", weight: 0.05 }, { label: "3 MOIS GRATUIT", weight: 0.01 },
-            { label: "6 MOIS GRATUIT", weight: 0.001 }
+            { label: "6 MOIS GRATUIT", weight: 0.001 }, { label: "SURPRISE", weight: 5 } // Remplissage pour faire 10 segments
         ];
 
-        let currentAngle = 0;
-        let selectedLot = "";
+        // Génération des segments CSS
+        rewards.forEach((r, i) => {
+            const seg = document.createElement("div");
+            seg.className = "segment";
+            seg.style.transform = `rotate(${i * 36}deg)`;
+            seg.style.background = i % 2 === 0 ? "#111" : "#1a1a1a";
+            
+            const txt = document.createElement("div");
+            txt.className = "segment-text";
+            txt.style.color = i % 2 === 0 ? "white" : "var(--fp-yellow)";
+            txt.innerText = r.label;
+            
+            seg.appendChild(txt);
+            wheel.appendChild(seg);
+        });
 
-        function draw() {
-            const arc = Math.PI / (rewards.length / 2);
-            rewards.forEach((r, i) => {
-                const angle = i * arc;
-                ctx.fillStyle = i % 2 === 0 ? "#111" : "#1a1a1a";
-                ctx.beginPath(); ctx.moveTo(175, 175); ctx.arc(175, 175, 175, angle, angle + arc); ctx.fill();
-                ctx.save(); ctx.fillStyle = i % 2 === 0 ? "#fff" : "#ffde00"; ctx.translate(175 + Math.cos(angle + arc/2) * 120, 175 + Math.sin(angle + arc/2) * 120);
-                ctx.rotate(angle + arc/2); ctx.font = "bold 10px Roboto"; ctx.fillText(r.label, -ctx.measureText(r.label).width/2, 0); ctx.restore();
-            });
-        }
-        draw();
+        let currentRotation = 0;
+        let selectedLot = "";
 
         document.getElementById("spinBtn").onclick = () => {
             const btn = document.getElementById("spinBtn");
@@ -113,31 +155,32 @@
             }
             selectedLot = rewards[winIdx].label;
 
-            // Rotation (la flèche est à 0 radian / droite)
-            const extra = 360 * 5; 
-            const stopAngle = 360 - (winIdx * (360/rewards.length));
-            currentAngle += extra + stopAngle;
-            canvas.style.transition = "transform 5s cubic-bezier(0.15, 0, 0.15, 1)";
-            canvas.style.transform = `rotate(${currentAngle}deg)`;
+            // Animation
+            const extra = 360 * 8; // 8 tours
+            const stopAngle = (winIdx * 36);
+            // On veut que le lot s'arrête à DROITE (0 deg en CSS est à droite par défaut)
+            currentRotation += extra - stopAngle;
+            
+            wheel.style.transform = `rotate(${currentRotation}deg)`;
 
             setTimeout(() => {
                 document.getElementById("form-win").style.display = "block";
-                document.getElementById("lot-name").innerText = "Lot : " + selectedLot;
+                document.getElementById("lot-display").innerText = selectedLot;
                 btn.style.display = "none";
             }, 5200);
         };
 
         document.getElementById("saveBtn").onclick = async () => {
-            const data = {
-                nom: document.getElementById("nom").value,
-                prenom: document.getElementById("prenom").value,
-                tel: document.getElementById("tel").value,
-                lot: selectedLot,
-                date: serverTimestamp()
-            };
-            if(!data.nom || !data.tel) return alert("Champs vides !");
-            await addDoc(collection(db, "gagnants"), data);
-            alert("Enregistré !");
+            const nom = document.getElementById("nom").value;
+            const prenom = document.getElementById("prenom").value;
+            const tel = document.getElementById("tel").value;
+
+            if(!nom || !tel) return alert("Veuillez remplir les informations !");
+
+            await addDoc(collection(db, "gagnants"), {
+                nom, prenom, tel, lot: selectedLot, date: serverTimestamp()
+            });
+            alert("Informations enregistrées ! Félicitations.");
             location.reload();
         };
     </script>

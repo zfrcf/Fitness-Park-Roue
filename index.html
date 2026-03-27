@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness Park - Tente ta chance !</title>
+    <title>Tente ta Chance ! - Fitness Park</title>
     <style>
         /* STYLE FITNESS PARK */
         @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;900&display=swap');
@@ -15,73 +15,106 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             min-height: 100vh;
             margin: 0;
             overflow-x: hidden;
         }
 
-        h1 {
+        /* HEADER FITNESS PARK (Simulé) */
+        header {
+            width: 100%;
+            background-color: #000;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            border-bottom: 2px solid #333;
+        }
+        header .logo {
+            font-family: 'Oswald', sans-serif;
+            font-size: 2rem;
+            text-transform: uppercase;
+            color: #fff;
+        }
+
+        /* BANNIÈRE TITRE (du Kakemono) */
+        .title-banner {
+            width: 100%;
+            max-width: 600px;
+            background-color: #000;
+            color: #fff;
+            padding: 30px;
+            text-align: center;
             font-family: 'Oswald', sans-serif;
             font-size: 3rem;
             text-transform: uppercase;
-            color: #fff;
-            margin-bottom: 0;
-            text-align: center;
+            margin-top: 40px;
+            border-top: 2px solid #333;
+            border-bottom: 2px solid #333;
         }
-
-        h1 span {
+        .title-banner .sub {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: #ccc;
+        }
+        .title-banner .highlight {
             color: #ffde00; /* Le jaune Fitness Park */
         }
 
+        /* CONTENEUR DE LA ROUE ET DU CURSEUR */
         .container {
             position: relative;
-            margin: 50px 0;
+            margin: 60px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
-        /* LA ROUE */
+        /* LA ROUE (L'Image) */
         .wheel-outer {
-            width: 400px;
-            height: 400px;
-            border: 10px solid #333;
+            width: 500px; /* Plus grande */
+            height: 500px;
             border-radius: 50%;
             position: relative;
-            overflow: hidden;
-            transition: transform 4s cubic-bezier(0.15, 0, 0.15, 1);
-            box-shadow: 0 0 30px rgba(255, 222, 0, 0.2);
+            box-shadow: 0 0 50px rgba(255, 222, 0, 0.3);
         }
-
-        canvas {
-            display: block;
+        
+        #wheel-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+            transition: transform 4s cubic-bezier(0.15, 0, 0.15, 1);
         }
 
         /* LE CURSEUR (L'AIGUILLE) */
         .pointer {
             position: absolute;
-            top: -20px;
+            top: -30px; /* Plus haut */
             left: 50%;
             transform: translateX(-50%);
-            width: 40px;
-            height: 50px;
+            width: 50px;
+            height: 60px;
             background: #ffde00;
             clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
             z-index: 10;
         }
 
-        /* BOUTON */
+        /* BOUTON SPIN */
         .spin-btn {
-            margin-top: 30px;
-            padding: 15px 40px;
+            margin-top: 20px;
+            padding: 20px 50px;
             background-color: #ffde00;
             color: #000;
             border: none;
             font-family: 'Oswald', sans-serif;
-            font-size: 1.5rem;
+            font-size: 1.8rem;
             font-weight: bold;
             text-transform: uppercase;
             cursor: pointer;
             border-radius: 5px;
             transition: transform 0.2s, background-color 0.2s;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.4);
         }
 
         .spin-btn:hover {
@@ -92,85 +125,81 @@
         .spin-btn:disabled {
             background-color: #555;
             cursor: not-allowed;
+            color: #999;
         }
 
         /* RESULTAT */
         #result {
-            margin-top: 20px;
-            font-size: 1.8rem;
+            margin-top: 30px;
+            font-size: 2rem;
             font-family: 'Oswald', sans-serif;
             color: #ffde00;
-            height: 40px;
+            height: 50px;
+            margin-bottom: 50px;
+        }
+
+        /* FOOTER (Simulé avec l'athlète) */
+        footer {
+            width: 100%;
+            max-width: 600px;
+            margin-top: auto;
+            position: relative;
+            background-color: #000;
+            border-top: 2px solid #333;
+        }
+        footer img {
+            width: 100%;
+            display: block;
         }
     </style>
 </head>
 <body>
 
-    <h1>TENTE TA <span>CHANCE !</span></h1>
+    <header>
+        <div class="logo">Fitness Park</div>
+    </header>
+
+    <div class="title-banner">
+        <div class="sub">Se dépasser • Se surpasser</div>
+        TENTE <span class="highlight">TA CHANCE !</span>
+    </div>
     
     <div class="container">
         <div class="pointer"></div>
         <div class="wheel-outer" id="wheel">
-            <canvas id="canvas" width="400" height="400"></canvas>
+            <img src="roue-fitness-park.png" alt="Roue Fitness Park" id="wheel-img">
         </div>
     </div>
 
     <button class="spin-btn" id="spin-button">Faire tourner la roue</button>
     <div id="result"></div>
 
+    <footer>
+        <img src="https://i.imgur.com/KqW4l5z.png" alt="Athlète Fitness Park">
+    </footer>
+
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
         const spinBtn = document.getElementById('spin-button');
-        const wheel = document.getElementById('wheel');
+        const wheelImg = document.getElementById('wheel-img');
         const resultDisplay = document.getElementById('result');
 
-        // LES RÉCOMPENSES (Tu peux les modifier ici plus tard)
+        // LES RÉCOMPENSES (Dans l'ordre de l'image, en partant du haut et en sens horaire)
         const rewards = [
-            "1 SERVIETTE OFFERTE",
             "4 SEMAINES OFFERTES",
-            "1 SHAKER FP",
-            "DÉFI POMPES : 3 RÈP",
             "1 COACHING OFFERT",
+            "DÉFI POMPES : 3 RÈP",
             "DÉFI GAINAGE : 30 SEC",
             "1 COURS COLLECTIF",
             "1 MOIS OFFERT",
             "GOURDE OFFERTE",
-            "DÉFI CHAISE : 45 SEC"
+            "DÉFI CHAISE : 45 SEC",
+            "1 SERVIETTE OFFERTE",
+            "1 SHAKER FP"
         ];
 
         const numSegments = rewards.length;
         const segmentAngle = 360 / numSegments;
         let currentRotation = 0;
-
-        // Dessiner la roue
-        function drawWheel() {
-            for (let i = 0; i < numSegments; i++) {
-                const angle = (i * segmentAngle * Math.PI) / 180;
-                
-                // Dessin du quartier
-                ctx.beginPath();
-                ctx.moveTo(200, 200);
-                ctx.arc(200, 200, 200, angle, angle + (segmentAngle * Math.PI) / 180);
-                ctx.fillStyle = (i % 2 === 0) ? "#1a1a1a" : "#2a2a2a";
-                ctx.fill();
-                ctx.strokeStyle = "#444";
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                // Texte
-                ctx.save();
-                ctx.translate(200, 200);
-                ctx.rotate(angle + (segmentAngle / 2) * Math.PI / 180);
-                ctx.textAlign = "right";
-                ctx.fillStyle = (i % 2 === 0) ? "#ffffff" : "#ffde00";
-                ctx.font = "bold 14px Roboto";
-                ctx.fillText(rewards[i], 180, 5);
-                ctx.restore();
-            }
-        }
-
-        drawWheel();
 
         // Animation du spin
         spinBtn.addEventListener('click', () => {
@@ -182,7 +211,7 @@
             const totalSpin = 1800 + extraRotation; 
             currentRotation += totalSpin;
             
-            wheel.style.transform = `rotate(${currentRotation}deg)`;
+            wheelImg.style.transform = `rotate(${currentRotation}deg)`;
 
             // Calcul du gain à la fin de l'animation (4 secondes)
             setTimeout(() => {
@@ -193,7 +222,10 @@
                 const actualAngle = (currentRotation % 360);
                 const winningIndex = Math.floor((360 - actualAngle + 270) % 360 / segmentAngle);
                 
-                resultDisplay.innerText = "GAGNÉ : " + rewards[winningIndex];
+                // Correction d'index pour l'image spécifique
+                let finalIndex = (winningIndex + 1) % numSegments;
+                
+                resultDisplay.innerText = "GAGNÉ : " + rewards[finalIndex];
             }, 4000);
         });
     </script>

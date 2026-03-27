@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness Park - Tente ta chance</title>
+    <title>Fitness Park - Tirage au sort</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;700;900&display=swap" rel="stylesheet">
     
     <style>
@@ -22,28 +22,31 @@
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
+            padding-bottom: 50px;
         }
 
-        /* --- LOGO EN GROS --- */
         .header-logo {
             margin-top: 40px;
-            width: 300px;
-            max-width: 80%;
+            width: 350px;
+            max-width: 85%;
         }
 
         .title-main {
             font-family: 'Oswald', sans-serif;
             font-size: clamp(2rem, 6vw, 3.5rem);
             text-transform: uppercase;
-            margin: 20px 0 40px 0;
+            margin: 30px 0;
             text-align: center;
         }
 
         /* --- ZONE ROUE --- */
-        .wheel-container {
+        .wheel-wrapper {
             position: relative;
             width: min(90vw, 450px);
             height: min(90vw, 450px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         #wheel-svg {
@@ -51,22 +54,24 @@
             transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
         }
 
-        .marker {
+        /* FLECHE A DROITE */
+        .marker-right {
             position: absolute;
-            top: -20px; left: 50%;
-            transform: translateX(-50%);
+            right: -25px; 
+            top: 50%;
+            transform: translateY(-50%);
             width: 0; height: 0;
-            border-left: 20px solid transparent;
-            border-right: 20px solid transparent;
-            border-top: 40px solid var(--fp-yellow);
+            border-top: 25px solid transparent;
+            border-bottom: 25px solid transparent;
+            border-right: 45px solid var(--fp-yellow);
             z-index: 10;
         }
 
         .spin-btn {
-            margin-top: 30px;
+            margin-top: 40px;
             background: var(--fp-yellow);
             border: none;
-            padding: 18px 50px;
+            padding: 20px 60px;
             font-family: 'Oswald', sans-serif;
             font-size: 1.8rem;
             text-transform: uppercase;
@@ -75,13 +80,9 @@
             box-shadow: 0 6px 0 #bfa700;
         }
 
-        .spin-btn:disabled {
-            background: #555;
-            box-shadow: none;
-            cursor: not-allowed;
-        }
+        .spin-btn:disabled { background: #444; box-shadow: none; cursor: not-allowed; }
 
-        /* --- FORMULAIRE GAGNANT --- */
+        /* --- FORMULAIRE --- */
         #winner-form {
             display: none;
             background: var(--fp-grey);
@@ -89,35 +90,31 @@
             border-radius: 4px;
             border: 2px solid var(--fp-yellow);
             margin-top: 30px;
-            width: 350px;
+            width: 380px;
             max-width: 90%;
             text-align: center;
         }
 
-        #winner-form h2 {
-            font-family: 'Oswald', sans-serif;
-            color: var(--fp-yellow);
-            margin-top: 0;
-        }
-
         .win-input {
             width: 100%;
-            padding: 12px;
+            padding: 15px;
             margin: 10px 0;
             background: #000;
             border: 1px solid #444;
             color: white;
-            box-sizing: border-box;
+            font-size: 1rem;
         }
 
         .submit-win {
             background: var(--fp-yellow);
             border: none;
             width: 100%;
-            padding: 12px;
+            padding: 15px;
             font-weight: bold;
             text-transform: uppercase;
             cursor: pointer;
+            font-size: 1.1rem;
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -127,24 +124,26 @@
 
     <h1 class="title-main">TENTE TA <span style="color:var(--fp-yellow)">CHANCE !</span></h1>
     
-    <div class="wheel-container">
-        <div class="marker"></div>
+    <div class="wheel-wrapper">
+        <div class="marker-right"></div>
         <svg id="wheel-svg" viewBox="0 0 400 400"></svg>
     </div>
 
-    <button class="spin-btn" id="spin-btn">Faire tourner</button>
+    <button class="spin-btn" id="spin-btn">Faire tourner la roue</button>
 
     <div id="winner-form">
-        <h2>FÉLICITATIONS !</h2>
-        <p id="win-message"></p>
-        <input type="text" class="win-input" placeholder="Nom" id="last-name" required>
-        <input type="text" class="win-input" placeholder="Prénom" id="first-name" required>
-        <input type="tel" class="win-input" placeholder="Numéro de téléphone" id="phone" required>
-        <button class="submit-win" onclick="alert('Vos informations ont été enregistrées !')">Recevoir mon lot</button>
+        <h2 style="font-family:'Oswald'; color:var(--fp-yellow);">BIEN JOUÉ !</h2>
+        <p id="win-message" style="font-size: 1.2rem; margin-bottom: 20px;"></p>
+        <input type="text" class="win-input" placeholder="Nom" id="last-name">
+        <input type="text" class="win-input" placeholder="Prénom" id="first-name">
+        <input type="tel" class="win-input" placeholder="Téléphone (ex: 06...)" id="phone">
+        <button class="submit-win" id="btn-save">Valider mes informations</button>
     </div>
 
     <script type="module">
         import { initializeApp } from "firebase/app";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
+
         const firebaseConfig = {
             apiKey: "AIzaSyA6RIWqdkWkIYYNXdRXfY84ocfMHuyaKkk",
             authDomain: "fitness-park-roue.firebaseapp.com",
@@ -154,45 +153,38 @@
             appId: "1:393113227879:web:0c73a9276b29ef8103bac2",
             measurementId: "G-FWRZGVQKXF"
         };
-        initializeApp(firebaseConfig);
-    </script>
 
-    <script>
-        // Définition des lots avec leurs probabilités
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // --- LOGIQUE DE LA ROUE ---
         const rewardsData = [
-            { label: "SERVIETTE FP", weight: 60 },
-            { label: "T-SHIRT FP", weight: 30 },
-            { label: "SAC À DOS FP", weight: 10 },
-            { label: "3M ULTIMATE", weight: 1 },
-            { label: "3M ACCESS", weight: 0.5 },
-            { label: "1 MOIS GRATUIT", weight: 0.1 },
-            { label: "2 MOIS GRATUIT", weight: 0.05 },
-            { label: "3 MOIS GRATUIT", weight: 0.01 },
+            { label: "SERVIETTE FP", weight: 60 }, { label: "T-SHIRT FP", weight: 30 },
+            { label: "SAC À DOS FP", weight: 10 }, { label: "3M ULTIMATE", weight: 1 },
+            { label: "3M ACCESS", weight: 0.5 }, { label: "1 MOIS GRATUIT", weight: 0.1 },
+            { label: "2 MOIS GRATUIT", weight: 0.05 }, { label: "3 MOIS GRATUIT", weight: 0.01 },
             { label: "6 MOIS GRATUIT", weight: 0.001 }
         ];
 
         const svg = document.getElementById('wheel-svg');
         const spinBtn = document.getElementById('spin-btn');
         let currentRotation = 0;
+        let selectedReward = null;
 
-        // Dessiner la roue (On divise en 10 segments pour la lisibilité visuelle)
         function drawWheel() {
-            const segments = 10; 
-            const step = 360 / segments;
-            for (let i = 0; i < segments; i++) {
+            const step = 360 / 10;
+            for (let i = 0; i < 10; i++) {
                 const angle = i * step;
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 const x1 = 200 + 190 * Math.cos(Math.PI * angle / 180);
                 const y1 = 200 + 190 * Math.sin(Math.PI * angle / 180);
                 const x2 = 200 + 190 * Math.cos(Math.PI * (angle + step) / 180);
                 const y2 = 200 + 190 * Math.sin(Math.PI * (angle + step) / 180);
-                
                 path.setAttribute("d", `M 200 200 L ${x1} ${y1} A 190 190 0 0 1 ${x2} ${y2} Z`);
-                path.setAttribute("fill", i % 2 === 0 ? "#111" : "#1a1a1a");
+                path.setAttribute("fill", i % 2 === 0 ? "#0a0a0a" : "#1a1a1a");
                 path.setAttribute("stroke", "#333");
                 svg.appendChild(path);
 
-                // Texte (On affiche les lots principaux sur la roue)
                 const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
                 t.setAttribute("x", "300"); t.setAttribute("y", "205");
                 t.setAttribute("fill", i % 2 === 0 ? "white" : "#ffde00");
@@ -202,41 +194,53 @@
                 svg.appendChild(t);
             }
         }
-
         drawWheel();
-
-        // Logique de calcul par probabilité
-        function getWeightedReward() {
-            const totalWeight = rewardsData.reduce((acc, item) => acc + item.weight, 0);
-            let random = Math.random() * totalWeight;
-            for (const reward of rewardsData) {
-                if (random < reward.weight) return reward;
-                random -= reward.weight;
-            }
-            return rewardsData[0];
-        }
 
         spinBtn.onclick = () => {
             spinBtn.disabled = true;
-            document.getElementById('winner-form').style.display = 'none';
-            
-            const winningReward = getWeightedReward();
-            const rewardIndex = rewardsData.indexOf(winningReward);
-            
-            // Calcul de l'angle pour tomber sur le bon segment visuel
-            // (Note: C'est une simulation visuelle, le lot est décidé par le JS avant)
-            const extraSpin = 3600; // 10 tours
-            const segmentAngle = 360 / 10;
-            const targetAngle = 360 - (rewardIndex * segmentAngle) - (segmentAngle / 2);
+            const totalWeight = rewardsData.reduce((acc, item) => acc + item.weight, 0);
+            let random = Math.random() * totalWeight;
+            for (const reward of rewardsData) {
+                if (random < reward.weight) { selectedReward = reward; break; }
+                random -= reward.weight;
+            }
+
+            const rewardIndex = rewardsData.indexOf(selectedReward);
+            const extraSpin = 3600; 
+            // 0 deg est à DROITE en SVG. On ajuste pour que l'index 0 tombe sur la flèche à droite.
+            const targetAngle = 360 - (rewardIndex * (360/10));
             
             currentRotation += extraSpin + targetAngle;
             svg.style.transform = `rotate(${currentRotation}deg)`;
-            
+
             setTimeout(() => {
                 document.getElementById('winner-form').style.display = 'block';
-                document.getElementById('win-message').innerHTML = `Vous avez gagné : <br><strong>${winningReward.label}</strong>`;
+                document.getElementById('win-message').innerHTML = `Tu as gagné : <br><strong>${selectedReward.label}</strong>`;
                 spinBtn.style.display = 'none';
             }, 5000);
+        };
+
+        // --- SAUVEGARDE FIREBASE ---
+        document.getElementById('btn-save').onclick = async () => {
+            const nom = document.getElementById('last-name').value;
+            const prenom = document.getElementById('first-name').value;
+            const tel = document.getElementById('phone').value;
+
+            if(!nom || !prenom || !tel) return alert("Remplis tous les champs !");
+
+            try {
+                await addDoc(collection(db, "gagnants"), {
+                    nom: nom,
+                    prenom: prenom,
+                    telephone: tel,
+                    lot: selectedReward.label,
+                    date: serverTimestamp()
+                });
+                alert("Lot validé ! À bientôt chez Fitness Park.");
+                location.reload(); 
+            } catch (e) {
+                console.error("Erreur lors de l'envoi : ", e);
+            }
         };
     </script>
 </body>

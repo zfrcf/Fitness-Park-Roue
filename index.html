@@ -3,181 +3,208 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness Park - Ultimate Wheel</title>
-    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;900&display=swap" rel="stylesheet">
+    <title>Fitness Park - Jeu de la Roue</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <style>
         :root {
             --fp-yellow: #ffde00;
-            --fp-black: #000000;
-            --fp-dark-grey: #1a1a1a;
-            --fp-border: #333333;
+            --fp-black: #1a1d20;
+            --fp-dark: #000000;
         }
 
         body {
-            background-color: var(--fp-black);
+            background-color: var(--fp-dark);
             color: white;
             font-family: 'Roboto', sans-serif;
             margin: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
-            min-height: 100vh;
         }
 
-        /* --- HEADER --- */
-        header {
+        /* --- NAVBAR STYLE IMAGE --- */
+        nav {
             width: 100%;
-            padding: 20px;
-            text-align: center;
-            background: linear-gradient(to bottom, #111, transparent);
-        }
-
-        .logo {
-            font-family: 'Oswald', sans-serif;
-            font-size: 2.5rem;
-            letter-spacing: -1px;
-            font-weight: 700;
-        }
-
-        /* --- SECTION CONNEXION --- */
-        .auth-container {
-            margin: 20px 0;
-            display: flex;
-            gap: 15px;
-            z-index: 100;
-        }
-
-        .auth-btn {
+            background-color: var(--fp-black);
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 10px 20px;
-            border-radius: 4px;
-            border: 1px solid var(--fp-border);
-            background: white;
-            color: black;
-            font-weight: bold;
-            cursor: pointer;
-            transition: 0.3s;
-            font-family: 'Roboto', sans-serif;
+            justify-content: space-between;
+            padding: 15px 50px;
+            box-sizing: border-box;
+            border-bottom: 1px solid #333;
         }
 
-        .auth-btn.apple { background: black; color: white; border: 1px solid white; }
-        .auth-btn:hover { opacity: 0.8; transform: translateY(-2px); }
+        .nav-left { display: flex; align-items: center; gap: 30px; }
+        
+        .logo-fp { height: 45px; }
 
-        /* --- ZONE DE JEU --- */
-        .main-game {
+        .nav-links {
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            max-width: 500px;
-            width: 100%;
-            padding: 20px;
-        }
-
-        .title-banner {
-            text-align: center;
-            font-family: 'Oswald', sans-serif;
-            font-size: 2.5rem;
+            gap: 20px;
             text-transform: uppercase;
-            line-height: 1;
-            margin-bottom: 40px;
+            font-family: 'Oswald', sans-serif;
+            font-size: 14px;
+            letter-spacing: 1px;
         }
 
-        .yellow-text { color: var(--fp-yellow); }
+        .nav-right { display: flex; align-items: center; gap: 20px; }
+        
+        .btn-login-text { color: white; text-decoration: underline; font-size: 14px; cursor: pointer; }
+        
+        .btn-register {
+            background-color: var(--fp-yellow);
+            color: black;
+            padding: 10px 25px;
+            border-radius: 5px;
+            font-weight: 900;
+            text-transform: uppercase;
+            font-style: italic;
+            border: none;
+            cursor: pointer;
+        }
 
-        /* --- LA ROUE (SVG) --- */
-        .wheel-box {
+        /* --- FORMULAIRE DE CONNEXION --- */
+        .login-box {
+            background: #111;
+            padding: 25px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            margin-top: 30px;
+            width: 320px;
+            text-align: center;
+        }
+
+        .login-box input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            background: #222;
+            border: 1px solid #444;
+            color: white;
+            box-sizing: border-box;
+        }
+
+        .social-auth {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .social-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        /* --- ZONE ROUE --- */
+        .game-container {
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .title-main {
+            font-family: 'Oswald', sans-serif;
+            font-size: 3rem;
+            text-transform: uppercase;
+            margin-bottom: 30px;
+        }
+
+        .wheel-wrapper {
             position: relative;
-            width: 350px;
-            height: 350px;
-            margin-bottom: 40px;
+            width: 400px;
+            height: 400px;
+            margin: 0 auto;
         }
 
         #wheel-svg {
             width: 100%;
             height: 100%;
-            transform: rotate(0deg);
             transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
-            filter: drop-shadow(0 0 15px rgba(255, 222, 0, 0.2));
         }
 
-        .pointer {
+        .marker {
             position: absolute;
-            top: -20px;
+            top: -15px;
             left: 50%;
             transform: translateX(-50%);
-            width: 40px;
-            height: 40px;
-            background: var(--fp-yellow);
-            clip-path: polygon(50% 100%, 0 0, 100% 0);
+            width: 0; 
+            height: 0; 
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 35px solid var(--fp-yellow);
             z-index: 10;
         }
 
-        /* --- BOUTON ACTION --- */
-        .spin-btn {
-            background-color: var(--fp-yellow);
-            color: black;
+        .spin-trigger {
+            margin-top: 30px;
+            background: var(--fp-yellow);
             border: none;
-            padding: 18px 50px;
+            padding: 15px 40px;
             font-family: 'Oswald', sans-serif;
             font-size: 1.5rem;
-            font-weight: bold;
             text-transform: uppercase;
+            font-weight: bold;
             cursor: pointer;
-            border-radius: 2px;
-            box-shadow: 0 4px 0 #bfa700;
+            transition: 0.2s;
         }
 
-        .spin-btn:active { transform: translateY(2px); box-shadow: none; }
-        .spin-btn:disabled { background: #555; color: #888; box-shadow: none; cursor: not-allowed; }
-
-        #status {
-            margin-top: 20px;
-            font-family: 'Oswald', sans-serif;
-            font-size: 1.5rem;
-            color: var(--fp-yellow);
-            text-align: center;
-            height: 30px;
-        }
+        .spin-trigger:hover { transform: scale(1.1); }
     </style>
 </head>
 <body>
 
-    <header>
-        <div class="logo">FITNESS <span class="yellow-text">PARK</span></div>
-    </header>
+    <nav>
+        <div class="nav-left">
+            <img src="https://www.fitnesspark.fr/wp-content/themes/fitnesspark/img/logo-fitness-park.svg" alt="Fitness Park" class="logo-fp">
+            <div class="nav-links">
+                <span>Abonnements</span>
+                <span>Activités & Options</span>
+                <span>Nos Clubs</span>
+                <span>Level Up</span>
+            </div>
+        </div>
+        <div class="nav-right">
+            <span class="btn-login-text">Se connecter</span>
+            <button class="btn-register">Je m'inscris</button>
+        </div>
+    </nav>
 
-    <div class="auth-container">
-        <button class="auth-btn google" id="btn-google">
-            <i class="fab fa-google"></i> Google
-        </button>
-        <button class="auth-btn apple" id="btn-apple">
-            <i class="fab fa-apple"></i> Apple
-        </button>
+    <div class="login-box">
+        <h3 style="margin-top:0; font-family:'Oswald'">CONNEXION</h3>
+        <input type="email" placeholder="Email">
+        <input type="password" placeholder="Mot de passe">
+        <button class="btn-register" style="width:100%; margin-top:10px;">Valider</button>
+        
+        <div class="social-auth">
+            <button class="social-btn" style="background:#fff; color:#000;"><i class="fab fa-google"></i></button>
+            <button class="social-btn" style="background:#000; color:#fff; border:1px solid #333;"><i class="fab fa-apple"></i></button>
+        </div>
     </div>
 
-    <div class="main-game">
-        <div class="title-banner">
-            TENTE TA <br><span class="yellow-text">CHANCE !</span>
+    <div class="game-container">
+        <h1 class="title-main">TENTE TA <span style="color:var(--fp-yellow)">CHANCE !</span></h1>
+        
+        <div class="wheel-wrapper">
+            <div class="marker"></div>
+            <svg id="wheel-svg" viewBox="0 0 400 400"></svg>
         </div>
 
-        <div class="wheel-box">
-            <div class="pointer"></div>
-            <svg id="wheel-svg" viewBox="0 0 400 400">
-                </svg>
-        </div>
-
-        <button class="spin-btn" id="spin-btn">Faire tourner</button>
-        <div id="status"></div>
+        <button class="spin-trigger" id="spin-button">Faire tourner la roue</button>
+        <h2 id="result-text" style="color:var(--fp-yellow); font-family:'Oswald'; height:40px;"></h2>
     </div>
 
     <script type="module">
         import { initializeApp } from "firebase/app";
         import { getAnalytics } from "firebase/analytics";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA6RIWqdkWkIYYNXdRXfY84ocfMHuyaKkk",
@@ -191,81 +218,66 @@
 
         const app = initializeApp(firebaseConfig);
         const analytics = getAnalytics(app);
-        const auth = getAuth(app);
-
-        // Connexion Google
-        document.getElementById('btn-google').onclick = () => {
-            const provider = new GoogleAuthProvider();
-            signInWithPopup(auth, provider).then((res) => alert("Connecté en tant que : " + res.user.displayName));
-        };
-
-        // Connexion Apple
-        document.getElementById('btn-apple').onclick = () => {
-            const provider = new OAuthProvider('apple.com');
-            signInWithPopup(auth, provider).then((res) => alert("Connecté avec Apple"));
-        };
     </script>
 
     <script>
         const rewards = [
-            "1 MOIS OFFERT", "GOURDE FP", "COACHING 1H", "4 SEMAINES", 
-            "DÉFI POMPES", "SAC DE SPORT", "SERVIETTE", "SHAKER", 
-            "ACCÈS VIP", "DÉFI CHAISE"
+            "1 MOIS OFFERT", "GOURDE OFFERTE", "DÉFI POMPES", 
+            "SERVIETTE", "4 SEMAINES", "SHAKER FP", 
+            "COACHING 1H", "DÉFI CHAISE", "ACCÈS VIP", "SURPRISE"
         ];
 
         const svg = document.getElementById('wheel-svg');
-        const btn = document.getElementById('spin-btn');
-        const status = document.getElementById('status');
+        const spinBtn = document.getElementById('spin-button');
+        const resultText = document.getElementById('result-text');
         let currentRotation = 0;
 
-        // Génération visuelle de la roue en SVG
-        function createWheel() {
-            const sliceAngle = 360 / rewards.length;
+        function initWheel() {
+            const angleStep = 360 / rewards.length;
             rewards.forEach((text, i) => {
-                const angle = i * sliceAngle;
-                const color = i % 2 === 0 ? "#111" : "#222";
+                const startAngle = i * angleStep;
+                const endAngle = (i + 1) * angleStep;
                 
-                // Tracé du quartier
-                const x1 = 200 + 200 * Math.cos(Math.PI * angle / 180);
-                const y1 = 200 + 200 * Math.sin(Math.PI * angle / 180);
-                const x2 = 200 + 200 * Math.cos(Math.PI * (angle + sliceAngle) / 180);
-                const y2 = 200 + 200 * Math.sin(Math.PI * (angle + sliceAngle) / 180);
+                // Dessin du quartier
+                const x1 = 200 + 180 * Math.cos(Math.PI * startAngle / 180);
+                const y1 = 200 + 180 * Math.sin(Math.PI * startAngle / 180);
+                const x2 = 200 + 180 * Math.cos(Math.PI * endAngle / 180);
+                const y2 = 200 + 180 * Math.sin(Math.PI * endAngle / 180);
                 
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                path.setAttribute("d", `M 200 200 L ${x1} ${y1} A 200 200 0 0 1 ${x2} ${y2} Z`);
-                path.setAttribute("fill", color);
-                path.setAttribute("stroke", "#333");
+                path.setAttribute("d", `M 200 200 L ${x1} ${y1} A 180 180 0 0 1 ${x2} ${y2} Z`);
+                path.setAttribute("fill", i % 2 === 0 ? "#111" : "#222");
+                path.setAttribute("stroke", "#444");
                 svg.appendChild(path);
 
                 // Texte
                 const textNode = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                const textAngle = angle + (sliceAngle / 2);
-                textNode.setAttribute("x", "310");
+                const rotation = startAngle + (angleStep / 2);
+                textNode.setAttribute("x", "300");
                 textNode.setAttribute("y", "205");
                 textNode.setAttribute("fill", i % 2 === 0 ? "white" : "#ffde00");
                 textNode.setAttribute("font-size", "10");
                 textNode.setAttribute("font-weight", "bold");
-                textNode.setAttribute("transform", `rotate(${textAngle}, 200, 200)`);
+                textNode.setAttribute("transform", `rotate(${rotation}, 200, 200)`);
                 textNode.textContent = text;
                 svg.appendChild(textNode);
             });
         }
 
-        createWheel();
+        initWheel();
 
-        btn.onclick = () => {
-            btn.disabled = true;
-            status.textContent = "C'est parti...";
-            const spinAdd = Math.floor(Math.random() * 360) + 1800; // 5 tours min
-            currentRotation += spinAdd;
+        spinBtn.onclick = () => {
+            spinBtn.disabled = true;
+            resultText.textContent = "C'est parti...";
+            const randomSpin = Math.floor(Math.random() * 360) + 2880; // 8 tours min
+            currentRotation += randomSpin;
             svg.style.transform = `rotate(${currentRotation}deg)`;
 
             setTimeout(() => {
-                btn.disabled = false;
-                const actualAngle = (currentRotation % 360);
-                // Calcul du segment gagnant (index)
-                const winningIndex = Math.floor((360 - (actualAngle % 360)) / (360 / rewards.length));
-                status.textContent = "RÉSULTAT : " + rewards[winningIndex];
+                spinBtn.disabled = false;
+                const finalAngle = (360 - (currentRotation % 360)) % 360;
+                const winIdx = Math.floor(finalAngle / (360 / rewards.length));
+                resultText.textContent = "GAGNÉ : " + rewards[winIdx];
             }, 5000);
         };
     </script>

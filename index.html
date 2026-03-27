@@ -3,231 +3,271 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tente ta Chance ! - Fitness Park</title>
+    <title>Fitness Park - Ultimate Wheel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
     <style>
-        /* STYLE FITNESS PARK */
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;900&display=swap');
+        :root {
+            --fp-yellow: #ffde00;
+            --fp-black: #000000;
+            --fp-dark-grey: #1a1a1a;
+            --fp-border: #333333;
+        }
 
         body {
-            background-color: #1a1a1a;
+            background-color: var(--fp-black);
             color: white;
             font-family: 'Roboto', sans-serif;
+            margin: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-start;
             min-height: 100vh;
-            margin: 0;
-            overflow-x: hidden;
         }
 
-        /* HEADER FITNESS PARK (Simulé) */
+        /* --- HEADER --- */
         header {
             width: 100%;
-            background-color: #000;
             padding: 20px;
-            display: flex;
-            justify-content: center;
-            border-bottom: 2px solid #333;
-        }
-        header .logo {
-            font-family: 'Oswald', sans-serif;
-            font-size: 2rem;
-            text-transform: uppercase;
-            color: #fff;
+            text-align: center;
+            background: linear-gradient(to bottom, #111, transparent);
         }
 
-        /* BANNIÈRE TITRE (du Kakemono) */
-        .title-banner {
+        .logo {
+            font-family: 'Oswald', sans-serif;
+            font-size: 2.5rem;
+            letter-spacing: -1px;
+            font-weight: 700;
+        }
+
+        /* --- SECTION CONNEXION --- */
+        .auth-container {
+            margin: 20px 0;
+            display: flex;
+            gap: 15px;
+            z-index: 100;
+        }
+
+        .auth-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            border-radius: 4px;
+            border: 1px solid var(--fp-border);
+            background: white;
+            color: black;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        .auth-btn.apple { background: black; color: white; border: 1px solid white; }
+        .auth-btn:hover { opacity: 0.8; transform: translateY(-2px); }
+
+        /* --- ZONE DE JEU --- */
+        .main-game {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 500px;
             width: 100%;
-            max-width: 600px;
-            background-color: #000;
-            color: #fff;
-            padding: 30px;
+            padding: 20px;
+        }
+
+        .title-banner {
             text-align: center;
             font-family: 'Oswald', sans-serif;
-            font-size: 3rem;
+            font-size: 2.5rem;
             text-transform: uppercase;
-            margin-top: 40px;
-            border-top: 2px solid #333;
-            border-bottom: 2px solid #333;
-        }
-        .title-banner .sub {
-            font-size: 1.2rem;
-            margin-bottom: 15px;
-            color: #ccc;
-        }
-        .title-banner .highlight {
-            color: #ffde00; /* Le jaune Fitness Park */
+            line-height: 1;
+            margin-bottom: 40px;
         }
 
-        /* CONTENEUR DE LA ROUE ET DU CURSEUR */
-        .container {
+        .yellow-text { color: var(--fp-yellow); }
+
+        /* --- LA ROUE (SVG) --- */
+        .wheel-box {
             position: relative;
-            margin: 60px 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            width: 350px;
+            height: 350px;
+            margin-bottom: 40px;
         }
 
-        /* LA ROUE (L'Image) */
-        .wheel-outer {
-            width: 500px; /* Plus grande */
-            height: 500px;
-            border-radius: 50%;
-            position: relative;
-            box-shadow: 0 0 50px rgba(255, 222, 0, 0.3);
-        }
-        
-        #wheel-img {
+        #wheel-svg {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            border-radius: 50%;
-            transition: transform 4s cubic-bezier(0.15, 0, 0.15, 1);
+            transform: rotate(0deg);
+            transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
+            filter: drop-shadow(0 0 15px rgba(255, 222, 0, 0.2));
         }
 
-        /* LE CURSEUR (L'AIGUILLE) */
         .pointer {
             position: absolute;
-            top: -30px; /* Plus haut */
+            top: -20px;
             left: 50%;
             transform: translateX(-50%);
-            width: 50px;
-            height: 60px;
-            background: #ffde00;
-            clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+            width: 40px;
+            height: 40px;
+            background: var(--fp-yellow);
+            clip-path: polygon(50% 100%, 0 0, 100% 0);
             z-index: 10;
         }
 
-        /* BOUTON SPIN */
+        /* --- BOUTON ACTION --- */
         .spin-btn {
-            margin-top: 20px;
-            padding: 20px 50px;
-            background-color: #ffde00;
-            color: #000;
+            background-color: var(--fp-yellow);
+            color: black;
             border: none;
+            padding: 18px 50px;
             font-family: 'Oswald', sans-serif;
-            font-size: 1.8rem;
+            font-size: 1.5rem;
             font-weight: bold;
             text-transform: uppercase;
             cursor: pointer;
-            border-radius: 5px;
-            transition: transform 0.2s, background-color 0.2s;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+            border-radius: 2px;
+            box-shadow: 0 4px 0 #bfa700;
         }
 
-        .spin-btn:hover {
-            background-color: #e6c800;
-            transform: scale(1.05);
-        }
+        .spin-btn:active { transform: translateY(2px); box-shadow: none; }
+        .spin-btn:disabled { background: #555; color: #888; box-shadow: none; cursor: not-allowed; }
 
-        .spin-btn:disabled {
-            background-color: #555;
-            cursor: not-allowed;
-            color: #999;
-        }
-
-        /* RESULTAT */
-        #result {
-            margin-top: 30px;
-            font-size: 2rem;
+        #status {
+            margin-top: 20px;
             font-family: 'Oswald', sans-serif;
-            color: #ffde00;
-            height: 50px;
-            margin-bottom: 50px;
-        }
-
-        /* FOOTER (Simulé avec l'athlète) */
-        footer {
-            width: 100%;
-            max-width: 600px;
-            margin-top: auto;
-            position: relative;
-            background-color: #000;
-            border-top: 2px solid #333;
-        }
-        footer img {
-            width: 100%;
-            display: block;
+            font-size: 1.5rem;
+            color: var(--fp-yellow);
+            text-align: center;
+            height: 30px;
         }
     </style>
 </head>
 <body>
 
     <header>
-        <div class="logo">Fitness Park</div>
+        <div class="logo">FITNESS <span class="yellow-text">PARK</span></div>
     </header>
 
-    <div class="title-banner">
-        <div class="sub">Se dépasser • Se surpasser</div>
-        TENTE <span class="highlight">TA CHANCE !</span>
+    <div class="auth-container">
+        <button class="auth-btn google" id="btn-google">
+            <i class="fab fa-google"></i> Google
+        </button>
+        <button class="auth-btn apple" id="btn-apple">
+            <i class="fab fa-apple"></i> Apple
+        </button>
     </div>
-    
-    <div class="container">
-        <div class="pointer"></div>
-        <div class="wheel-outer" id="wheel">
-            <img src="roue-fitness-park.png" alt="Roue Fitness Park" id="wheel-img">
+
+    <div class="main-game">
+        <div class="title-banner">
+            TENTE TA <br><span class="yellow-text">CHANCE !</span>
         </div>
+
+        <div class="wheel-box">
+            <div class="pointer"></div>
+            <svg id="wheel-svg" viewBox="0 0 400 400">
+                </svg>
+        </div>
+
+        <button class="spin-btn" id="spin-btn">Faire tourner</button>
+        <div id="status"></div>
     </div>
 
-    <button class="spin-btn" id="spin-button">Faire tourner la roue</button>
-    <div id="result"></div>
+    <script type="module">
+        import { initializeApp } from "firebase/app";
+        import { getAnalytics } from "firebase/analytics";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
 
-    <footer>
-        <img src="https://i.imgur.com/KqW4l5z.png" alt="Athlète Fitness Park">
-    </footer>
+        const firebaseConfig = {
+            apiKey: "AIzaSyA6RIWqdkWkIYYNXdRXfY84ocfMHuyaKkk",
+            authDomain: "fitness-park-roue.firebaseapp.com",
+            projectId: "fitness-park-roue",
+            storageBucket: "fitness-park-roue.firebasestorage.app",
+            messagingSenderId: "393113227879",
+            appId: "1:393113227879:web:0c73a9276b29ef8103bac2",
+            measurementId: "G-FWRZGVQKXF"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+        const auth = getAuth(app);
+
+        // Connexion Google
+        document.getElementById('btn-google').onclick = () => {
+            const provider = new GoogleAuthProvider();
+            signInWithPopup(auth, provider).then((res) => alert("Connecté en tant que : " + res.user.displayName));
+        };
+
+        // Connexion Apple
+        document.getElementById('btn-apple').onclick = () => {
+            const provider = new OAuthProvider('apple.com');
+            signInWithPopup(auth, provider).then((res) => alert("Connecté avec Apple"));
+        };
+    </script>
 
     <script>
-        const spinBtn = document.getElementById('spin-button');
-        const wheelImg = document.getElementById('wheel-img');
-        const resultDisplay = document.getElementById('result');
-
-        // LES RÉCOMPENSES (Dans l'ordre de l'image, en partant du haut et en sens horaire)
         const rewards = [
-            "4 SEMAINES OFFERTES",
-            "1 COACHING OFFERT",
-            "DÉFI POMPES : 3 RÈP",
-            "DÉFI GAINAGE : 30 SEC",
-            "1 COURS COLLECTIF",
-            "1 MOIS OFFERT",
-            "GOURDE OFFERTE",
-            "DÉFI CHAISE : 45 SEC",
-            "1 SERVIETTE OFFERTE",
-            "1 SHAKER FP"
+            "1 MOIS OFFERT", "GOURDE FP", "COACHING 1H", "4 SEMAINES", 
+            "DÉFI POMPES", "SAC DE SPORT", "SERVIETTE", "SHAKER", 
+            "ACCÈS VIP", "DÉFI CHAISE"
         ];
 
-        const numSegments = rewards.length;
-        const segmentAngle = 360 / numSegments;
+        const svg = document.getElementById('wheel-svg');
+        const btn = document.getElementById('spin-btn');
+        const status = document.getElementById('status');
         let currentRotation = 0;
 
-        // Animation du spin
-        spinBtn.addEventListener('click', () => {
-            spinBtn.disabled = true;
-            resultDisplay.innerText = "Bonne chance...";
-            
-            // Calcul d'une rotation aléatoire (au moins 5 tours complets + angle au pif)
-            const extraRotation = Math.floor(Math.random() * 360);
-            const totalSpin = 1800 + extraRotation; 
-            currentRotation += totalSpin;
-            
-            wheelImg.style.transform = `rotate(${currentRotation}deg)`;
+        // Génération visuelle de la roue en SVG
+        function createWheel() {
+            const sliceAngle = 360 / rewards.length;
+            rewards.forEach((text, i) => {
+                const angle = i * sliceAngle;
+                const color = i % 2 === 0 ? "#111" : "#222";
+                
+                // Tracé du quartier
+                const x1 = 200 + 200 * Math.cos(Math.PI * angle / 180);
+                const y1 = 200 + 200 * Math.sin(Math.PI * angle / 180);
+                const x2 = 200 + 200 * Math.cos(Math.PI * (angle + sliceAngle) / 180);
+                const y2 = 200 + 200 * Math.sin(Math.PI * (angle + sliceAngle) / 180);
+                
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", `M 200 200 L ${x1} ${y1} A 200 200 0 0 1 ${x2} ${y2} Z`);
+                path.setAttribute("fill", color);
+                path.setAttribute("stroke", "#333");
+                svg.appendChild(path);
 
-            // Calcul du gain à la fin de l'animation (4 secondes)
+                // Texte
+                const textNode = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                const textAngle = angle + (sliceAngle / 2);
+                textNode.setAttribute("x", "310");
+                textNode.setAttribute("y", "205");
+                textNode.setAttribute("fill", i % 2 === 0 ? "white" : "#ffde00");
+                textNode.setAttribute("font-size", "10");
+                textNode.setAttribute("font-weight", "bold");
+                textNode.setAttribute("transform", `rotate(${textAngle}, 200, 200)`);
+                textNode.textContent = text;
+                svg.appendChild(textNode);
+            });
+        }
+
+        createWheel();
+
+        btn.onclick = () => {
+            btn.disabled = true;
+            status.textContent = "C'est parti...";
+            const spinAdd = Math.floor(Math.random() * 360) + 1800; // 5 tours min
+            currentRotation += spinAdd;
+            svg.style.transform = `rotate(${currentRotation}deg)`;
+
             setTimeout(() => {
-                spinBtn.disabled = false;
-                
-                // Calcul de l'index gagnant
-                // Le curseur est en haut (270 deg), donc on ajuste le calcul
+                btn.disabled = false;
                 const actualAngle = (currentRotation % 360);
-                const winningIndex = Math.floor((360 - actualAngle + 270) % 360 / segmentAngle);
-                
-                // Correction d'index pour l'image spécifique
-                let finalIndex = (winningIndex + 1) % numSegments;
-                
-                resultDisplay.innerText = "GAGNÉ : " + rewards[finalIndex];
-            }, 4000);
-        });
+                // Calcul du segment gagnant (index)
+                const winningIndex = Math.floor((360 - (actualAngle % 360)) / (360 / rewards.length));
+                status.textContent = "RÉSULTAT : " + rewards[winningIndex];
+            }, 5000);
+        };
     </script>
 </body>
 </html>

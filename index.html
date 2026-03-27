@@ -3,75 +3,84 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness Park - Wheel</title>
+    <title>Fitness Park - Ultimate Wheel</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;900&display=swap" rel="stylesheet">
     <style>
         :root { --fp-yellow: #ffde00; --fp-bg: #000; }
-        body { background: var(--fp-bg); color: white; font-family: 'Roboto', sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; overflow-x: hidden; }
+        body { 
+            background: var(--fp-bg); 
+            color: white; 
+            font-family: 'Roboto', sans-serif; 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-height: 100vh; 
+            padding: 20px;
+        }
         
-        .logo { width: 300px; margin-bottom: 20px; margin-top: 20px; }
-        .title { font-family: 'Oswald'; text-transform: uppercase; font-size: 2.5rem; text-align: center; margin-bottom: 40px; }
+        .logo { width: 320px; margin: 30px 0; }
+        .title { font-family: 'Oswald'; text-transform: uppercase; font-size: 2.8rem; text-align: center; margin-bottom: 50px; letter-spacing: 1px; }
 
-        /* --- LA ROUE EN CSS PUR --- */
-        .wheel-container {
+        /* --- CONTENEUR DE LA ROUE --- */
+        .wheel-area {
             position: relative;
-            width: 350px;
-            height: 350px;
-            margin-bottom: 40px;
+            width: 450px;
+            height: 450px;
+            max-width: 95vw;
+            max-height: 95vw;
         }
 
-        .main-wheel {
+        #wheel-svg {
             width: 100%;
             height: 100%;
-            border-radius: 50%;
-            position: relative;
-            overflow: hidden;
-            border: 8px solid #222;
-            transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
-            background: #111;
-            box-shadow: 0 0 30px rgba(255, 222, 0, 0.1);
+            transform: rotate(0deg);
+            transition: transform 6s cubic-bezier(0.15, 0, 0.15, 1);
         }
 
-        /* L'aiguille à droite */
-        .right-arrow {
+        /* L'AIGUILLE JAUNE A DROITE */
+        .indicator {
             position: absolute;
-            right: -40px;
+            right: -20px;
             top: 50%;
             transform: translateY(-50%);
-            width: 0; height: 0;
-            border-top: 25px solid transparent;
-            border-bottom: 25px solid transparent;
-            border-right: 50px solid var(--fp-yellow);
-            z-index: 100;
+            width: 60px;
+            height: 50px;
+            background: var(--fp-yellow);
+            clip-path: polygon(100% 50%, 0 0, 0 100%);
+            z-index: 10;
+            filter: drop-shadow(-5px 0 10px rgba(0,0,0,0.5));
         }
 
-        .segment {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            clip-path: polygon(50% 50%, 100% 19%, 100% 81%); /* Pour 10 segments */
+        /* BOUTON ET FORMULAIRE */
+        .spin-btn { 
+            margin-top: 50px; 
+            background: var(--fp-yellow); 
+            border: none; 
+            padding: 20px 60px; 
+            font-family: 'Oswald'; 
+            font-size: 2rem; 
+            font-weight: bold; 
+            cursor: pointer; 
+            text-transform: uppercase;
+            box-shadow: 0 6px 0 #bfa700;
         }
-
-        .segment-text {
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 10px;
-            font-weight: 900;
-            width: 120px;
-            text-align: right;
-            pointer-events: none;
-        }
-
-        /* Boutons et Formulaire */
-        .spin-btn { background: var(--fp-yellow); border: none; padding: 20px 50px; font-family: 'Oswald'; font-size: 1.8rem; font-weight: bold; cursor: pointer; text-transform: uppercase; box-shadow: 0 5px 0 #bfa700; transition: 0.2s; }
         .spin-btn:active { transform: translateY(3px); box-shadow: none; }
-        .spin-btn:disabled { background: #444; box-shadow: none; cursor: not-allowed; }
+        .spin-btn:disabled { background: #333; color: #666; box-shadow: none; cursor: not-allowed; }
 
-        #form-win { display: none; background: #111; padding: 30px; border: 2px solid var(--fp-yellow); margin-top: 20px; width: 320px; text-align: center; z-index: 200; }
-        input { width: 100%; padding: 12px; margin: 10px 0; background: #222; border: 1px solid #444; color: white; box-sizing: border-box; border-radius: 4px; }
-        .save-btn { background: var(--fp-yellow); border: none; width: 100%; padding: 15px; font-weight: bold; text-transform: uppercase; cursor: pointer; margin-top: 10px; }
+        #form-container { 
+            display: none; 
+            background: #111; 
+            padding: 30px; 
+            border: 2px solid var(--fp-yellow); 
+            margin-top: 30px; 
+            width: 350px; 
+            text-align: center;
+            border-radius: 4px;
+        }
+        .win-title { font-family: 'Oswald'; font-size: 2rem; color: var(--fp-yellow); margin-bottom: 15px; }
+        input { width: 100%; padding: 15px; margin: 10px 0; background: #000; border: 1px solid #444; color: white; box-sizing: border-box; font-size: 1rem; }
+        .submit-btn { background: var(--fp-yellow); border: none; width: 100%; padding: 15px; font-weight: bold; text-transform: uppercase; cursor: pointer; font-size: 1.1rem; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -80,21 +89,21 @@
     
     <div class="title">TENTE TA <span style="color:var(--fp-yellow)">CHANCE</span></div>
 
-    <div class="wheel-container">
-        <div class="right-arrow"></div>
-        <div id="wheel" class="main-wheel">
-            </div>
+    <div class="wheel-area">
+        <div class="indicator"></div>
+        <svg id="wheel-svg" viewBox="0 0 400 400">
+            </svg>
     </div>
 
     <button class="spin-btn" id="spinBtn">Lancer la roue</button>
 
-    <div id="form-win">
-        <h2 style="font-family:'Oswald'; color:var(--fp-yellow); margin-top:0;">GAGNÉ !</h2>
-        <p id="lot-display" style="font-size: 1.2rem; font-weight: bold;"></p>
-        <input type="text" id="nom" placeholder="Nom">
-        <input type="text" id="prenom" placeholder="Prénom">
-        <input type="tel" id="tel" placeholder="Téléphone">
-        <button class="save-btn" id="saveBtn">Recevoir mon lot</button>
+    <div id="form-container">
+        <div class="win-title">LOT GAGNÉ !</div>
+        <p id="lot-text" style="font-size: 1.3rem; margin-bottom: 20px; font-weight: 900;"></p>
+        <input type="text" id="nom" placeholder="NOM">
+        <input type="text" id="prenom" placeholder="PRÉNOM">
+        <input type="tel" id="tel" placeholder="TÉLÉPHONE">
+        <button class="submit-btn" id="saveBtn">Valider mon gain</button>
     </div>
 
     <script type="module">
@@ -113,61 +122,84 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        const wheel = document.getElementById("wheel");
         const rewards = [
-            { label: "SERVIETTE FP", weight: 60 }, { label: "T-SHIRT FP", weight: 30 },
-            { label: "SAC À DOS FP", weight: 10 }, { label: "3M ULTIMATE", weight: 1 },
-            { label: "3M ACCESS", weight: 0.5 }, { label: "1 MOIS GRATUIT", weight: 0.1 },
-            { label: "2 MOIS GRATUIT", weight: 0.05 }, { label: "3 MOIS GRATUIT", weight: 0.01 },
-            { label: "6 MOIS GRATUIT", weight: 0.001 }, { label: "SURPRISE", weight: 5 } // Remplissage pour faire 10 segments
+            { label: "SERVIETTE FP", weight: 60 },
+            { label: "T-SHIRT FP", weight: 30 },
+            { label: "SAC À DOS FP", weight: 10 },
+            { label: "3M ULTIMATE", weight: 1 },
+            { label: "3M ACCESS", weight: 0.5 },
+            { label: "1 MOIS OFFERT", weight: 0.1 },
+            { label: "2 MOIS OFFERT", weight: 0.05 },
+            { label: "3 MOIS OFFERT", weight: 0.01 },
+            { label: "6 MOIS OFFERT", weight: 0.001 }
         ];
 
-        // Génération des segments CSS
-        rewards.forEach((r, i) => {
-            const seg = document.createElement("div");
-            seg.className = "segment";
-            seg.style.transform = `rotate(${i * 36}deg)`;
-            seg.style.background = i % 2 === 0 ? "#111" : "#1a1a1a";
-            
-            const txt = document.createElement("div");
-            txt.className = "segment-text";
-            txt.style.color = i % 2 === 0 ? "white" : "var(--fp-yellow)";
-            txt.innerText = r.label;
-            
-            seg.appendChild(txt);
-            wheel.appendChild(seg);
-        });
+        const svg = document.getElementById("wheel-svg");
+        const numSlices = rewards.length;
+        const sliceAngle = 360 / numSlices;
 
-        let currentRotation = 0;
-        let selectedLot = "";
+        // Génération visuelle du SVG (Méthode géométrique pure)
+        function createWheel() {
+            rewards.forEach((reward, i) => {
+                const startAngle = i * sliceAngle;
+                const endAngle = (i + 1) * sliceAngle;
+                
+                // Coordonnées pour le quartier
+                const x1 = 200 + 190 * Math.cos(Math.PI * startAngle / 180);
+                const y1 = 200 + 190 * Math.sin(Math.PI * startAngle / 180);
+                const x2 = 200 + 190 * Math.cos(Math.PI * endAngle / 180);
+                const y2 = 200 + 190 * Math.sin(Math.PI * endAngle / 180);
+
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", `M 200 200 L ${x1} ${y1} A 190 190 0 0 1 ${x2} ${y2} Z`);
+                path.setAttribute("fill", i % 2 === 0 ? "#111" : "#1a1a1a");
+                path.setAttribute("stroke", "#333");
+                svg.appendChild(path);
+
+                // Texte
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                const textAngle = startAngle + sliceAngle / 2;
+                text.setAttribute("x", "310");
+                text.setAttribute("y", "205");
+                text.setAttribute("fill", i % 2 === 0 ? "white" : "var(--fp-yellow)");
+                text.setAttribute("font-size", "8");
+                text.setAttribute("font-weight", "900");
+                text.setAttribute("transform", `rotate(${textAngle}, 200, 200)`);
+                text.textContent = reward.label;
+                svg.appendChild(text);
+            });
+        }
+        createWheel();
+
+        let rotation = 0;
+        let finalLot = "";
 
         document.getElementById("spinBtn").onclick = () => {
             const btn = document.getElementById("spinBtn");
             btn.disabled = true;
-            
-            // Calcul probabilité
-            const total = rewards.reduce((s, r) => s + r.weight, 0);
-            let rand = Math.random() * total;
-            let winIdx = 0;
-            for(let i=0; i<rewards.length; i++) {
-                if(rand < rewards[i].weight) { winIdx = i; break; }
-                rand -= rewards[i].weight;
-            }
-            selectedLot = rewards[winIdx].label;
 
-            // Animation
-            const extra = 360 * 8; // 8 tours
-            const stopAngle = (winIdx * 36);
-            // On veut que le lot s'arrête à DROITE (0 deg en CSS est à droite par défaut)
-            currentRotation += extra - stopAngle;
-            
-            wheel.style.transform = `rotate(${currentRotation}deg)`;
+            // Tirage au sort par poids
+            const totalWeight = rewards.reduce((sum, r) => sum + r.weight, 0);
+            let random = Math.random() * totalWeight;
+            let winIdx = 0;
+            for (let i = 0; i < rewards.length; i++) {
+                if (random < rewards[i].weight) { winIdx = i; break; }
+                random -= rewards[i].weight;
+            }
+            finalLot = rewards[winIdx].label;
+
+            // Calcul de l'angle pour que le lot arrive face à la flèche à DROITE (0°)
+            const extraSpins = 360 * 10; // 10 tours
+            const stopAngle = 360 - (winIdx * sliceAngle);
+            rotation += extraSpins + stopAngle;
+
+            svg.style.transform = `rotate(${rotation}deg)`;
 
             setTimeout(() => {
-                document.getElementById("form-win").style.display = "block";
-                document.getElementById("lot-display").innerText = selectedLot;
+                document.getElementById("form-container").style.display = "block";
+                document.getElementById("lot-text").innerText = finalLot;
                 btn.style.display = "none";
-            }, 5200);
+            }, 6200);
         };
 
         document.getElementById("saveBtn").onclick = async () => {
@@ -175,13 +207,17 @@
             const prenom = document.getElementById("prenom").value;
             const tel = document.getElementById("tel").value;
 
-            if(!nom || !tel) return alert("Veuillez remplir les informations !");
+            if (!nom || !prenom || !tel) return alert("Merci de remplir tous les champs.");
 
-            await addDoc(collection(db, "gagnants"), {
-                nom, prenom, tel, lot: selectedLot, date: serverTimestamp()
-            });
-            alert("Informations enregistrées ! Félicitations.");
-            location.reload();
+            try {
+                await addDoc(collection(db, "gagnants"), {
+                    nom, prenom, tel, lot: finalLot, date: serverTimestamp()
+                });
+                alert("Lot enregistré avec succès ! Présentez cet écran à l'accueil.");
+                location.reload();
+            } catch (e) {
+                alert("Erreur de connexion Firebase.");
+            }
         };
     </script>
 </body>

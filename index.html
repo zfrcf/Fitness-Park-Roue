@@ -47,8 +47,16 @@
             font-weight: 700;
         }
 
-        .nav-links span { cursor: pointer; transition: 0.3s; }
-        .nav-links span:hover { color: var(--fp-yellow); }
+        /* Style des liens */
+        .nav-links a { 
+            color: white; 
+            text-decoration: none; 
+            transition: 0.3s; 
+        }
+        
+        .nav-links a:hover { 
+            color: var(--fp-yellow); 
+        }
 
         .nav-right { display: flex; align-items: center; gap: 25px; }
         
@@ -73,9 +81,9 @@
             font-family: 'Roboto', sans-serif;
         }
 
-        /* --- MODALE DE CONNEXION (CACHÉE PAR DÉFAUT) --- */
+        /* --- MODALE DE CONNEXION --- */
         #auth-overlay {
-            display: none; /* Caché */
+            display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85);
@@ -119,21 +127,6 @@
             border-radius: 4px;
         }
 
-        .social-auth {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #333;
-        }
-
-        .social-btn {
-            width: 45px; height: 45px; border-radius: 50%;
-            border: none; cursor: pointer; font-size: 20px;
-            display: flex; align-items: center; justify-content: center;
-        }
-
         /* --- ZONE DE JEU --- */
         .hero {
             display: flex;
@@ -158,7 +151,6 @@
 
         #wheel-svg {
             width: 100%; height: 100%;
-            filter: drop-shadow(0 0 20px rgba(255, 222, 0, 0.1));
             transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
         }
 
@@ -193,12 +185,12 @@
 
     <nav>
         <div class="nav-left">
-            <img src="https://d1nwmbf35sn2fq.cloudfront.net/s3fs-public/2025-12/LOGO_FITNESS%20PARK_WHITE_2020_FR%20%281%29%20%281%29.svg?VersionId=c9xFUFsleMk4wk4mV8FfPEzY8KueB1XW" alt="Fitness Park" class="logo-fp">
+            <a href="https://www.fitnesspark.fr/"><img src="https://d1nwmbf35sn2fq.cloudfront.net/s3fs-public/2025-12/LOGO_FITNESS%20PARK_WHITE_2020_FR%20%281%29%20%281%29.svg?VersionId=c9xFUFsleMk4wk4mV8FfPEzY8KueB1XW" alt="Fitness Park" class="logo-fp"></a>
             <div class="nav-links">
-                <span>Abonnements</span>
-                <span>Activités & Options</span>
-                <span>Nos Clubs</span>
-                <span>Level Up</span>
+                <a href="https://www.fitnesspark.fr/nos-offres/">Abonnements</a>
+                <a href="https://www.fitnesspark.fr/activites/">Activités & Options</a>
+                <a href="https://www.fitnesspark.fr/club/">Nos Clubs</a>
+                <a href="https://www.fitnesspark.fr/level-up/">Level Up</a>
             </div>
         </div>
         <div class="nav-right">
@@ -214,11 +206,6 @@
             <input type="email" placeholder="Adresse e-mail">
             <input type="password" placeholder="Mot de passe">
             <button class="btn-register-trigger" style="width:100%; margin-top:10px; font-style: normal;">Valider</button>
-            
-            <div class="social-auth">
-                <button class="social-btn" style="background:#fff; color:#000;"><i class="fab fa-google"></i></button>
-                <button class="social-btn" style="background:#000; color:#fff; border:1px solid #333;"><i class="fab fa-apple"></i></button>
-            </div>
         </div>
     </div>
 
@@ -234,21 +221,6 @@
         <h2 id="result" style="color:var(--fp-yellow); font-family:'Oswald'; margin-top:30px; height:40px;"></h2>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "firebase/app";
-        // Ta config Firebase reste active ici
-        const firebaseConfig = {
-            apiKey: "AIzaSyA6RIWqdkWkIYYNXdRXfY84ocfMHuyaKkk",
-            authDomain: "fitness-park-roue.firebaseapp.com",
-            projectId: "fitness-park-roue",
-            storageBucket: "fitness-park-roue.firebasestorage.app",
-            messagingSenderId: "393113227879",
-            appId: "1:393113227879:web:0c73a9276b29ef8103bac2",
-            measurementId: "G-FWRZGVQKXF"
-        };
-        initializeApp(firebaseConfig);
-    </script>
-
     <script>
         // Fonctions d'affichage de la connexion
         function openAuth(mode) {
@@ -260,8 +232,8 @@
             document.getElementById('auth-overlay').style.display = 'none';
         }
 
-        // Configuration de la roue
-        const rewards = ["1 MOIS OFFERT", "GOURDE FP", "DÉFI POMPES", "SERVIETTE", "4 SEMAINES", "SHAKER", "COACHING 1H", "DÉFI CHAISE", "ACCÈS VIP", "CADEAU"];
+        // Configuration de la roue (SVG)
+        const rewards = ["1 MOIS OFFERT", "GOURDE FP", "DÉFI POMPES", "SERVIETTE", "4 SEMAINES", "SHAKER", "COACHING 1H", "DÉFI CHAISE", "ACCÈS VIP", "SURPRISE"];
         const svg = document.getElementById('wheel-svg');
         const spinBtn = document.getElementById('spin-btn');
         let currentRotation = 0;

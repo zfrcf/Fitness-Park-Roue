@@ -5,13 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fitness Park - Tente ta chance</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&family=Roboto:wght@400;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <style>
         :root {
             --fp-yellow: #ffde00;
-            --fp-black-nav: #1c1f22;
             --fp-bg: #000000;
+            --fp-grey: #1a1a1a;
         }
 
         body {
@@ -19,130 +18,28 @@
             color: white;
             font-family: 'Roboto', sans-serif;
             margin: 0;
-            overflow-x: hidden;
-        }
-
-        /* --- NAVIGATION OFFICIELLE --- */
-        nav {
-            width: 100%;
-            background-color: var(--fp-black-nav);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 40px;
-            box-sizing: border-box;
-            height: 70px;
-        }
-
-        .nav-left { display: flex; align-items: center; gap: 40px; }
-        .logo-fp { height: 35px; cursor: pointer; }
-
-        .nav-links {
-            display: flex;
-            gap: 25px;
-            text-transform: uppercase;
-            font-family: 'Oswald', sans-serif;
-            font-size: 14px;
-            letter-spacing: 0.5px;
-            font-weight: 700;
-        }
-
-        /* Style des liens */
-        .nav-links a { 
-            color: white; 
-            text-decoration: none; 
-            transition: 0.3s; 
-        }
-        
-        .nav-links a:hover { 
-            color: var(--fp-yellow); 
-        }
-
-        .nav-right { display: flex; align-items: center; gap: 25px; }
-        
-        .btn-login-trigger { 
-            color: white; 
-            text-decoration: underline; 
-            font-size: 14px; 
-            cursor: pointer; 
-            font-weight: bold;
-        }
-        
-        .btn-register-trigger {
-            background-color: var(--fp-yellow);
-            color: black;
-            padding: 10px 20px;
-            border-radius: 4px;
-            font-weight: 900;
-            text-transform: uppercase;
-            font-style: italic;
-            border: none;
-            cursor: pointer;
-            font-family: 'Roboto', sans-serif;
-        }
-
-        /* --- MODALE DE CONNEXION --- */
-        #auth-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-            backdrop-filter: blur(5px);
-        }
-
-        .login-box {
-            background: #111;
-            padding: 40px;
-            border-radius: 2px;
-            border: 1px solid #333;
-            width: 350px;
-            text-align: center;
-            position: relative;
-        }
-
-        .close-btn {
-            position: absolute;
-            top: 10px; right: 15px;
-            color: white; font-size: 24px; cursor: pointer;
-        }
-
-        .login-box h3 {
-            font-family: 'Oswald', sans-serif;
-            font-size: 2rem;
-            margin-bottom: 25px;
-            text-transform: uppercase;
-        }
-
-        .login-box input {
-            width: 100%;
-            padding: 15px;
-            margin: 10px 0;
-            background: #222;
-            border: 1px solid #444;
-            color: white;
-            box-sizing: border-box;
-            border-radius: 4px;
-        }
-
-        /* --- ZONE DE JEU --- */
-        .hero {
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 50px 20px;
+            min-height: 100vh;
+        }
+
+        /* --- LOGO EN GROS --- */
+        .header-logo {
+            margin-top: 40px;
+            width: 300px;
+            max-width: 80%;
         }
 
         .title-main {
             font-family: 'Oswald', sans-serif;
-            font-size: clamp(2rem, 8vw, 4rem);
+            font-size: clamp(2rem, 6vw, 3.5rem);
             text-transform: uppercase;
-            margin-bottom: 40px;
+            margin: 20px 0 40px 0;
             text-align: center;
         }
 
+        /* --- ZONE ROUE --- */
         .wheel-container {
             position: relative;
             width: min(90vw, 450px);
@@ -166,7 +63,7 @@
         }
 
         .spin-btn {
-            margin-top: 40px;
+            margin-top: 30px;
             background: var(--fp-yellow);
             border: none;
             padding: 18px 50px;
@@ -178,69 +75,111 @@
             box-shadow: 0 6px 0 #bfa700;
         }
 
-        .spin-btn:active { transform: translateY(3px); box-shadow: none; }
+        .spin-btn:disabled {
+            background: #555;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        /* --- FORMULAIRE GAGNANT --- */
+        #winner-form {
+            display: none;
+            background: var(--fp-grey);
+            padding: 30px;
+            border-radius: 4px;
+            border: 2px solid var(--fp-yellow);
+            margin-top: 30px;
+            width: 350px;
+            max-width: 90%;
+            text-align: center;
+        }
+
+        #winner-form h2 {
+            font-family: 'Oswald', sans-serif;
+            color: var(--fp-yellow);
+            margin-top: 0;
+        }
+
+        .win-input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            background: #000;
+            border: 1px solid #444;
+            color: white;
+            box-sizing: border-box;
+        }
+
+        .submit-win {
+            background: var(--fp-yellow);
+            border: none;
+            width: 100%;
+            padding: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
 
-    <nav>
-        <div class="nav-left">
-            <a href="https://www.fitnesspark.fr/"><img src="https://d1nwmbf35sn2fq.cloudfront.net/s3fs-public/2025-12/LOGO_FITNESS%20PARK_WHITE_2020_FR%20%281%29%20%281%29.svg?VersionId=c9xFUFsleMk4wk4mV8FfPEzY8KueB1XW" alt="Fitness Park" class="logo-fp"></a>
-            <div class="nav-links">
-                <a href="https://www.fitnesspark.fr/nos-offres/">Abonnements</a>
-                <a href="https://www.fitnesspark.fr/activites/">Activités & Options</a>
-                <a href="https://www.fitnesspark.fr/club/">Nos Clubs</a>
-                <a href="https://www.fitnesspark.fr/level-up/">Level Up</a>
-            </div>
-        </div>
-        <div class="nav-right">
-            <span class="btn-login-trigger" onclick="openAuth('connexion')">Se connecter</span>
-            <button class="btn-register-trigger" onclick="openAuth('inscription')">Je m'inscris</button>
-        </div>
-    </nav>
+    <img src="https://d1nwmbf35sn2fq.cloudfront.net/s3fs-public/2025-12/LOGO_FITNESS%20PARK_WHITE_2020_FR%20%281%29%20%281%29.svg?VersionId=c9xFUFsleMk4wk4mV8FfPEzY8KueB1XW" alt="Fitness Park" class="header-logo">
 
-    <div id="auth-overlay">
-        <div class="login-box">
-            <span class="close-btn" onclick="closeAuth()">&times;</span>
-            <h3 id="auth-title">Connexion</h3>
-            <input type="email" placeholder="Adresse e-mail">
-            <input type="password" placeholder="Mot de passe">
-            <button class="btn-register-trigger" style="width:100%; margin-top:10px; font-style: normal;">Valider</button>
-        </div>
+    <h1 class="title-main">TENTE TA <span style="color:var(--fp-yellow)">CHANCE !</span></h1>
+    
+    <div class="wheel-container">
+        <div class="marker"></div>
+        <svg id="wheel-svg" viewBox="0 0 400 400"></svg>
     </div>
 
-    <div class="hero">
-        <h1 class="title-main">TENTE TA <span style="color:var(--fp-yellow)">CHANCE !</span></h1>
-        
-        <div class="wheel-container">
-            <div class="marker"></div>
-            <svg id="wheel-svg" viewBox="0 0 400 400"></svg>
-        </div>
+    <button class="spin-btn" id="spin-btn">Faire tourner</button>
 
-        <button class="spin-btn" id="spin-btn">Faire tourner</button>
-        <h2 id="result" style="color:var(--fp-yellow); font-family:'Oswald'; margin-top:30px; height:40px;"></h2>
+    <div id="winner-form">
+        <h2>FÉLICITATIONS !</h2>
+        <p id="win-message"></p>
+        <input type="text" class="win-input" placeholder="Nom" id="last-name" required>
+        <input type="text" class="win-input" placeholder="Prénom" id="first-name" required>
+        <input type="tel" class="win-input" placeholder="Numéro de téléphone" id="phone" required>
+        <button class="submit-win" onclick="alert('Vos informations ont été enregistrées !')">Recevoir mon lot</button>
     </div>
+
+    <script type="module">
+        import { initializeApp } from "firebase/app";
+        const firebaseConfig = {
+            apiKey: "AIzaSyA6RIWqdkWkIYYNXdRXfY84ocfMHuyaKkk",
+            authDomain: "fitness-park-roue.firebaseapp.com",
+            projectId: "fitness-park-roue",
+            storageBucket: "fitness-park-roue.firebasestorage.app",
+            messagingSenderId: "393113227879",
+            appId: "1:393113227879:web:0c73a9276b29ef8103bac2",
+            measurementId: "G-FWRZGVQKXF"
+        };
+        initializeApp(firebaseConfig);
+    </script>
 
     <script>
-        // Fonctions d'affichage de la connexion
-        function openAuth(mode) {
-            document.getElementById('auth-overlay').style.display = 'flex';
-            document.getElementById('auth-title').innerText = (mode === 'connexion') ? 'Connexion' : 'Inscription';
-        }
+        // Définition des lots avec leurs probabilités
+        const rewardsData = [
+            { label: "SERVIETTE FP", weight: 60 },
+            { label: "T-SHIRT FP", weight: 30 },
+            { label: "SAC À DOS FP", weight: 10 },
+            { label: "3M ULTIMATE", weight: 1 },
+            { label: "3M ACCESS", weight: 0.5 },
+            { label: "1 MOIS GRATUIT", weight: 0.1 },
+            { label: "2 MOIS GRATUIT", weight: 0.05 },
+            { label: "3 MOIS GRATUIT", weight: 0.01 },
+            { label: "6 MOIS GRATUIT", weight: 0.001 }
+        ];
 
-        function closeAuth() {
-            document.getElementById('auth-overlay').style.display = 'none';
-        }
-
-        // Configuration de la roue (SVG)
-        const rewards = ["1 MOIS OFFERT", "GOURDE FP", "DÉFI POMPES", "SERVIETTE", "4 SEMAINES", "SHAKER", "COACHING 1H", "DÉFI CHAISE", "ACCÈS VIP", "SURPRISE"];
         const svg = document.getElementById('wheel-svg');
         const spinBtn = document.getElementById('spin-btn');
         let currentRotation = 0;
 
+        // Dessiner la roue (On divise en 10 segments pour la lisibilité visuelle)
         function drawWheel() {
-            const step = 360 / rewards.length;
-            rewards.forEach((text, i) => {
+            const segments = 10; 
+            const step = 360 / segments;
+            for (let i = 0; i < segments; i++) {
                 const angle = i * step;
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 const x1 = 200 + 190 * Math.cos(Math.PI * angle / 180);
@@ -253,29 +192,50 @@
                 path.setAttribute("stroke", "#333");
                 svg.appendChild(path);
 
+                // Texte (On affiche les lots principaux sur la roue)
                 const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                t.setAttribute("x", "310"); t.setAttribute("y", "205");
+                t.setAttribute("x", "300"); t.setAttribute("y", "205");
                 t.setAttribute("fill", i % 2 === 0 ? "white" : "#ffde00");
-                t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "900");
+                t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "900");
                 t.setAttribute("transform", `rotate(${angle + step/2}, 200, 200)`);
-                t.textContent = text;
+                t.textContent = rewardsData[i % rewardsData.length].label;
                 svg.appendChild(t);
-            });
+            }
         }
 
         drawWheel();
 
+        // Logique de calcul par probabilité
+        function getWeightedReward() {
+            const totalWeight = rewardsData.reduce((acc, item) => acc + item.weight, 0);
+            let random = Math.random() * totalWeight;
+            for (const reward of rewardsData) {
+                if (random < reward.weight) return reward;
+                random -= reward.weight;
+            }
+            return rewardsData[0];
+        }
+
         spinBtn.onclick = () => {
             spinBtn.disabled = true;
-            const spin = Math.floor(Math.random() * 360) + 3600;
-            currentRotation += spin;
+            document.getElementById('winner-form').style.display = 'none';
+            
+            const winningReward = getWeightedReward();
+            const rewardIndex = rewardsData.indexOf(winningReward);
+            
+            // Calcul de l'angle pour tomber sur le bon segment visuel
+            // (Note: C'est une simulation visuelle, le lot est décidé par le JS avant)
+            const extraSpin = 3600; // 10 tours
+            const segmentAngle = 360 / 10;
+            const targetAngle = 360 - (rewardIndex * segmentAngle) - (segmentAngle / 2);
+            
+            currentRotation += extraSpin + targetAngle;
             svg.style.transform = `rotate(${currentRotation}deg)`;
             
             setTimeout(() => {
-                spinBtn.disabled = false;
-                const final = (360 - (currentRotation % 360)) % 360;
-                const idx = Math.floor(final / (360 / rewards.length));
-                document.getElementById('result').innerText = "GAGNÉ : " + rewards[idx];
+                document.getElementById('winner-form').style.display = 'block';
+                document.getElementById('win-message').innerHTML = `Vous avez gagné : <br><strong>${winningReward.label}</strong>`;
+                spinBtn.style.display = 'none';
             }, 5000);
         };
     </script>

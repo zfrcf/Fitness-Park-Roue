@@ -127,6 +127,8 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'HEAD' || !upstream.body) {
+    // Sonde de taille : on ne lit pas le corps.
+    try { await upstream.body?.cancel(); } catch {}
     return res.end();
   }
 

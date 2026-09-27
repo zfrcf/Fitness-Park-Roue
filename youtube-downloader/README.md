@@ -25,12 +25,21 @@ Les qualités « Vidéo + son » sont les fichiers complets (360p, parfois 720p)
 Au-dessus, YouTube fournit vidéo et audio en pistes séparées, à assembler
 ensuite (VLC, ffmpeg).
 
+## Anti-robot YouTube
+
+Depuis une IP de datacenter, YouTube répond « Sign in to confirm you're not a
+bot ». Le serveur génère donc automatiquement un jeton « Proof of Origin »
+(BotGuard, via `bgutils-js` et un DOM simulé `jsdom`), lié au `visitorData` de
+la session, valable environ 12 h et mis en cache dans `/tmp`. La génération
+prend moins d'une seconde. En cas de blocage malgré tout, la session est
+régénérée une fois, puis l'erreur est remontée à l'utilisateur.
+
 ## Variables d'environnement (optionnelles)
 
 | Variable | Rôle |
 | --- | --- |
 | `YT_COOKIES` | Chaîne de cookies d'un compte YouTube connecté. À renseigner si YouTube répond « connexion requise » (détection anti-robot depuis les IP de datacenter). |
-| `YT_PO_TOKEN` | Jeton « Proof of Origin » pour le client web. |
+| `YT_PO_TOKEN` | Jeton « Proof of Origin » fourni manuellement (désactive la génération automatique). |
 | `YT_VISITOR_DATA` | `visitorData` associé au jeton ci-dessus. |
 
 ## Développement local

@@ -340,6 +340,19 @@
     const filename = `${(current.title || 'video').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 120)}.${f.container}`;
 
     const canStreamToDisk = typeof window.showSaveFilePicker === 'function' && window.isSecureContext;
+
+    // Taille inconnue (fréquent pour le 360p "vidéo + son") : on la demande au
+    // serveur pour pouvoir télécharger par morceaux.
+    if (canStreamToDisk && !f.size) {
+      setBusy(true, 'Préparation du téléchargement…');
+      try {
+        const h = await fetch(downloadUrl(f), { method: 'HEAD' });
+        const len = Number(h.headers.get('content-length'));
+        if (h.ok && len > 0) f = { ...f, size: len };
+      } catch {}
+      setBusy(false);
+    }
+
     if (!canStreamToDisk || !f.size) {
       // Repli : téléchargement classique en flux continu.
       const a = document.createElement('a');

@@ -12,6 +12,8 @@
     "test": "node test/smoke.js"
   },
   "dependencies": {
+    "bgutils-js": "^4.0.3",
+    "jsdom": "^30.1.1",
     "youtubei.js": "^18.1.0"
   }
 }

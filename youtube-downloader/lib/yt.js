@@ -5,6 +5,7 @@
 
 import vm from 'node:vm';
 import { Innertube, UniversalCache, Platform } from 'youtubei.js';
+import { getPoTokenSession, USER_AGENT } from './potoken.js';
 
 // Évaluateur JavaScript pour déchiffrer les paramètres "n" et "sig" des URL de
 // flux : youtubei.js extrait le code du lecteur YouTube et nous l'exécutons dans
@@ -14,9 +15,11 @@ Platform.shim.eval = (data, env) => {
   return vm.runInContext(`(function(){ ${data.output} })()`, context, { timeout: 5000 });
 };
 
-// Ordre d'essai des clients. iOS est le plus tolérant depuis un datacenter,
-// MWEB/WEB fournissent en plus les formats "vidéo+audio" (progressifs).
-export const CLIENT_CHAIN = ['IOS', 'MWEB', 'WEB', 'ANDROID', 'TV'];
+// Ordre d'essai des clients. MWEB fournit les formats "vidéo+audio"
+// (progressifs) et des URL directes ; iOS et Android sont les plus tolérants
+// depuis un datacenter. WEB ne renvoie plus que du SABR (sans URL), on le
+// garde en dernier recours avec TV.
+export const CLIENT_CHAIN = ['MWEB', 'IOS', 'ANDROID', 'TV', 'WEB'];
 
 const CLIENT_USER_AGENTS = {
   IOS: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
@@ -70,19 +73,27 @@ export function extractVideoId(input) {
 }
 
 let innertubePromise = null;
+let innertubeForceRefresh = false;
 
 /** Session InnerTube partagée entre les invocations "chaudes" de la fonction. */
 export function getInnertube() {
   if (!innertubePromise) {
-    innertubePromise = Innertube.create({
-      cache: new UniversalCache(true, '/tmp/youtubei-cache'),
-      generate_session_locally: true,
-      cookie: process.env.YT_COOKIES || undefined,
-      po_token: process.env.YT_PO_TOKEN || undefined,
-      visitor_data: process.env.YT_VISITOR_DATA || undefined,
-      lang: 'fr',
-      location: 'FR',
-    }).catch((err) => {
+    const force = innertubeForceRefresh;
+    innertubeForceRefresh = false;
+    innertubePromise = (async () => {
+      const po = await getPoTokenSession({ force });
+      if (po) console.log(`[yt] session avec jeton PO (${po.source})`);
+      return Innertube.create({
+        cache: new UniversalCache(true, '/tmp/youtubei-cache'),
+        generate_session_locally: true,
+        user_agent: USER_AGENT,
+        cookie: process.env.YT_COOKIES || undefined,
+        po_token: po?.poToken,
+        visitor_data: po?.visitorData,
+        lang: 'fr',
+        location: 'FR',
+      });
+    })().catch((err) => {
       innertubePromise = null;
       throw err;
     });
@@ -131,6 +142,7 @@ function pickError(current, candidate) {
  * YouTube marque la session courante comme robot. */
 export function resetInnertube() {
   innertubePromise = null;
+  innertubeForceRefresh = true; // nouveau visitorData + nouveau jeton PO
 }
 
 async function tryClients(videoId, clients) {
@@ -289,7 +301,7 @@ export async function resolveStream(videoId, itag, preferredClient) {
       size: format.content_length ? Number(format.content_length) : null,
       mime: (format.mime_type || '').split(';')[0],
       container: containerOf(format),
-      userAgent: CLIENT_USER_AGENTS[client],
+      userAgent: CLIENT_USER_AGENTS[client] || USER_AGENT,
     };
   }
   throw lastError || new YoutubeError('Flux introuvable.', 404, 'FORMAT_NOT_FOUND');

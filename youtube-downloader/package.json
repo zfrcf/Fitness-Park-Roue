@@ -1,0 +1,17 @@
+{
+  "name": "youtube-downloader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Téléchargeur de vidéos YouTube (liens watch, live, shorts, youtu.be) déployé sur Vercel",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "node dev-server.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "youtubei.js": "^18.1.0"
+  }
+}

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Téléchargeur YouTube</title>
+  <meta name="description" content="Télécharge une vidéo YouTube à partir de son lien (watch, live, shorts, youtu.be), même très longue.">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff0033'/%3E%3Cpath d='M12 9l11 7-11 7z' fill='white'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1f232c;
+      --border: #2a2f3a;
+      --text: #f2f4f8;
+      --muted: #9aa3b2;
+      --accent: #ff0033;
+      --accent-2: #ff3355;
+      --ok: #2ecc71;
+      --warn: #f5b942;
+      --err: #ff5c5c;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(1200px 600px at 50% -10%, #23182b 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      padding: 32px 16px 64px;
+      line-height: 1.45;
+    }
+    main { max-width: 860px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 28px; }
+    .logo {
+      display: inline-flex; align-items: center; gap: 12px;
+      font-weight: 800; font-size: clamp(1.6rem, 4vw, 2.4rem); letter-spacing: -0.02em;
+    }
+    .logo .badge {
+      background: var(--accent); color: white; border-radius: 10px; width: 46px; height: 46px;
+      display: inline-grid; place-items: center; font-size: 1.3rem;
+    }
+    header p { color: var(--muted); margin: 8px 0 0; }
+
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 20px; margin-bottom: 18px;
+    }
+    form.search { display: flex; gap: 10px; flex-wrap: wrap; }
+    form.search input {
+      flex: 1 1 320px; min-width: 0;
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 10px; padding: 14px 16px; font-size: 1rem; outline: none;
+    }
+    form.search input:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(255,0,51,.18); }
+    button {
+      background: var(--accent); color: white; border: 0; border-radius: 10px;
+      padding: 14px 20px; font-size: 1rem; font-weight: 700; cursor: pointer;
+      transition: transform .08s ease, background .15s ease;
+    }
+    button:hover { background: var(--accent-2); }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    button.secondary { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
+    button.secondary:hover { background: #262b36; }
+    .hint { color: var(--muted); font-size: .9rem; margin: 12px 0 0; }
+    .hint code { background: var(--panel-2); padding: 2px 6px; border-radius: 6px; }
+
+    .status { display: none; align-items: center; gap: 10px; color: var(--muted); }
+    .status.show { display: flex; }
+    .spinner {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 3px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error { display: none; border-color: rgba(255,92,92,.5); background: rgba(255,92,92,.08); color: #ffd3d3; }
+    .error.show { display: block; }
+    .error strong { color: var(--err); }
+
+    .video { display: none; }
+    .video.show { display: block; }
+    .video-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+    .video-head img { width: 220px; max-width: 100%; border-radius: 10px; background: #000; aspect-ratio: 16/9; object-fit: cover; }
+    .video-head h2 { margin: 0 0 6px; font-size: 1.2rem; }
+    .meta { color: var(--muted); font-size: .92rem; }
+    .meta span + span::before { content: " · "; }
+    .pill {
+      display: inline-block; background: var(--panel-2); border: 1px solid var(--border);
+      border-radius: 999px; padding: 2px 10px; font-size: .8rem; color: var(--muted); margin-top: 8px;
+    }
+
+    .tabs { display: flex; gap: 8px; margin: 20px 0 12px; flex-wrap: wrap; }
+    .tabs button { padding: 9px 14px; font-size: .92rem; }
+    .tabs button.active { background: var(--accent); border-color: var(--accent); }
+    .tabs button:not(.active) { background: var(--panel-2); border: 1px solid var(--border); }
+    .tab-note { color: var(--muted); font-size: .88rem; margin: 0 0 12px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: .95rem; }
+    th { color: var(--muted); font-weight: 600; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+    td.q { font-weight: 700; }
+    td .sub { color: var(--muted); font-size: .82rem; display: block; }
+    td.act { text-align: right; white-space: nowrap; }
+    td.act button { padding: 9px 14px; font-size: .9rem; }
+    .empty { color: var(--muted); padding: 14px 8px; }
+
+    .progress { display: none; }
+    .progress.show { display: block; }
+    .progress .row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .bar { height: 12px; background: var(--panel-2); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
+    .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .25s ease; }
+    .progress .stats { color: var(--muted); font-size: .9rem; margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
+    .progress .done { color: var(--ok); font-weight: 700; }
+    .progress .actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+    footer { text-align: center; color: var(--muted); font-size: .85rem; margin-top: 28px; }
+    details summary { cursor: pointer; color: var(--muted); }
+    details p { color: var(--muted); font-size: .9rem; }
+
+    @media (max-width: 600px) {
+      body { padding: 20px 16px 48px; }
+      th:nth-child(3), td:nth-child(3) { display: none; }
+      .video-head img { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo"><span class="badge">▶</span> Téléchargeur YouTube</div>
+    <p>Colle un lien YouTube (vidéo, live terminé, short, youtu.be) et choisis la qualité. Les vidéos de plusieurs heures sont prises en charge.</p>
+  </header>
+
+  <section class="card">
+    <form class="search" id="form" autocomplete="off">
+      <input id="url" type="text" inputmode="url" placeholder="https://www.youtube.com/live/Jr_EcIG_gAM?si=…" required aria-label="Lien YouTube">
+      <button id="go" type="submit">Analyser</button>
+    </form>
+    <p class="hint">Liens acceptés : <code>youtube.com/watch?v=…</code>, <code>youtu.be/…</code>, <code>youtube.com/live/…</code>, <code>/shorts/…</code>, <code>/embed/…</code>, <code>music.youtube.com</code>. Les paramètres <code>?si=</code>, <code>&amp;t=</code> ou <code>&amp;list=</code> sont ignorés.</p>
+    <div class="status" id="status" style="margin-top:14px"><div class="spinner"></div><span id="status-text">Analyse du lien…</span></div>
+  </section>
+
+  <section class="card error" id="error" role="alert"></section>
+
+  <section class="card video" id="video">
+    <div class="video-head">
+      <img id="thumb" alt="Miniature de la vidéo">
+      <div style="flex:1;min-width:220px">
+        <h2 id="title"></h2>
+        <div class="meta"><span id="author"></span><span id="duration"></span><span id="views"></span></div>
+        <span class="pill" id="client-pill"></span>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button type="button" data-tab="video+audio" class="active">Vidéo + son</button>
+      <button type="button" data-tab="video">Vidéo seule (HD)</button>
+      <button type="button" data-tab="audio">Audio seul</button>
+    </div>
+    <p class="tab-note" id="tab-note"></p>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Qualité</th><th>Format</th><th>Codec</th><th>Taille</th><th></th></tr></thead>
+        <tbody id="formats"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card progress" id="progress">
+    <div class="row"><strong id="p-title">Téléchargement</strong><span id="p-pct">0 %</span></div>
+    <div class="bar"><div id="p-bar"></div></div>
+    <div class="stats">
+      <span id="p-bytes">0 o / 0 o</span>
+      <span id="p-speed"></span>
+      <span id="p-eta"></span>
+      <span id="p-parts"></span>
+    </div>
+    <div class="actions">
+      <button type="button" class="secondary" id="p-cancel">Annuler</button>
+    </div>
+  </section>
+
+  <footer>
+    <details>
+      <summary>Comment ça marche ?</summary>
+      <p>Le serveur interroge YouTube pour la liste des flux, puis relaie le fichier vers ton navigateur. Sur Chrome et Edge, le fichier est écrit directement sur le disque par morceaux téléchargés en parallèle : aucune limite de durée, reprise automatique si un morceau échoue. Sur les autres navigateurs, le téléchargement passe par un flux continu classique.</p>
+      <p>Les qualités « Vidéo + son » sont les fichiers prêts à lire. Les qualités HD (1080p et plus) sont fournies par YouTube en pistes séparées : télécharge la vidéo seule et l'audio seul puis assemble-les (par exemple avec VLC ou ffmpeg).</p>
+      <p>À utiliser uniquement pour des contenus dont tu détiens les droits ou qui l'autorisent.</p>
+    </details>
+  </footer>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const form = $('form'), input = $('url'), go = $('go');
+  const statusBox = $('status'), statusText = $('status-text');
+  const errorBox = $('error');
+  const videoBox = $('video');
+  const formatsBody = $('formats');
+  const tabNote = $('tab-note');
+  const progress = $('progress');
+
+  const TAB_NOTES = {
+    'video+audio': 'Fichiers complets, lisibles directement. YouTube ne fournit ces fichiers qu\'en qualité standard (360p, parfois 720p).',
+    'video': 'Pistes vidéo sans son, jusqu\'en 1080p/4K. À assembler avec la piste audio.',
+    'audio': 'Pistes audio seules (M4A ou WebM/Opus). Idéal pour podcasts et musique.',
+  };
+
+  let current = null;
+  let currentTab = 'video+audio';
+  let activeDownload = null;
+
+  const fmtBytes = (n) => {
+    if (n == null || isNaN(n)) return '—';
+    const u = ['o', 'Ko', 'Mo', 'Go', 'To']; let i = 0; let v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+  };
+  const fmtDuration = (s) => {
+    s = Math.round(s || 0);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h ? `${h} h ${String(m).padStart(2, '0')} min ${String(sec).padStart(2, '0')} s` : `${m} min ${String(sec).padStart(2, '0')} s`;
+  };
+  const fmtTime = (s) => {
+    if (!isFinite(s) || s < 0) return '—';
+    s = Math.round(s);
+    if (s < 60) return `${s} s`;
+    const m = Math.floor(s / 60), sec = s % 60;
+    if (m < 60) return `${m} min ${String(sec).padStart(2, '0')} s`;
+    return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+  };
+  const fmtViews = (n) => n ? new Intl.NumberFormat('fr-FR').format(n) + ' vues' : '';
+
+  function showError(msg) {
+    errorBox.innerHTML = `<strong>Erreur.</strong> ${msg}`;
+    errorBox.classList.add('show');
+  }
+  function clearError() { errorBox.classList.remove('show'); errorBox.textContent = ''; }
+  function setBusy(busy, text) {
+    go.disabled = busy;
+    statusText.textContent = text || 'Analyse du lien…';
+    statusBox.classList.toggle('show', busy);
+  }
+
+  // Pré-remplissage depuis ?url= (partage direct) ou collage.
+  const params = new URLSearchParams(location.search);
+  if (params.get('url')) { input.value = params.get('url'); setTimeout(() => form.requestSubmit(), 50); }
+  input.addEventListener('paste', () => setTimeout(() => { if (input.value.trim()) form.requestSubmit(); }, 30));
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = input.value.trim();
+    if (!url) return;
+    clearError();
+    videoBox.classList.remove('show');
+    setBusy(true, 'Analyse du lien…');
+    try {
+      const r = await fetch(`/api/info?url=${encodeURIComponent(url)}`);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `Le serveur a répondu ${r.status}.`);
+      current = data;
+      render(data);
+      history.replaceState(null, '', `?url=${encodeURIComponent(url)}`);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  document.querySelectorAll('.tabs button').forEach((b) => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.tabs button').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      currentTab = b.dataset.tab;
+      renderFormats();
+    });
+  });
+
+  function render(d) {
+    $('thumb').src = d.thumbnail;
+    $('title').textContent = d.title;
+    $('author').textContent = d.author;
+    $('duration').textContent = fmtDuration(d.duration);
+    $('views').textContent = fmtViews(d.views);
+    $('client-pill').textContent = `${d.formats.length} flux disponibles · client ${d.client}${d.wasLive ? ' · replay de direct' : ''}`;
+
+    // Onglet par défaut : le premier qui a des formats.
+    const has = (k) => d.formats.some((f) => f.kind === k);
+    currentTab = has('video+audio') ? 'video+audio' : has('video') ? 'video' : 'audio';
+    document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === currentTab));
+    renderFormats();
+    videoBox.classList.add('show');
+  }
+
+  function renderFormats() {
+    tabNote.textContent = TAB_NOTES[currentTab];
+    const list = current.formats.filter((f) => f.kind === currentTab);
+    formatsBody.innerHTML = '';
+    if (!list.length) {
+      formatsBody.innerHTML = `<tr><td colspan="5" class="empty">Aucun flux de ce type pour cette vidéo${currentTab === 'video+audio' ? ' via ce client. Utilise « Vidéo seule » + « Audio seul », ou réessaie l\'analyse.' : '.'}</td></tr>`;
+      return;
+    }
+    for (const f of list) {
+      const tr = document.createElement('tr');
+      const q = f.kind === 'audio' ? (f.audioQuality === 'AUDIO_QUALITY_MEDIUM' ? 'Qualité moyenne' : f.audioQuality === 'AUDIO_QUALITY_LOW' ? 'Qualité basse' : 'Audio') : f.quality;
+      const sub = f.kind === 'audio' ? `${Math.round(f.bitrate / 1000)} kbit/s` : (f.fps ? `${f.fps} i/s` : '');
+      tr.innerHTML = `
+        <td class="q">${q}<span class="sub">${sub}</span></td>
+        <td>${f.container.toUpperCase()}</td>
+        <td><span class="sub" style="display:inline">${f.codecs || f.mime}</span></td>
+        <td>${fmtBytes(f.size)}</td>
+        <td class="act"></td>`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Télécharger';
+      btn.addEventListener('click', () => startDownload(f));
+      tr.querySelector('.act').appendChild(btn);
+      formatsBody.appendChild(tr);
+    }
+  }
+
+  // ------- Téléchargement -------
+  const CHUNK = 48 * 1024 * 1024;   // 48 Mo par morceau (chaque morceau = une requête courte)
+  const PARALLEL = 4;               // morceaux téléchargés simultanément
+  const MAX_RETRY = 6;
+
+  function downloadUrl(f, extra = '') {
+    const p = new URLSearchParams({ id: current.id, itag: f.itag, client: f.client, title: current.title });
+    return `/api/download?${p.toString()}${extra}`;
+  }
+
+  async function startDownload(f) {
+    clearError();
+    if (activeDownload) { showError('Un téléchargement est déjà en cours. Annule-le d\'abord.'); return; }
+    const filename = `${(current.title || 'video').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 120)}.${f.container}`;
+
+    const canStreamToDisk = typeof window.showSaveFilePicker === 'function' && window.isSecureContext;
+    if (!canStreamToDisk || !f.size) {
+      // Repli : téléchargement classique en flux continu.
+      const a = document.createElement('a');
+      a.href = downloadUrl(f);
+      a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      if (f.size && f.size > 1.5 * 1024 * 1024 * 1024) {
+        showError('Ce navigateur ne permet pas le téléchargement par morceaux. Pour les très gros fichiers, utilise Chrome ou Edge afin d\'éviter une coupure.');
+      }
+      return;
+    }
+
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: 'Média', accept: { [f.mime || 'application/octet-stream']: [`.${f.container}`] } }],
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      showError(`Impossible d'ouvrir le sélecteur de fichier : ${err.message}`);
+      return;
+    }
+
+    const writable = await handle.createWritable();
+    const total = f.size;
+    const parts = Math.ceil(total / CHUNK);
+    const controller = new AbortController();
+    const state = { received: 0, doneParts: 0, start: performance.now(), lastTick: performance.now(), lastBytes: 0, speed: 0 };
+    activeDownload = { controller };
+
+    progress.classList.add('show');
+    $('p-title').textContent = `Téléchargement : ${filename}`;
+    $('p-cancel').textContent = 'Annuler';
+    $('p-cancel').onclick = () => controller.abort();
+    updateProgress(state, total, parts);
+    const ticker = setInterval(() => updateProgress(state, total, parts), 500);
+
+    let next = 0;
+    let failed = null;
+
+    async function fetchPart(index) {
+      const start = index * CHUNK;
+      const end = Math.min(total, start + CHUNK) - 1;
+      for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+        if (controller.signal.aborted) throw new DOMException('Annulé', 'AbortError');
+        try {
+          const r = await fetch(downloadUrl(f), { headers: { Range: `bytes=${start}-${end}` }, signal: controller.signal });
+          if (r.status !== 206 && r.status !== 200) {
+            const body = await r.json().catch(() => ({}));
+            throw new Error(body.error || `Le serveur a répondu ${r.status}.`);
+          }
+          const reader = r.body.getReader();
+          let pos = start;
+          let got = 0;
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            await writable.write({ type: 'write', position: pos, data: value });
+            pos += value.byteLength; got += value.byteLength; state.received += value.byteLength;
+            if (got > end - start + 1) throw new Error('Le serveur a renvoyé plus de données que demandé.');
+          }
+          if (got !== end - start + 1) {
+            state.received -= got;
+            throw new Error(`Morceau ${index + 1} incomplet (${got} octets sur ${end - start + 1}).`);
+          }
+          state.doneParts++;
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') throw err;
+          if (attempt === MAX_RETRY) throw new Error(`Morceau ${index + 1}/${parts} : ${err.message}`);
+          await new Promise((res) => setTimeout(res, 800 * Math.pow(1.7, attempt)));
+        }
+      }
+    }
+
+    async function worker() {
+      while (next < parts && !failed) {
+        const idx = next++;
+        try { await fetchPart(idx); } catch (err) { failed = err; controller.abort(); }
+      }
+    }
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(PARALLEL, parts) }, worker));
+      if (failed) throw failed;
+      await writable.close();
+      clearInterval(ticker);
+      updateProgress(state, total, parts, true);
+    } catch (err) {
+      clearInterval(ticker);
+      try { await writable.abort(); } catch {}
+      if (err.name === 'AbortError' && !failed) {
+        $('p-title').textContent = 'Téléchargement annulé';
+        $('p-cancel').textContent = 'Fermer';
+      } else {
+        $('p-title').textContent = 'Téléchargement interrompu';
+        $('p-cancel').textContent = 'Fermer';
+        showError((failed || err).message);
+      }
+      $('p-cancel').onclick = () => progress.classList.remove('show');
+    } finally {
+      activeDownload = null;
+    }
+  }
+
+  function updateProgress(state, total, parts, done = false) {
+    const now = performance.now();
+    const dt = (now - state.lastTick) / 1000;
+    if (dt >= 0.45) {
+      const inst = (state.received - state.lastBytes) / dt;
+      state.speed = state.speed ? state.speed * 0.6 + inst * 0.4 : inst;
+      state.lastTick = now; state.lastBytes = state.received;
+    }
+    const pct = total ? Math.min(100, (state.received / total) * 100) : 0;
+    $('p-bar').style.width = `${pct}%`;
+    $('p-pct').textContent = done ? '100 %' : `${pct.toFixed(1)} %`;
+    $('p-bytes').textContent = `${fmtBytes(done ? total : state.received)} / ${fmtBytes(total)}`;
+    $('p-speed').textContent = done ? `Terminé en ${fmtTime((now - state.start) / 1000)}` : (state.speed ? `${fmtBytes(state.speed)}/s` : '');
+    $('p-eta').textContent = done ? '' : (state.speed ? `reste ${fmtTime((total - state.received) / state.speed)}` : '');
+    $('p-parts').textContent = done ? '' : `morceaux ${state.doneParts}/${parts}`;
+    if (done) {
+      $('p-title').innerHTML = `<span class="done">✔ Téléchargement terminé</span>`;
+      $('p-cancel').textContent = 'Fermer';
+      $('p-cancel').onclick = () => progress.classList.remove('show');
+    }
+  }
+})();
+</script>
+</body>
+</html>

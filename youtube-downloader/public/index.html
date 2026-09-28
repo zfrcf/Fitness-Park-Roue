@@ -193,7 +193,8 @@
   </footer>
 </main>
 
-<script>
+<script type="module">
+import { muxFmp4, rangeChunks } from './js/mux.js';
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $('form'), input = $('url'), go = $('go');
@@ -205,7 +206,7 @@
   const progress = $('progress');
 
   const TAB_NOTES = {
-    'video+audio': 'Fichiers complets, lisibles directement. YouTube ne fournit ces fichiers qu\'en qualité standard (360p, parfois 720p).',
+    'video+audio': 'Fichiers complets, lisibles directement. Les qualités marquées « fusion » sont assemblées dans ton navigateur à partir des pistes vidéo et audio HD, sans perte.',
     'video': 'Pistes vidéo sans son, jusqu\'en 1080p/4K. À assembler avec la piste audio.',
     'audio': 'Pistes audio seules (M4A ou WebM/Opus). Idéal pour podcasts et musique.',
   };
@@ -303,9 +304,31 @@
     videoBox.classList.add('show');
   }
 
+  const canStreamToDisk = () => typeof window.showSaveFilePicker === 'function' && window.isSecureContext;
+
+  /** Qualités « vidéo + son » obtenues par fusion d'une piste vidéo MP4 (H.264) et de la meilleure piste audio M4A. */
+  function mergedEntries(formats) {
+    const audio = formats
+      .filter((f) => f.kind === 'audio' && f.container === 'm4a')
+      .sort((a, b) => (b.itag === 140) - (a.itag === 140) || b.bitrate - a.bitrate)[0];
+    if (!audio) return [];
+    const seen = new Set();
+    return formats
+      .filter((f) => f.kind === 'video' && f.container === 'mp4' && /^avc1/.test(f.codecs) && f.height >= 480 && f.size)
+      .filter((f) => { const k = `${f.height}p${f.fps}`; if (seen.has(k)) return false; seen.add(k); return true; })
+      .map((v) => ({
+        merge: true, video: v, audio, kind: 'video+audio', client: v.client,
+        quality: v.quality, height: v.height, fps: v.fps, container: 'mp4', mime: 'video/mp4',
+        codecs: `${v.codecs} + ${audio.codecs}`, size: v.size + audio.size, bitrate: v.bitrate + audio.bitrate,
+      }));
+  }
+
   function renderFormats() {
     tabNote.textContent = TAB_NOTES[currentTab];
-    const list = current.formats.filter((f) => f.kind === currentTab);
+    let list = current.formats.filter((f) => f.kind === currentTab);
+    if (currentTab === 'video+audio') {
+      list = [...list, ...mergedEntries(current.formats)].sort((a, b) => b.height - a.height || b.fps - a.fps);
+    }
     formatsBody.innerHTML = '';
     if (!list.length) {
       formatsBody.innerHTML = `<tr><td colspan="5" class="empty">Aucun flux de ce type pour cette vidéo${currentTab === 'video+audio' ? ' via ce client. Utilise « Vidéo seule » + « Audio seul », ou réessaie l\'analyse.' : '.'}</td></tr>`;
@@ -314,7 +337,7 @@
     for (const f of list) {
       const tr = document.createElement('tr');
       const q = f.kind === 'audio' ? (f.audioQuality === 'AUDIO_QUALITY_MEDIUM' ? 'Qualité moyenne' : f.audioQuality === 'AUDIO_QUALITY_LOW' ? 'Qualité basse' : 'Audio') : f.quality;
-      const sub = f.kind === 'audio' ? `${Math.round(f.bitrate / 1000)} kbit/s` : (f.fps ? `${f.fps} i/s` : '');
+      const sub = f.kind === 'audio' ? `${Math.round(f.bitrate / 1000)} kbit/s` : [f.fps ? `${f.fps} i/s` : '', f.merge ? 'fusion vidéo + audio' : ''].filter(Boolean).join(' · ');
       tr.innerHTML = `
         <td class="q">${q}<span class="sub">${sub}</span></td>
         <td>${f.container.toUpperCase()}</td>
@@ -324,7 +347,12 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = 'Télécharger';
-      btn.addEventListener('click', () => startDownload(f));
+      if (f.merge && !canStreamToDisk()) {
+        btn.disabled = true;
+        btn.title = 'La fusion nécessite Chrome ou Edge (écriture directe sur le disque).';
+        tr.querySelector('.q .sub').textContent += ' · Chrome ou Edge requis';
+      }
+      btn.addEventListener('click', () => (f.merge ? startMergeDownload(f) : startDownload(f)));
       tr.querySelector('.act').appendChild(btn);
       formatsBody.appendChild(tr);
     }
@@ -334,6 +362,7 @@
   const CHUNK = 48 * 1024 * 1024;   // 48 Mo par morceau (chaque morceau = une requête courte)
   const PARALLEL = 4;               // morceaux téléchargés simultanément
   const MAX_RETRY = 6;
+  const MERGE_CHUNK = 32 * 1024 * 1024; // morceaux pour la fusion (2 flux en parallèle, préchargement inclus)
 
   function downloadUrl(f, extra = '') {
     const p = new URLSearchParams({ id: current.id, itag: f.itag, client: f.client, title: current.title });
@@ -460,6 +489,62 @@
         showError((failed || err).message);
       }
       $('p-cancel').onclick = () => progress.classList.remove('show');
+    } finally {
+      activeDownload = null;
+    }
+  }
+
+  /** Télécharge vidéo + audio en parallèle et écrit le MP4 fusionné directement sur le disque. */
+  async function startMergeDownload(entry) {
+    clearError();
+    if (activeDownload) { showError('Un téléchargement est déjà en cours. Annule-le d\'abord.'); return; }
+    const filename = `${(current.title || 'video').replace(/[\\/:*?"<>|]/g, ' ').trim().slice(0, 120)} - ${entry.quality}.mp4`;
+
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker({ suggestedName: filename, types: [{ description: 'Vidéo MP4', accept: { 'video/mp4': ['.mp4'] } }] });
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      showError(`Impossible d'ouvrir le sélecteur de fichier : ${err.message}`);
+      return;
+    }
+
+    const writable = await handle.createWritable();
+    const total = entry.size;
+    const controller = new AbortController();
+    const state = { received: 0, doneParts: 0, start: performance.now(), lastTick: performance.now(), lastBytes: 0, speed: 0 };
+    const parts = Math.ceil(entry.video.size / MERGE_CHUNK) + Math.ceil(entry.audio.size / MERGE_CHUNK);
+    activeDownload = { controller };
+
+    progress.classList.add('show');
+    $('p-title').textContent = `Fusion ${entry.quality} : ${filename}`;
+    $('p-cancel').textContent = 'Annuler';
+    $('p-cancel').onclick = () => controller.abort();
+    updateProgress(state, total, parts);
+    const ticker = setInterval(() => updateProgress(state, total, parts), 500);
+
+    const onBytes = (n) => { state.received += n; state.doneParts++; };
+    try {
+      await muxFmp4({
+        video: rangeChunks(downloadUrl(entry.video), entry.video.size, { chunkSize: MERGE_CHUNK, signal: controller.signal, onBytes }),
+        audio: rangeChunks(downloadUrl(entry.audio), entry.audio.size, { chunkSize: MERGE_CHUNK, signal: controller.signal, onBytes }),
+        write: (data) => writable.write(data),
+        signal: controller.signal,
+      });
+      await writable.close();
+      clearInterval(ticker);
+      updateProgress(state, total, parts, true);
+    } catch (err) {
+      clearInterval(ticker);
+      try { await writable.abort(); } catch {}
+      $('p-cancel').textContent = 'Fermer';
+      $('p-cancel').onclick = () => progress.classList.remove('show');
+      if (err.name === 'AbortError') {
+        $('p-title').textContent = 'Téléchargement annulé';
+      } else {
+        $('p-title').textContent = 'Fusion interrompue';
+        showError(err.message);
+      }
     } finally {
       activeDownload = null;
     }

@@ -34,7 +34,15 @@ console.log(`\n✔ fusion : ${result.fragments} fragments, ${result.bytesWritten
 if (Math.abs(result.bytesWritten - total) > 1_000_000) throw new Error('Taille de sortie incohérente');
 
 if (process.env.FFMPEG) {
-  const probe = execFileSync(process.env.FFMPEG, ['-hide_banner', '-i', out, '-f', 'null', '-'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).toString();
-  const info2 = execFileSync(process.env.FFMPEG, ['-hide_banner', '-i', out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).toString();
-  console.log(info2 || probe);
+  const run = (args) => {
+    try { return execFileSync(process.env.FFMPEG, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { return e.stderr?.toString() || e.message; } // ffmpeg -i sans sortie termine en erreur : normal
+  };
+  const description = run(['-hide_banner', '-i', out]);
+  const streams = description.split('\n').filter((l) => l.includes('Stream #') || l.includes('Duration') || l.includes('major_brand'));
+  console.log(streams.join('\n'));
+  if (!/Stream #0:0.*Video/.test(description) || !/Stream #0:1.*Audio/.test(description)) throw new Error('Le fichier fusionné ne contient pas deux pistes');
+  const errors = run(['-v', 'error', '-i', out, '-f', 'null', '-']).trim();
+  if (errors) throw new Error('Erreurs de décodage :\n' + errors);
+  console.log('✔ décodage complet sans erreur');
 }

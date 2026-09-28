@@ -18,6 +18,7 @@ const u32 = (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o +
 const u64 = (b, o) => u32(b, o) * 4294967296 + u32(b, o + 4);
 const setU32 = (b, o, v) => { b[o] = (v >>> 24) & 255; b[o + 1] = (v >>> 16) & 255; b[o + 2] = (v >>> 8) & 255; b[o + 3] = v & 255; };
 const boxType = (b, o) => textDecoder.decode(b.subarray(o + 4, o + 8));
+const ascii = (str) => Uint8Array.from(str, (c) => c.charCodeAt(0));
 
 function concat(parts) {
   let len = 0;
@@ -285,7 +286,9 @@ export async function muxFmp4({ video, audio, write, signal }) {
   let bytesWritten = 0;
   const out = async (data) => { await write(data); bytesWritten += data.byteLength; };
 
-  await out(vInit.ftyp || makeBox('ftyp', [new Uint8Array([0x69, 0x73, 0x6f, 0x6d, 0, 0, 2, 0, 0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x36, 0x6d, 0x70, 0x34, 0x31])]));
+  // ftyp standard (les flux YouTube portent la marque "dash", que certains
+  // lecteurs de bureau n'aiment pas) : isom / iso6 / avc1 / mp41.
+  await out(makeBox('ftyp', [ascii('isom'), new Uint8Array([0, 0, 2, 0]), ascii('isom'), ascii('iso6'), ascii('avc1'), ascii('mp41')]));
   await out(mergeMoov(vInit.moov, aInit.moov));
 
   const vState = { pending: vInit.pending };

@@ -21,9 +21,12 @@ ainsi qu'un identifiant nu. Les paramètres superflus (`si=`, `t=`, `list=`) son
   disque par morceaux de 48 Mo téléchargés 4 par 4 (rapide, sans limite de durée,
   reprise automatique). Sur les autres navigateurs, téléchargement en flux continu.
 
-Les qualités « Vidéo + son » sont les fichiers complets (360p, parfois 720p).
-Au-dessus, YouTube fournit vidéo et audio en pistes séparées, à assembler
-ensuite (VLC, ffmpeg).
+Les qualités « Vidéo + son » regroupent les fichiers complets fournis par
+YouTube (360p) et les qualités **assemblées dans le navigateur** (480p, 720p,
+1080p, 60 i/s compris) : `public/js/mux.js` fusionne la piste vidéo H.264 et la
+piste audio AAC au niveau des boîtes MP4 fragmentées, sans réencodage ni
+chargement en mémoire, en écrivant directement sur le disque (Chrome ou Edge).
+Les pistes VP9/AV1 (WebM, 1440p et 4K) restent proposées séparément.
 
 ## Anti-robot YouTube (important)
 
@@ -64,6 +67,7 @@ npm install
 npm run dev            # http://localhost:3000
 npm test               # tests hors ligne (extraction des identifiants)
 node test/smoke.js --online   # nécessite le serveur de dev lancé
+FFMPEG=/chemin/ffmpeg node test/mux-test.mjs   # fusion 720p + audio via l'API, vérifiée avec ffmpeg
 ```
 
 ## Déploiement Vercel

@@ -73,12 +73,12 @@ export default async function handler(req, res) {
 
   const upstreamHeaders = {};
   if (stream.userAgent) upstreamHeaders['User-Agent'] = stream.userAgent;
-  // Le paramètre d'URL "range" est celui que les clients officiels utilisent ;
-  // l'en-tête Range est aussi honoré par googlevideo. On envoie les deux.
+  // On transmet la plage via le paramètre d'URL "range", comme les clients
+  // officiels. Surtout pas en plus d'un en-tête Range : googlevideo applique
+  // alors l'en-tête à l'intérieur de la fenêtre définie par l'URL (416).
   let upstreamUrl = stream.url;
   if (range) {
     const endPart = range.end === null ? '' : range.end;
-    upstreamHeaders.Range = `bytes=${range.start}-${endPart}`;
     upstreamUrl += `&range=${range.start}-${endPart}`;
   } else if (size !== null) {
     upstreamUrl += `&range=0-${size - 1}`;

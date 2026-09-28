@@ -261,12 +261,18 @@
     try {
       const r = await fetch(`/api/info?url=${encodeURIComponent(url)}`);
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || `Le serveur a répondu ${r.status}.`);
+      if (!r.ok) {
+        const err = new Error(data.error || `Le serveur a répondu ${r.status}.`);
+        err.code = data.code;
+        throw err;
+      }
       current = data;
       render(data);
       history.replaceState(null, '', `?url=${encodeURIComponent(url)}`);
     } catch (err) {
-      showError(err.message);
+      showError(err.message + (err.code === 'LOGIN_REQUIRED'
+        ? '<br><small>Administrateur : la procédure (variable <code>YT_COOKIES</code>, cookies d\'un compte YouTube) est décrite dans le README du projet.</small>'
+        : ''));
     } finally {
       setBusy(false);
     }

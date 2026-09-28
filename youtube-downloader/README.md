@@ -25,22 +25,37 @@ Les qualités « Vidéo + son » sont les fichiers complets (360p, parfois 720p)
 Au-dessus, YouTube fournit vidéo et audio en pistes séparées, à assembler
 ensuite (VLC, ffmpeg).
 
-## Anti-robot YouTube
+## Anti-robot YouTube (important)
 
 Depuis une IP de datacenter, YouTube répond « Sign in to confirm you're not a
-bot ». Le serveur génère donc automatiquement un jeton « Proof of Origin »
-(BotGuard, via `bgutils-js` et un DOM simulé `jsdom`), lié au `visitorData` de
-la session, valable environ 12 h et mis en cache dans `/tmp`. La génération
-prend moins d'une seconde. En cas de blocage malgré tout, la session est
-régénérée une fois, puis l'erreur est remontée à l'utilisateur.
+bot » pour la plupart des vidéos. Le serveur applique déjà deux parades :
 
-## Variables d'environnement (optionnelles)
+1. génération automatique d'un jeton « Proof of Origin » (BotGuard, via
+   `bgutils-js` et un DOM simulé `jsdom`), lié au `visitorData`, mis en cache
+   6 h dans `/tmp` (moins d'une seconde à produire) ;
+2. chaîne de clients de repli (web mobile, iOS, Android, TV, web) et
+   régénération de la session en cas de refus.
 
-| Variable | Rôle |
-| --- | --- |
-| `YT_COOKIES` | Chaîne de cookies d'un compte YouTube connecté. À renseigner si YouTube répond « connexion requise » (détection anti-robot depuis les IP de datacenter). |
-| `YT_PO_TOKEN` | Jeton « Proof of Origin » fourni manuellement (désactive la génération automatique). |
-| `YT_VISITOR_DATA` | `visitorData` associé au jeton ci-dessus. |
+Cela suffit depuis certaines IP, mais **pas depuis les IP AWS de Vercel** : lors
+des tests, tous les clients répondaient « connexion requise » pour le lien de
+test (`/live/Jr_EcIG_gAM`), alors qu'une vidéo très populaire passait. La
+solution fiable est de donner au serveur une session YouTube connectée via la
+variable `YT_COOKIES`.
+
+### Configurer `YT_COOKIES` (une fois)
+
+1. Dans un navigateur, ouvre une **fenêtre de navigation privée**, connecte-toi à
+   youtube.com (de préférence avec un compte secondaire : YouTube peut
+   restreindre un compte utilisé pour du téléchargement massif).
+2. Exporte les cookies du site youtube.com avec une extension du type
+   « Get cookies.txt LOCALLY » (format Netscape) ou copie l'en-tête `Cookie`
+   d'une requête vers youtube.com dans les outils de développement.
+3. Ferme la fenêtre privée **sans te déconnecter** (une déconnexion invalide
+   les cookies).
+4. Sur Vercel : projet `telechargeur-youtube` → Settings → Environment
+   Variables → ajoute `YT_COOKIES` (type Sensitive, environnement Production)
+   et colle le contenu du fichier cookies.txt ou la chaîne `a=b; c=d`.
+5. Redéploie (Deployments → ⋯ → Redeploy). Les deux formats sont acceptés.
 
 ## Développement local
 

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Préparer YT_COOKIES</title>
+  <meta name="robots" content="noindex">
+  <style>
+    :root { --bg: #0f1115; --panel: #171a21; --panel-2: #1f232c; --border: #2a2f3a; --text: #f2f4f8; --muted: #9aa3b2; --accent: #ff0033; --ok: #2ecc71; --err: #ff5c5c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 16px 64px; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.45; }
+    main { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 1.6rem; margin: 0 0 6px; }
+    p { color: var(--muted); }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+    textarea { width: 100%; min-height: 160px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+    button { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 12px 18px; font-size: 1rem; font-weight: 700; cursor: pointer; margin-right: 8px; }
+    button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .stat { color: var(--muted); font-size: .9rem; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .err { color: var(--err); font-weight: 700; }
+    ol { color: var(--muted); padding-left: 20px; }
+    code { background: var(--panel-2); padding: 2px 6px; border-radius: 6px; }
+    a { color: #ff5c7a; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Préparer la variable <code>YT_COOKIES</code></h1>
+  <p>Cette page tourne entièrement dans ton navigateur : rien n'est envoyé au serveur. Elle réduit un export de cookies YouTube à l'essentiel pour tenir sous la limite de 64 Ko de Vercel.</p>
+
+  <section class="card">
+    <label for="in"><strong>1. Colle ici l'export de cookies</strong> (JSON d'une extension type Cookie-Editor, fichier cookies.txt, ou en-tête <code>Cookie</code>)</label>
+    <textarea id="in" placeholder='[{"name":"SID","value":"…"}, …]' spellcheck="false"></textarea>
+    <div class="row">
+      <button id="go" type="button">Convertir</button>
+      <button id="clear" type="button" class="secondary">Effacer</button>
+      <span class="stat" id="stat"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <label for="out"><strong>2. Copie le résultat</strong> dans Vercel → Settings → Environment Variables → <code>YT_COOKIES</code> (Production, Sensitive), puis redéploie.</label>
+    <textarea id="out" readonly placeholder="Le résultat apparaîtra ici."></textarea>
+    <div class="row">
+      <button id="copy" type="button" disabled>Copier</button>
+      <span class="stat" id="size"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <strong>Ce qui est conservé</strong>
+    <p>Uniquement les cookies de session Google et de contexte YouTube : <code>SID</code>, <code>HSID</code>, <code>SSID</code>, <code>APISID</code>, <code>SAPISID</code>, leurs variantes <code>__Secure-…</code>, <code>LOGIN_INFO</code>, <code>VISITOR_INFO1_LIVE</code>, <code>YSC</code>, <code>PREF</code>, <code>SOCS</code>. Les cookies <code>ST-…</code> (historique de navigation, souvent plus de 100 Ko) sont supprimés.</p>
+    <p><a href="/">← Retour au téléchargeur</a></p>
+  </section>
+</main>
+
+<script>
+(() => {
+  const KEEP = new Set([
+    'SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'SIDCC',
+    '__Secure-1PSID', '__Secure-3PSID', '__Secure-1PAPISID', '__Secure-3PAPISID',
+    '__Secure-1PSIDTS', '__Secure-3PSIDTS', '__Secure-1PSIDCC', '__Secure-3PSIDCC',
+    '__Secure-YNID', '__Secure-BUCKET', 'LOGIN_INFO', 'VISITOR_INFO1_LIVE',
+    'VISITOR_PRIVACY_METADATA', 'YSC', 'PREF', 'SOCS', 'CONSISTENCY', 'GPS',
+  ]);
+  const $ = (id) => document.getElementById(id);
+
+  function parse(text) {
+    text = text.trim();
+    const pairs = new Map();
+    if (!text) return pairs;
+    if (text.startsWith('[') || text.startsWith('{')) {
+      const parsed = JSON.parse(text);
+      const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.cookies) ? parsed.cookies : [];
+      for (const c of list) if (c && typeof c.name === 'string' && typeof c.value === 'string') pairs.set(c.name, c.value);
+      return pairs;
+    }
+    if (text.includes('\t')) {
+      for (const line of text.split(/\r?\n/)) {
+        if (!line || line.startsWith('#')) continue;
+        const cols = line.split('\t');
+        if (cols.length >= 7) pairs.set(cols[5], cols[6]);
+      }
+      return pairs;
+    }
+    for (const part of text.split(/;\s*/)) {
+      const i = part.indexOf('=');
+      if (i > 0) pairs.set(part.slice(0, i).trim(), part.slice(i + 1).trim());
+    }
+    return pairs;
+  }
+
+  $('go').addEventListener('click', () => {
+    const out = $('out'), stat = $('stat'), size = $('size');
+    try {
+      const all = parse($('in').value);
+      const kept = [...all].filter(([name]) => KEEP.has(name));
+      const missing = ['SAPISID', 'SID', 'HSID', 'SSID', 'APISID'].filter((n) => !all.has(n));
+      const result = kept.map(([n, v]) => `${n}=${v}`).join('; ');
+      out.value = result;
+      const bytes = new TextEncoder().encode(result).length;
+      size.textContent = result ? `${bytes.toLocaleString('fr-FR')} octets (limite Vercel : 65 535)` : '';
+      size.className = 'stat ' + (bytes > 60000 ? 'err' : bytes ? 'ok' : '');
+      stat.innerHTML = `${all.size} cookies lus, ${kept.length} conservés.` + (missing.length ? ` <span class="err">Manquants : ${missing.join(', ')} — la session n'est probablement pas connectée.</span>` : ' <span class="ok">Session complète.</span>');
+      $('copy').disabled = !result;
+    } catch (err) {
+      out.value = '';
+      stat.innerHTML = `<span class="err">Lecture impossible : ${err.message}</span>`;
+      $('copy').disabled = true;
+    }
+  });
+
+  $('copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('out').value); $('copy').textContent = 'Copié ✔'; setTimeout(() => ($('copy').textContent = 'Copier'), 1500); }
+    catch { $('out').select(); document.execCommand('copy'); }
+  });
+  $('clear').addEventListener('click', () => { $('in').value = ''; $('out').value = ''; $('stat').textContent = ''; $('size').textContent = ''; $('copy').disabled = true; });
+})();
+</script>
+</body>
+</html>

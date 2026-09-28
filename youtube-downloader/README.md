@@ -55,11 +55,14 @@ variable `YT_COOKIES`.
    d'une requête vers youtube.com dans les outils de développement.
 3. Ferme la fenêtre privée **sans te déconnecter** (une déconnexion invalide
    les cookies).
-4. Sur Vercel : projet `telechargeur-youtube` → Settings → Environment
+4. Vercel limite une variable à 64 Ko : passe l'export par la page
+   `/outil-cookies.html` du site (traitement 100 % local), qui ne garde que
+   les cookies utiles et retire les `ST-…`.
+5. Sur Vercel : projet `telechargeur-youtube` → Settings → Environment
    Variables → ajoute `YT_COOKIES` (type Sensitive, environnement Production)
    et colle, au choix : l'export JSON d'une extension type Cookie-Editor, le
    contenu d'un fichier cookies.txt, ou la chaîne `a=b; c=d`.
-5. Redéploie (Deployments → ⋯ → Redeploy). Les trois formats sont acceptés ;
+6. Redéploie (Deployments → ⋯ → Redeploy). Les trois formats sont acceptés ;
    les cookies transitoires `ST-…` sont ignorés automatiquement.
 
 ## Développement local

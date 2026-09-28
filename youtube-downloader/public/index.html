@@ -272,7 +272,7 @@ import { muxFmp4, rangeChunks } from './js/mux.js';
       history.replaceState(null, '', `?url=${encodeURIComponent(url)}`);
     } catch (err) {
       showError(err.message + (err.code === 'LOGIN_REQUIRED'
-        ? '<br><small>Administrateur : la procédure (variable <code>YT_COOKIES</code>, cookies d\'un compte YouTube) est décrite dans le README du projet.</small>'
+        ? '<br><small>Administrateur : renseigne la variable <code>YT_COOKIES</code> sur Vercel avec les cookies d\'un compte YouTube (<a href="/outil-cookies.html" style="color:#ff5c7a">outil de préparation</a>).</small>'
         : ''));
     } finally {
       setBusy(false);

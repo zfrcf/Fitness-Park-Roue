@@ -35,19 +35,36 @@ export function parseClientList(value) {
 }
 
 /**
- * Accepte YT_COOKIES sous forme d'en-tête ("a=b; c=d") ou de fichier
- * cookies.txt (format Netscape, tabulations) et renvoie un en-tête Cookie.
+ * Accepte YT_COOKIES sous trois formes et renvoie un en-tête Cookie :
+ *  - en-tête brut ("a=b; c=d") ;
+ *  - fichier cookies.txt (format Netscape, colonnes séparées par des tabulations) ;
+ *  - export JSON d'une extension type Cookie-Editor ([{ name, value, … }]).
+ * Les cookies transitoires "ST-…" (état de navigation) sont ignorés.
  */
 export function normalizeCookies(raw) {
   if (!raw) return undefined;
   const text = String(raw).trim();
   if (!text) return undefined;
+
+  if (text.startsWith('[') || text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text);
+      const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.cookies) ? parsed.cookies : [];
+      const pairs = list
+        .filter((c) => c && typeof c.name === 'string' && typeof c.value === 'string' && !c.name.startsWith('ST-'))
+        .map((c) => `${c.name}=${c.value}`);
+      return pairs.length ? pairs.join('; ') : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   if (!text.includes('\t')) return text;
   const pairs = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line || line.startsWith('#')) continue;
     const cols = line.split('\t');
-    if (cols.length >= 7) pairs.push(`${cols[5]}=${cols[6]}`);
+    if (cols.length >= 7 && !cols[5].startsWith('ST-')) pairs.push(`${cols[5]}=${cols[6]}`);
   }
   return pairs.length ? pairs.join('; ') : undefined;
 }

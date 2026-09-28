@@ -57,8 +57,10 @@ variable `YT_COOKIES`.
    les cookies).
 4. Sur Vercel : projet `telechargeur-youtube` → Settings → Environment
    Variables → ajoute `YT_COOKIES` (type Sensitive, environnement Production)
-   et colle le contenu du fichier cookies.txt ou la chaîne `a=b; c=d`.
-5. Redéploie (Deployments → ⋯ → Redeploy). Les deux formats sont acceptés.
+   et colle, au choix : l'export JSON d'une extension type Cookie-Editor, le
+   contenu d'un fichier cookies.txt, ou la chaîne `a=b; c=d`.
+5. Redéploie (Deployments → ⋯ → Redeploy). Les trois formats sont acceptés ;
+   les cookies transitoires `ST-…` sont ignorés automatiquement.
 
 ## Développement local
 

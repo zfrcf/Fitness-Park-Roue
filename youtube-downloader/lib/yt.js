@@ -21,6 +21,37 @@ Platform.shim.eval = (data, env) => {
 // garde en dernier recours avec TV.
 export const CLIENT_CHAIN = ['MWEB', 'IOS', 'ANDROID', 'TV', 'WEB'];
 
+/** Clients acceptés pour le paramètre de diagnostic `clients=`. */
+export const KNOWN_CLIENTS = [
+  'WEB', 'MWEB', 'IOS', 'ANDROID', 'ANDROID_VR', 'VISIONOS', 'ANDROID_MUSIC', 'ANDROID_CREATOR',
+  'TV', 'TV_SIMPLY', 'TV_EMBEDDED', 'WEB_EMBEDDED', 'WEB_CREATOR', 'MUSIC', 'KIDS',
+];
+
+/** Transforme "IOS,MWEB" en liste de clients valides (ou null si vide). */
+export function parseClientList(value) {
+  if (!value) return null;
+  const list = String(value).split(',').map((c) => c.trim().toUpperCase()).filter((c) => KNOWN_CLIENTS.includes(c));
+  return list.length ? list : null;
+}
+
+/**
+ * Accepte YT_COOKIES sous forme d'en-tête ("a=b; c=d") ou de fichier
+ * cookies.txt (format Netscape, tabulations) et renvoie un en-tête Cookie.
+ */
+export function normalizeCookies(raw) {
+  if (!raw) return undefined;
+  const text = String(raw).trim();
+  if (!text) return undefined;
+  if (!text.includes('\t')) return text;
+  const pairs = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line || line.startsWith('#')) continue;
+    const cols = line.split('\t');
+    if (cols.length >= 7) pairs.push(`${cols[5]}=${cols[6]}`);
+  }
+  return pairs.length ? pairs.join('; ') : undefined;
+}
+
 const CLIENT_USER_AGENTS = {
   IOS: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
   ANDROID: 'com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip',
@@ -87,7 +118,7 @@ export function getInnertube() {
         cache: new UniversalCache(true, '/tmp/youtubei-cache'),
         generate_session_locally: true,
         user_agent: USER_AGENT,
-        cookie: process.env.YT_COOKIES || undefined,
+        cookie: normalizeCookies(process.env.YT_COOKIES),
         po_token: po?.poToken,
         visitor_data: po?.visitorData,
         lang: 'fr',
@@ -308,8 +339,8 @@ export async function resolveStream(videoId, itag, preferredClient) {
 }
 
 /** Fabrique la charge utile JSON de /api/info. */
-export async function getVideoInfo(videoId) {
-  const { info, client } = await fetchPlayable(videoId);
+export async function getVideoInfo(videoId, clients = CLIENT_CHAIN) {
+  const { info, client } = await fetchPlayable(videoId, clients);
   const b = info.basic_info;
   const thumbs = (b.thumbnail || []).slice().sort((a, c) => (c.width || 0) - (a.width || 0));
   return {

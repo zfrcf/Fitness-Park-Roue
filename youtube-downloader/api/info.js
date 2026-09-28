@@ -1,7 +1,7 @@
 // GET /api/info?url=<lien YouTube>
 // Retourne le titre, la durée, la miniature et la liste des formats.
 
-import { extractVideoId, getVideoInfo, YoutubeError } from '../lib/yt.js';
+import { extractVideoId, getVideoInfo, parseClientList, CLIENT_CHAIN, YoutubeError } from '../lib/yt.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -27,7 +27,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const data = await getVideoInfo(videoId);
+    const clients = parseClientList(url.searchParams.get('clients')) || CLIENT_CHAIN;
+    const data = await getVideoInfo(videoId, clients);
     res.statusCode = 200;
     return res.end(JSON.stringify(data));
   } catch (err) {

@@ -4,6 +4,7 @@ import { memo, type ComponentProps, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import { cheminDepuisInfo } from "@/lib/fichiers/extraire";
 import { BlocCode } from "./bloc-code";
 
 function texteDe(noeud: ReactNode): string {
@@ -20,10 +21,12 @@ const composants: ComponentProps<typeof ReactMarkdown>["components"] = {
   pre({ children }) {
     // Le <code> enfant porte la classe language-xxx ajoutée par rehype-highlight.
     const enfant = Array.isArray(children) ? children[0] : children;
-    const props = (enfant as { props?: { className?: string; children?: ReactNode } } | null)?.props ?? {};
-    const langue = /language-([\w+-]+)/.exec(props.className ?? "")?.[1];
+    const props = (enfant as { props?: { className?: string; children?: ReactNode; node?: { data?: { meta?: string } } } } | null)?.props ?? {};
+    const meta = props.node?.data?.meta ?? "";
+    const langueClasse = /language-([\w+-]+)/.exec(props.className ?? "")?.[1];
+    const info = cheminDepuisInfo(`${langueClasse ?? ""} ${meta}`.trim());
     return (
-      <BlocCode langue={langue} code={texteDe(props.children).replace(/\n$/, "")}>
+      <BlocCode langue={info.langue ?? langueClasse} chemin={info.chemin} code={texteDe(props.children).replace(/\n$/, "")}>
         {props.children}
       </BlocCode>
     );

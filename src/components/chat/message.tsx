@@ -1,7 +1,14 @@
 "use client";
 
 import { AlertCircle, Bot, Brain, ChevronDown, Check, ExternalLink, FileText, Globe, Loader2, Pencil, RefreshCw, Search, Sparkles, X } from "lucide-react";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
+
+function texteDe(m: MessageUI): string {
+  return partiesVisibles(m)
+    .filter((p) => p.type === "text")
+    .map((p) => p.text)
+    .join("");
+}
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -10,6 +17,8 @@ import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { BoutonCopier } from "./bloc-code";
 import { Markdown } from "./markdown";
+import { extraireFichiers } from "@/lib/fichiers/extraire";
+import { PanneauFichiers } from "./panneau-fichiers";
 import { partiesVisibles } from "./utils";
 
 function MetaReponse({ meta }: { meta?: MetaMessage }) {
@@ -214,6 +223,7 @@ export interface PropsMessage {
 
 export const Message = memo(function Message({ message: m, dernier, enCours, occupe, onRegenerer, onEditer }: PropsMessage) {
   const [edition, setEdition] = useState(false);
+  const fichiers = useMemo(() => (m.role === "assistant" && !enCours ? extraireFichiers(texteDe(m)) : []), [m, enCours]);
   const [brouillon, setBrouillon] = useState("");
   const parts = partiesVisibles(m);
   const texte = parts
@@ -295,6 +305,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : null}
+        {fichiers.length > 0 && <PanneauFichiers fichiers={fichiers} />}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <MetaReponse meta={m.metadata} />
           {!enCours && (

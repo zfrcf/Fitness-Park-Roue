@@ -35,6 +35,12 @@ function MetaReponse({ meta }: { meta?: MetaMessage }) {
           <span>{meta.cout.toFixed(4)} $</span>
         </>
       ) : null}
+      {meta.neurons ? (
+        <>
+          {sep}
+          <span title="Cloudflare Workers AI : 10 000 neurons gratuits par jour">{meta.neurons} neurons</span>
+        </>
+      ) : null}
       {meta.dureeMs ? (
         <>
           {sep}

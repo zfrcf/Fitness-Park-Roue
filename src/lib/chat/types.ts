@@ -31,6 +31,8 @@ export interface MetaMessage {
   modele?: string;
   usage?: { entree: number; sortie: number; total: number };
   cout?: number;
+  /** Cloudflare : neurons consommés par la réponse. */
+  neurons?: number;
   bascules?: Bascule[];
   regenerations?: number;
   dureeMs?: number;

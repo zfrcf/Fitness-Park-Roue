@@ -214,6 +214,7 @@ interface Tentative {
   erreur?: ErreurClassee;
   usage?: { entree: number; sortie: number; total: number };
   cout?: number;
+  neurons?: number;
   enTetes?: Headers | Record<string, string>;
   resume: boolean;
   /** Taille estimée de la requête envoyée (tokens), pour recalibrer en cas d'erreur de contexte. */
@@ -268,6 +269,7 @@ async function tenter(
   let tamponFerme = !continuation; // en continuation, on garde ~300 caractères pour ôter le chevauchement
   let usage: Tentative["usage"];
   let cout: number | undefined;
+  let neurons: number | undefined;
   let erreur: ErreurClassee | undefined;
   let enTetes: Tentative["enTetes"];
 
@@ -333,9 +335,11 @@ async function tenter(
       try {
         const rep = await resultat.response;
         enTetes = rep.headers;
-        const meta = (await resultat.providerMetadata) as Record<string, { cout?: number }> | undefined;
+        const meta = (await resultat.providerMetadata) as Record<string, { cout?: number; neurons?: number }> | undefined;
         const c = meta?.[f.famille]?.cout;
         if (typeof c === "number") cout = c;
+        const n = meta?.[f.famille]?.neurons;
+        if (typeof n === "number") neurons = n;
       } catch {
         /* métadonnées facultatives */
       }
@@ -354,7 +358,7 @@ async function tenter(
     // Annulation par l'utilisateur : on s'arrête là.
   }
   if (erreur) log(`[chat] ${f.nom} : ${erreur.categorie} ${erreur.statut ?? ""} ${erreur.message}`);
-  return { texte: emis, erreur, usage, cout, enTetes, resume: ajuste.resume, tokensEstimes };
+  return { texte: emis, erreur, usage, cout, neurons, enTetes, resume: ajuste.resume, tokensEstimes };
 }
 
 /* ───────────── Exécution complète ───────────── */
@@ -369,6 +373,7 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
   let regenerations = 0;
   let usageTotal = { entree: 0, sortie: 0, total: 0 };
   let coutTotal = 0;
+  let neuronsTotal = 0;
   let aResume = false;
   let precedent: Fournisseur | undefined;
   let continuation = false;
@@ -420,6 +425,7 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
       usageTotal = { entree: usageTotal.entree + t.usage.entree, sortie: usageTotal.sortie + t.usage.sortie, total: usageTotal.total + t.usage.total };
     }
     if (t.cout) coutTotal += t.cout;
+    if (t.neurons) neuronsTotal += t.neurons;
     if (f.payant && t.usage && deps.enregistrerDepense) {
       await deps.enregistrerDepense(f, t.usage, t.cout).catch(() => {});
     }
@@ -430,6 +436,7 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
       writer.write({ type: "text-end", id: partId });
       meta.usage = usageTotal;
       if (coutTotal) meta.cout = coutTotal;
+      if (neuronsTotal) meta.neurons = Math.round(neuronsTotal * 10) / 10;
       meta.regenerations = regenerations;
       meta.resume = aResume || undefined;
       meta.dureeMs = maintenant - debut;

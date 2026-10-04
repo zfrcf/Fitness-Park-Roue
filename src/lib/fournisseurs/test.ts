@@ -15,7 +15,7 @@ export async function testerFournisseur(f: Fournisseur): Promise<ResultatTest> {
       model: creerModele(f, { raisonnement: "aucun" }),
       system: "Tu es un assistant. Réponds uniquement par le mot OK.",
       prompt: "Test de connexion.",
-      maxOutputTokens: 16,
+      maxOutputTokens: 80, // les modèles raisonneurs consomment quelques tokens avant de répondre
       temperature: 0,
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(45_000),

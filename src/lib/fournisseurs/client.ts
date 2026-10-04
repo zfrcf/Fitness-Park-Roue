@@ -31,8 +31,9 @@ export function adapterCorps(
     case "cloudflare":
       // Workers AI applique un max_tokens très bas par défaut : on l'envoie toujours.
       if (c.max_tokens === undefined) c.max_tokens = 4096;
-      if (raisonnement === "aucun") c.reasoning_effort = "none";
-      else c.reasoning_effort = EFFORT[raisonnement];
+      // Qwen 3.8 chez Cloudflare raisonne toujours : niveaux acceptés low / medium / xhigh (défaut).
+      // « Aucun » devient donc « low », le minimum ; le raisonnement arrive dans delta.reasoning.
+      c.reasoning_effort = raisonnement === "eleve" ? "xhigh" : raisonnement === "moyen" ? "medium" : "low";
       break;
     default:
       break;
@@ -45,6 +46,8 @@ export interface MetaFournisseur {
   cout?: number;
   amont?: string;
   tokensRaisonnement?: number;
+  /** Cloudflare : neurons consommés (10 000 gratuits par jour). */
+  neurons?: number;
 }
 
 function lireMeta(corps: unknown): Record<string, number | string> | undefined {
@@ -53,6 +56,7 @@ function lireMeta(corps: unknown): Record<string, number | string> | undefined {
   const usage = (o.usage ?? null) as Record<string, unknown> | null;
   const m: Record<string, number | string> = {};
   if (usage && typeof usage.cost === "number") m.cout = usage.cost;
+  if (usage && typeof usage.neurons === "number") m.neurons = usage.neurons;
   const details = usage?.completion_tokens_details as Record<string, unknown> | undefined;
   if (details && typeof details.reasoning_tokens === "number") m.tokensRaisonnement = details.reasoning_tokens;
   if (typeof o.provider === "string") m.amont = o.provider;
@@ -82,7 +86,10 @@ export function creerModele(f: Fournisseur, options: OptionsModele): LanguageMod
         return {
           processChunk(chunk) {
             const m = lireMeta(chunk);
-            if (m) acc = { ...acc, ...m };
+            if (!m) return;
+            // Les neurons sont donnés par chunk, puis en total sur le dernier : on garde le maximum.
+            const neurons = Math.max(Number(acc?.neurons ?? 0), Number(m.neurons ?? 0));
+            acc = { ...acc, ...m, ...(neurons ? { neurons } : {}) };
           },
           buildMetadata() {
             return acc ? { [f.famille]: acc } : undefined;

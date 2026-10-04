@@ -1,4 +1,5 @@
-import { createUIMessageStream, type UIMessageChunk } from "ai";
+import { createUIMessageStream, tool, type UIMessageChunk } from "ai";
+import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getKV, type KV } from "@/lib/kv";
 import { creerModele } from "@/lib/fournisseurs/client";
@@ -44,12 +45,18 @@ interface Sortie {
   regenerations: number;
 }
 
-async function executer(liste: Fournisseur[], opts: Partial<DepsOrchestrateur> = {}, question = "Bonjour", conversationId = "conv-1"): Promise<Sortie> {
+const outilRecherche = tool({
+  description: "Recherche web",
+  inputSchema: z.object({ requete: z.string() }),
+  execute: async ({ requete }) => ({ requete, moteur: "faux", resultats: [{ titre: "Java Edition 1.21.11", url: "https://minecraft.wiki/w/Java_Edition_1.21.11", extrait: "Sortie en 2025" }] }),
+});
+
+async function executer(liste: Fournisseur[], opts: Partial<DepsOrchestrateur> = {}, question = "Bonjour", conversationId = "conv-1", outils?: Record<string, typeof outilRecherche>): Promise<Sortie> {
   const deps: DepsOrchestrateur = { fournisseurs: liste, kv, creerModele, delaiInactiviteMs: 400, ...opts };
   const chunks: UIMessageChunk[] = [];
   const flux = createUIMessageStream<MessageUI>({
     execute: async ({ writer }) => {
-      await executerChat(deps, { writer, messages: [{ role: "user", content: question }], reglages: REGLAGES_DEFAUT, conversationId });
+      await executerChat(deps, { writer, messages: [{ role: "user", content: question }], reglages: REGLAGES_DEFAUT, conversationId, outils });
     },
     onError: (e) => String(e),
   });
@@ -195,6 +202,25 @@ describe("rotation des fournisseurs", () => {
     );
     expect(r2.meta.fournisseur).toBe("P");
     expect(depenses).toEqual([{ id: "p", usage: { entree: 30, sortie: 7, total: 37 }, cout: 0.001 }]);
+  });
+
+  it("laisse le modèle appeler l'outil de recherche et affiche les sources", async () => {
+    const r = await executer([fournisseur("A", "outil")], {}, "Minecraft 1.21.11 existe ?", "conv-o", { recherche_web: outilRecherche });
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("D'après la recherche, la 1.21.11 existe.");
+    const recherches = r.chunks.filter((c) => c.type === "data-recherche").map((c) => (c as { data: { etat: string; requete: string; resultats?: unknown[] } }).data);
+    expect(recherches[0]).toMatchObject({ etat: "en-cours", requete: "minecraft 1.21.11" });
+    expect(recherches.at(-1)).toMatchObject({ etat: "ok", requete: "minecraft 1.21.11" });
+    expect(recherches.at(-1)?.resultats).toHaveLength(1);
+    expect(r.meta.usage?.total).toBe(40 + 69);
+  });
+
+  it("retente sans outils si le fournisseur les refuse", async () => {
+    const r = await executer([fournisseur("R", "outil-refuse")], {}, "Bonjour", "conv-or", { recherche_web: outilRecherche });
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse sans outil.");
+    expect(r.bascules).toHaveLength(0);
+    expect(serveur.appels.filter((a) => a.scenario === "outil-refuse")).toHaveLength(2);
   });
 
   it("résume les anciens messages quand le contexte du suivant est plus court", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Bot, Brain, ChevronDown, Check, ExternalLink, FileText, Globe, Loader2, Pencil, RefreshCw, Sparkles, X } from "lucide-react";
+import { AlertCircle, Bot, Brain, ChevronDown, Check, ExternalLink, FileText, Globe, Loader2, Pencil, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import { memo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -135,6 +135,54 @@ function PastillesPages({ pages }: { pages: PageLue[] }) {
   );
 }
 
+type Recherche = Extract<MessageUI["parts"][number], { type: "data-recherche" }>["data"];
+
+function Recherches({ liste }: { liste: Recherche[] }) {
+  const [ouvert, setOuvert] = useState<string | null>(null);
+  if (!liste.length) return null;
+  return (
+    <ul className="flex flex-col gap-1" aria-label="Recherches web">
+      {liste.map((r, i) => {
+        const cle = `${i}-${r.requete}`;
+        const estOuvert = ouvert === cle;
+        return (
+          <li key={cle} className="rounded-lg border bg-muted/30 text-sm">
+            <button
+              type="button"
+              onClick={() => setOuvert(estOuvert ? null : cle)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground"
+              aria-expanded={estOuvert}
+              disabled={r.etat === "en-cours"}
+            >
+              {r.etat === "en-cours" ? <Loader2 className="size-3.5 animate-spin" /> : r.etat === "erreur" ? <AlertCircle className="size-3.5 text-destructive" /> : <Search className="size-3.5" />}
+              <span className="truncate">
+                {r.etat === "en-cours" ? "Recherche web en cours : " : r.etat === "erreur" ? "Recherche web impossible : " : "Recherche web : "}
+                <span className="text-foreground">{r.requete}</span>
+                {r.etat === "ok" && r.resultats ? ` · ${r.resultats.length} résultat${r.resultats.length > 1 ? "s" : ""}${r.moteur ? ` (${r.moteur})` : ""}` : ""}
+              </span>
+              {r.etat !== "en-cours" && <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform", estOuvert && "rotate-180")} />}
+            </button>
+            {estOuvert && r.etat === "erreur" && <p className="border-t px-3 py-2 text-xs text-destructive">{r.erreur}</p>}
+            {estOuvert && r.etat === "ok" && (
+              <ol className="flex flex-col gap-1.5 border-t px-3 py-2">
+                {(r.resultats ?? []).map((x, j) => (
+                  <li key={x.url} className="text-xs">
+                    <a href={x.url} target="_blank" rel="noopener noreferrer" className="font-medium underline decoration-dotted underline-offset-2">
+                      {j + 1}. {x.titre}
+                    </a>
+                    <span className="block truncate text-muted-foreground">{x.url}</span>
+                    {x.extrait && <span className="block text-muted-foreground">{x.extrait}</span>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function Raisonnement({ texte, enCours }: { texte: string; enCours: boolean }) {
   const [ouvert, setOuvert] = useState(false);
   if (!texte.trim()) return null;
@@ -177,6 +225,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
     .map((p) => p.text)
     .join("");
   const pages = m.parts.filter((p) => p.type === "data-page-lue").map((p) => p.data);
+  const recherches = m.parts.filter((p) => p.type === "data-recherche").map((p) => p.data);
   const estUtilisateur = m.role === "user";
 
   if (estUtilisateur) {
@@ -236,6 +285,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
         <Bot className="size-4" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <Recherches liste={recherches} />
         <PastillesPages pages={pages} />
         <Raisonnement texte={raisonnement} enCours={enCours && !texte} />
         {texte ? (

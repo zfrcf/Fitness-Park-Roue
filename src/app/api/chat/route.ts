@@ -1,4 +1,6 @@
-import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse } from "ai";
+import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, tool } from "ai";
+import { z } from "zod";
+import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { executerChat, genererAvecRotation } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
@@ -32,6 +34,17 @@ export async function POST(req: Request) {
   } catch {
     reglages = normaliserReglages(corps.reglages);
   }
+  // Le modèle ne connaît pas la date : on la lui donne, avec la consigne sur la recherche web.
+  const dateDuJour = new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeZone: process.env.TZ || "Europe/Paris" }).format(new Date());
+  reglages = {
+    ...reglages,
+    systeme:
+      `${reglages.systeme}\n\nNous sommes le ${dateDuJour}. Tes connaissances s'arrêtent avant cette date : ` +
+      "pour tout ce qui est récent (versions de logiciels ou de jeux, actualités, prix, événements, personnes), " +
+      (reglages.rechercheAuto
+        ? "utilise l'outil recherche_web avant d'affirmer qu'une chose n'existe pas, puis cite tes sources en liens Markdown."
+        : "précise que tu n'as pas pu vérifier et invite l'utilisateur à activer la recherche web (bouton globe)."),
+  };
 
   const liste = fournisseurs();
   if (liste.length === 0) {
@@ -67,6 +80,8 @@ export async function POST(req: Request) {
     }
   }
 
+  const rechercheForcee = corps.rechercheWeb === true && texteDernier.trim().length > 0;
+
   let fournisseurUtilise: string | undefined;
   const deps = {
     fournisseurs: liste,
@@ -101,8 +116,44 @@ export async function POST(req: Request) {
           dernierUI.parts[0] = { type: "text", text: dernierUI.parts[0].text + blocPagesPourModele(pages) };
         }
       }
+      // 2. Recherche web forcée (bouton globe) : résultats injectés dans le dernier message.
+      if (rechercheForcee) {
+        const idPart = `recherche-${Date.now().toString(36)}`;
+        writer.write({ type: "data-recherche", id: idPart, data: { requete: texteDernier.slice(0, 300), etat: "en-cours" } });
+        try {
+          const r = await rechercherWeb(texteDernier, { kv: deps.kv, log: (m) => console.warn(m) });
+          writer.write({ type: "data-recherche", id: idPart, data: { requete: r.requete, etat: "ok", moteur: r.moteur, resultats: r.resultats.map(({ titre, url, extrait }) => ({ titre, url, extrait })) } });
+          const dernierUI = messagesUI.at(-1);
+          if (dernierUI && dernierUI.parts[0]?.type === "text") {
+            dernierUI.parts[0] = { type: "text", text: dernierUI.parts[0].text + "\n\n" + blocRecherchePourModele(r) };
+          }
+        } catch (e) {
+          writer.write({ type: "data-recherche", id: idPart, data: { requete: texteDernier.slice(0, 300), etat: "erreur", erreur: e instanceof Error ? e.message : "échec" } });
+        }
+      }
+      // 3. Outil de recherche à la disposition du modèle (sauf si désactivé ou recherche déjà forcée).
+      const outils =
+        reglages.rechercheAuto && !rechercheForcee
+          ? {
+              recherche_web: tool({
+                description:
+                  "Recherche sur le web (DuckDuckGo) et renvoie des résultats avec titres, URL, extraits et le contenu des premières pages. " +
+                  "À utiliser pour les informations récentes ou que tu ne connais pas avec certitude : versions, actualités, prix, événements, faits vérifiables. " +
+                  "Une seule recherche bien formulée suffit en général (mots-clés précis, numéro de version, nom exact).",
+                inputSchema: z.object({ requete: z.string().min(2).max(300).describe("Requête de recherche courte et précise, en français ou en anglais") }),
+                execute: async ({ requete }) => {
+                  try {
+                    const r = await rechercherWeb(requete, { kv: deps.kv, log: (m) => console.warn(m) });
+                    return { requete: r.requete, moteur: r.moteur, resultats: r.resultats, consigne: "Cite tes sources en liens Markdown [titre](url)." };
+                  } catch (e) {
+                    return { requete, erreur: e instanceof Error ? e.message : "échec de la recherche" };
+                  }
+                },
+              }),
+            }
+          : undefined;
       const messages = await convertToModelMessages(messagesUI);
-      const r = await executerChat(deps, { writer, messages, reglages, conversationId, signal: req.signal });
+      const r = await executerChat(deps, { writer, messages, reglages, conversationId, signal: req.signal, outils });
       fournisseurUtilise = r.meta.fournisseurId;
     },
     onError: (e) => (e instanceof Error ? e.message : String(e)),

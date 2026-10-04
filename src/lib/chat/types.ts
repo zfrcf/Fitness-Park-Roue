@@ -6,6 +6,8 @@ export interface Reglages {
   temperature: number;
   maxTokens: number;
   raisonnement: NiveauRaisonnement;
+  /** Le modèle peut déclencher lui-même une recherche web (outil). */
+  rechercheAuto: boolean;
 }
 
 export const REGLAGES_DEFAUT: Reglages = {
@@ -14,6 +16,7 @@ export const REGLAGES_DEFAUT: Reglages = {
   temperature: 0.7,
   maxTokens: 4096,
   raisonnement: "aucun",
+  rechercheAuto: true,
 };
 
 export interface Bascule {
@@ -48,6 +51,13 @@ export type DonneesChat = {
   regeneration: { raison: string };
   info: { texte: string };
   "tous-epuises": { message: string; reessaiA?: number; fournisseur?: string };
+  recherche: {
+    requete: string;
+    etat: "en-cours" | "ok" | "erreur";
+    moteur?: string;
+    resultats?: Array<{ titre: string; url: string; extrait: string }>;
+    erreur?: string;
+  };
   "page-lue": {
     url: string;
     titre: string;
@@ -67,4 +77,6 @@ export interface CorpsRequeteChat {
   messages: MessageUI[];
   conversationId: string;
   reglages?: Partial<Reglages>;
+  /** Recherche web forcée sur le dernier message (bouton globe). */
+  rechercheWeb?: boolean;
 }

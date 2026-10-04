@@ -18,7 +18,9 @@ export type Scenario =
   | "muet" // ne répond jamais (chien de garde)
   | "contexte" // 400 contexte trop long sauf si le prompt est court
   | "413-itpm" // Groq : requête trop grande pour la fenêtre de tokens par minute, sauf si le prompt est court
-  | "cf-3036"; // Cloudflare quota journalier
+  | "cf-3036" // Cloudflare quota journalier
+  | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
+  | "outil-refuse"; // 400 si des outils sont envoyés, sinon réponse normale
 
 export interface Appel {
   scenario: string;
@@ -133,6 +135,30 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
         sse();
         res.write(chunk(id, "Réponse courte."));
         res.end(finChunk(id, 50, 3));
+        return;
+      }
+      case "outil-refuse": {
+        if (corps.tools) return json(400, { error: { message: "This model does not support tools / function calling", type: "invalid_request_error" } });
+        sse();
+        res.write(chunk(id, "Réponse sans outil."));
+        res.end(finChunk(id, 20, 4));
+        return;
+      }
+      case "outil": {
+        const msgs = corps.messages as Array<{ role: string; content?: unknown }>;
+        const resultatOutil = msgs.find((m) => m.role === "tool");
+        sse();
+        if (!resultatOutil) {
+          // Premier tour : appel d'outil en flux (format OpenAI).
+          res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "recherche_web", arguments: "" } }] }, finish_reason: null }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ requete: "minecraft 1.21.11" }) } }] }, finish_reason: null }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 } })}\n\n`);
+          res.end("data: [DONE]\n\n");
+          return;
+        }
+        const contenu = String(resultatOutil.content);
+        res.write(chunk(id, contenu.includes("1.21.11") ? "D'après la recherche, la 1.21.11 existe." : "Recherche sans résultat."));
+        res.end(finChunk(id, 60, 9));
         return;
       }
       case "muet":

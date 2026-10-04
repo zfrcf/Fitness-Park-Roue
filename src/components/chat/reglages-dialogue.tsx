@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { REGLAGES_DEFAUT, type Reglages } from "@/lib/chat/types";
@@ -37,6 +38,7 @@ const RACCOURCIS: Array<[string, string]> = [
   ["⌘/Ctrl + B", "Replier la barre latérale"],
   ["⌘/Ctrl + ⇧ + O", "Nouvelle conversation"],
   ["⌘/Ctrl + ,", "Réglages"],
+  ["Bouton globe", "Forcer une recherche web"],
 ];
 
 export function ReglagesDialogue() {
@@ -148,6 +150,15 @@ export function ReglagesDialogue() {
                 ))}
               </div>
               <p className="text-xs text-muted-foreground">{NIVEAUX.find((n) => n.valeur === brouillon.raisonnement)?.aide}</p>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="recherche-auto">Recherche web automatique</Label>
+                <p className="text-xs text-muted-foreground">
+                  Le modèle peut lancer lui-même une recherche (DuckDuckGo) pour les informations récentes. Le bouton globe de la saisie force une recherche quoi qu&apos;il arrive.
+                </p>
+              </div>
+              <Switch id="recherche-auto" checked={brouillon.rechercheAuto} onCheckedChange={(v) => setBrouillon({ ...brouillon, rechercheAuto: v })} />
             </div>
             <div className="flex flex-col gap-2">
               <Label>Raccourcis clavier</Label>

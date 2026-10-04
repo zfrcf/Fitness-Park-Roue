@@ -31,7 +31,10 @@ suivant, sans action de votre part.
 - **Markdown** complet (tableaux, listes, liens) et **blocs de code colorés** avec bouton copier.
 - **Historique** en Postgres : renommer, supprimer, rechercher (titres et contenu), exporter
   une conversation (Markdown ou JSON) ou tout l'historique (JSON).
-- **Réglages** persistants : prompt système, température, longueur maximale, raisonnement.
+- **Réglages** persistants : prompt système, température, longueur maximale, raisonnement,
+  recherche web automatique.
+- **Recherche web** : outil que le modèle déclenche lui-même, ou bouton globe pour forcer une
+  recherche ; sources citées et cliquables.
 - **Rotation automatique** des fournisseurs (429, 402, 401, 5xx, délai dépassé, coupure) avec
   reprise exacte en plein flux, résumé automatique de l'historique si le contexte du suivant
   est plus court, mémoire des épuisements et de l'heure de réessai.
@@ -85,7 +88,8 @@ Le fichier `.env.example` est commenté ligne par ligne. Résumé :
 | `PAID_MONTHLY_CAP` | non | plafond mensuel en USD pour les fournisseurs payants (`0` = jamais) |
 | `DATABASE_URL` | en production | Postgres (injectée par l'intégration Neon) |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | recommandé en production | Redis (injectées par l'intégration Upstash) |
-| `JINA_API_KEY` | non | clé Jina Reader (sans clé : 20 lectures/min ; avec : 500/min) |
+| `JINA_API_KEY` | non | clé Jina Reader (sans clé : 20 lectures/min ; avec : 500/min) et Jina Search |
+| `BRAVE_API_KEY` / `TAVILY_API_KEY` | non | moteurs de recherche de secours si DuckDuckGo est bloqué |
 | `APP_URL` | non | URL publique, envoyée à OpenRouter dans `HTTP-Referer` |
 
 Les clés API ne vont **que** dans `.env.local` (ignoré par git) et dans les variables
@@ -207,6 +211,28 @@ CLI Vercel.
 - **Tout épuisé** : message clair avec le prochain fournisseur disponible et son heure de réessai.
 
 Les mêmes réglages (prompt système, température, longueur, raisonnement) sont envoyés à tous.
+
+## Recherche web
+
+Le modèle ne connaît ni la date du jour ni ce qui est sorti après son entraînement. L'application
+lui donne la date dans le prompt système et lui offre deux façons de chercher sur le web :
+
+- **Automatique** : le modèle dispose d'un outil `recherche_web` qu'il appelle lui-même quand la
+  question porte sur quelque chose de récent ou d'incertain (deux recherches par réponse au plus).
+  Désactivable dans les réglages. Un fournisseur qui refuse les outils est détecté et retenté sans.
+- **Forcée** : le bouton globe de la zone de saisie cherche le message tel quel avant la réponse.
+
+Chaque recherche apparaît au-dessus de la réponse (requête, moteur, résultats cliquables) et le
+modèle doit citer ses sources en liens Markdown.
+
+Moteurs, en cascade : **DuckDuckGo** (page HTML, sans clé, parfois bloqué par un défi anti-robot),
+puis **Brave** (`BRAVE_API_KEY`, 2 000 requêtes/mois gratuites), **Tavily** (`TAVILY_API_KEY`,
+1 000/mois), **Jina Search** (`JINA_API_KEY`), et enfin **Wikipédia** (sans clé, sujets
+encyclopédiques seulement). Les deux premiers résultats sont lus et réduits (sans appel au modèle)
+pour fournir du contenu, pas seulement des extraits. Les recherches sont mises en cache une heure.
+
+Coût en contexte : environ 2 000 tokens par recherche. Chez Groq, dont la limite est de 7 000 tokens
+d'entrée par minute, une réponse avec recherche bascule souvent vers Cloudflare : c'est normal.
 
 ## Lecture des liens
 

@@ -8,7 +8,7 @@
  * - mémorise en KV les fournisseurs épuisés avec leur heure de réessai ;
  * - résume les anciens messages quand le contexte du suivant est plus court.
  */
-import { generateText, streamText, type LanguageModel, type ModelMessage, type UIMessageStreamWriter } from "ai";
+import { generateText, stepCountIs, streamText, type LanguageModel, type ModelMessage, type ToolSet, type UIMessageStreamWriter } from "ai";
 import type { KV } from "@/lib/kv";
 import { lireQuota } from "@/lib/fournisseurs/entetes";
 import { classerErreur, type ErreurClassee } from "@/lib/fournisseurs/erreurs";
@@ -37,6 +37,8 @@ export interface ParamsExecution {
   reglages: Reglages;
   conversationId: string;
   signal?: AbortSignal;
+  /** Outils proposés au modèle (recherche web). Retirés automatiquement si le fournisseur les refuse. */
+  outils?: ToolSet;
 }
 
 export interface ResultatExecution {
@@ -52,6 +54,13 @@ const PREFIXE_CONV = "conv:fournisseur:";
 const TTL_CONV = 30 * 24 * 3600;
 const PREFIXE_RESUME = "conv:resume:";
 const TTL_RESUME = 30 * 24 * 3600;
+/** Fournisseurs ayant refusé les outils (400) : on n'insiste pas pendant une heure. */
+const sansOutils = new Map<string, number>();
+export function fournisseurSansOutils(id: string, maintenant = Date.now()): boolean {
+  const jusqua = sansOutils.get(id);
+  return jusqua !== undefined && jusqua > maintenant;
+}
+const RE_OUTILS_REFUSES = /tool|function[_ ]call/i;
 
 export const INSTRUCTION_CONTINUATION =
   "Ta réponse précédente a été interrompue par une coupure technique. Reprends EXACTEMENT là où elle s'est arrêtée, " +
@@ -228,6 +237,7 @@ async function tenter(
   partId: string,
   deja: string,
   continuation: boolean,
+  outils?: ToolSet,
 ): Promise<Tentative> {
   const maintenant = deps.maintenant?.() ?? Date.now();
   const log = deps.log ?? (() => {});
@@ -286,6 +296,7 @@ async function tenter(
 
   try {
     armer();
+    const avecOutils = outils && Object.keys(outils).length > 0 && !continuation;
     const resultat = streamText({
       model: deps.creerModele(f, { raisonnement: p.reglages.raisonnement }),
       system: ajuste.systeme,
@@ -294,6 +305,7 @@ async function tenter(
       maxOutputTokens: p.reglages.maxTokens,
       maxRetries: 0,
       abortSignal: controleur.signal,
+      ...(avecOutils ? { tools: outils, stopWhen: stepCountIs(3) } : {}), // au plus deux recherches par réponse
       onError: () => {}, // les erreurs arrivent aussi dans le flux
     });
 
@@ -315,6 +327,22 @@ async function tenter(
           p.writer.write({ type: "reasoning-end", id: raisonnementId });
           raisonnementId = undefined;
         }
+      } else if (part.type === "tool-call") {
+        // Recherche web demandée par le modèle : pastille « en cours ».
+        vider();
+        const entree = part.input as { requete?: string } | undefined;
+        p.writer.write({ type: "data-recherche", id: part.toolCallId, data: { requete: entree?.requete ?? "", etat: "en-cours" } });
+      } else if (part.type === "tool-result") {
+        const sortie = part.output as { requete?: string; moteur?: string; resultats?: Array<{ titre: string; url: string; extrait: string }>; erreur?: string } | undefined;
+        p.writer.write({
+          type: "data-recherche",
+          id: part.toolCallId,
+          data: sortie?.erreur
+            ? { requete: sortie.requete ?? "", etat: "erreur", erreur: sortie.erreur }
+            : { requete: sortie?.requete ?? "", etat: "ok", moteur: sortie?.moteur, resultats: sortie?.resultats ?? [] },
+        });
+      } else if (part.type === "tool-error") {
+        p.writer.write({ type: "data-recherche", id: part.toolCallId, data: { requete: "", etat: "erreur", erreur: String(part.error).slice(0, 200) } });
       } else if (part.type === "error") {
         erreur = classerErreur(part.error, deps.maintenant?.() ?? Date.now());
         break;
@@ -417,7 +445,8 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
     meta.modele = f.modele;
     writer.write({ type: "message-metadata", messageMetadata: { fournisseur: f.nom, fournisseurId: f.id, modele: f.modele } });
 
-    const t = await tenter(deps, f, p, partId, texte, continuation);
+    const outilsPour = p.outils && !fournisseurSansOutils(f.id) ? p.outils : undefined;
+    const t = await tenter(deps, f, p, partId, texte, continuation, outilsPour);
     const maintenant = deps.maintenant?.() ?? Date.now();
     texte += t.texte;
     aResume ||= t.resume;
@@ -445,6 +474,13 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
     }
 
     const e = t.erreur;
+    if (outilsPour && e.categorie === "requete" && e.statut === 400 && RE_OUTILS_REFUSES.test(e.message)) {
+      // Ce fournisseur ne prend pas les outils : on le note et on retente sans, immédiatement.
+      sansOutils.set(f.id, maintenant + 3_600_000);
+      (deps.log ?? (() => {}))(`[chat] ${f.nom} refuse les outils, nouvel essai sans recherche web`);
+      tentes.delete(f.id);
+      continue;
+    }
     if (e.categorie === "abandon" && p.signal?.aborted) {
       writer.write({ type: "text-end", id: partId });
       meta.usage = usageTotal;

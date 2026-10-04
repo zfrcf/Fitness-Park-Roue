@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Globe, Square } from "lucide-react";
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,8 @@ export function Saisie({
   onArreter,
   occupe,
   indice,
+  rechercheWeb,
+  onRechercheWeb,
 }: {
   valeur: string;
   onChange: (v: string) => void;
@@ -20,6 +22,8 @@ export function Saisie({
   onArreter: () => void;
   occupe: boolean;
   indice?: React.ReactNode;
+  rechercheWeb: boolean;
+  onRechercheWeb: (v: boolean) => void;
 }) {
   const zone = useRef<HTMLTextAreaElement>(null);
 
@@ -62,7 +66,25 @@ export function Saisie({
   return (
     <form onSubmit={soumettre} className="border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-1.5">
-        <div className="flex items-end gap-2 rounded-2xl border bg-background p-1.5 pl-3 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+        <div className="flex items-end gap-2 rounded-2xl border bg-background p-1.5 pl-1.5 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant={rechercheWeb ? "secondary" : "ghost"}
+                  size="icon"
+                  aria-pressed={rechercheWeb}
+                  aria-label={rechercheWeb ? "Recherche web forcée : activée" : "Forcer une recherche web pour ce message"}
+                  onClick={() => onRechercheWeb(!rechercheWeb)}
+                  className={rechercheWeb ? "text-primary" : "text-muted-foreground"}
+                />
+              }
+            >
+              <Globe className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>{rechercheWeb ? "Recherche web forcée (cliquez pour désactiver)" : "Forcer une recherche web sur ce message"}</TooltipContent>
+          </Tooltip>
           <Textarea
             ref={zone}
             value={valeur}
@@ -91,7 +113,7 @@ export function Saisie({
           )}
         </div>
         <p className="px-1 text-center text-[11px] text-muted-foreground">
-          {indice ?? "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · / pour écrire"}
+          {indice ?? (rechercheWeb ? "Recherche web forcée : le message est cherché sur le web avant la réponse" : "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · / pour écrire")}
         </p>
       </div>
     </form>

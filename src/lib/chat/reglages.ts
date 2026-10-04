@@ -16,5 +16,6 @@ export function normaliserReglages(partiel: Partial<Reglages> | undefined): Regl
   if (typeof partiel.raisonnement === "string" && NIVEAUX.has(partiel.raisonnement)) {
     r.raisonnement = partiel.raisonnement;
   }
+  if (typeof partiel.rechercheAuto === "boolean") r.rechercheAuto = partiel.rechercheAuto;
   return r;
 }

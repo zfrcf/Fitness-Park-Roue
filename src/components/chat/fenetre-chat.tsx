@@ -25,6 +25,7 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
   const urlRemplacee = useRef(messagesInitiaux.length > 0);
   const zoneDefilement = useRef<HTMLDivElement>(null);
   const [collé, setCollé] = useState(true); // suit-on le bas de la conversation ?
+  const [rechercheWeb, setRechercheWeb] = useState(false);
 
   const { messages, sendMessage, status, stop, error, regenerate, setMessages, clearError } = useChat<MessageUI>({
     id: conversationId,
@@ -70,7 +71,7 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
     const t = texte.trim();
     if (!t || occupe) return;
     clearError();
-    void sendMessage({ text: t });
+    void sendMessage({ text: t }, { body: { rechercheWeb } });
     setSaisie("");
     setCollé(true);
     premiereFois();
@@ -80,7 +81,7 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
     if (occupe) return;
     clearError();
     setMessages((prev) => prev.slice(0, index));
-    void sendMessage({ text: texte });
+    void sendMessage({ text: texte }, { body: { rechercheWeb } });
     setCollé(true);
   }
 
@@ -88,7 +89,7 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
     if (occupe) return;
     clearError();
     setCollé(true);
-    void regenerate(messageId ? { messageId } : undefined);
+    void regenerate({ ...(messageId ? { messageId } : {}), body: { rechercheWeb } });
   }
 
   const dernierIndex = messages.length - 1;
@@ -165,7 +166,15 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
           <ArrowDown className="size-4" />
         </Button>
       )}
-      <Saisie valeur={saisie} onChange={setSaisie} onEnvoyer={() => envoyer()} onArreter={() => stop()} occupe={occupe} />
+      <Saisie
+        valeur={saisie}
+        onChange={setSaisie}
+        onEnvoyer={() => envoyer()}
+        onArreter={() => stop()}
+        occupe={occupe}
+        rechercheWeb={rechercheWeb}
+        onRechercheWeb={setRechercheWeb}
+      />
     </div>
   );
 }

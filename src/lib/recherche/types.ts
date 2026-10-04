@@ -6,7 +6,7 @@ export interface ResultatRecherche {
   contenu?: string;
 }
 
-export type MoteurRecherche = "duckduckgo" | "brave" | "tavily" | "jina" | "wikipedia";
+export type MoteurRecherche = "bing" | "duckduckgo" | "brave" | "tavily" | "jina" | "wikipedia";
 
 export interface Recherche {
   requete: string;

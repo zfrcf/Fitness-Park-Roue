@@ -225,10 +225,11 @@ lui donne la date dans le prompt système et lui offre deux façons de chercher 
 Chaque recherche apparaît au-dessus de la réponse (requête, moteur, résultats cliquables) et le
 modèle doit citer ses sources en liens Markdown.
 
-Moteurs, en cascade : **DuckDuckGo** (page HTML, sans clé, parfois bloqué par un défi anti-robot),
-puis **Brave** (`BRAVE_API_KEY`, 2 000 requêtes/mois gratuites), **Tavily** (`TAVILY_API_KEY`,
-1 000/mois), **Jina Search** (`JINA_API_KEY`), et enfin **Wikipédia** (sans clé, sujets
-encyclopédiques seulement). Les deux premiers résultats sont lus et réduits (sans appel au modèle)
+Moteurs, en cascade : les moteurs à clé s'ils sont configurés (**Brave** `BRAVE_API_KEY`,
+2 000 requêtes/mois gratuites ; **Tavily** `TAVILY_API_KEY`, 1 000/mois ; **Jina Search**
+`JINA_API_KEY`), puis **Bing** (page HTML, sans clé, joignable depuis Vercel), **DuckDuckGo**
+(page HTML, sans clé, bloque les adresses de centres de données), et enfin **Wikipédia** (sans
+clé, sujets encyclopédiques seulement). Les deux premiers résultats sont lus et réduits (sans appel au modèle)
 pour fournir du contenu, pas seulement des extraits. Les recherches sont mises en cache une heure.
 
 Coût en contexte : environ 2 000 tokens par recherche. Chez Groq, dont la limite est de 7 000 tokens

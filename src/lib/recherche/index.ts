@@ -5,6 +5,7 @@
 import type { KV } from "@/lib/kv";
 import { reduireExtractif } from "@/lib/liens/condenser";
 import { lirePage } from "@/lib/liens/lecture";
+import { rechercherBing } from "./bing";
 import { rechercherDuckDuckGo } from "./duckduckgo";
 import { rechercherBrave, rechercherJina, rechercherTavily, rechercherWikipedia } from "./moteurs";
 import type { MoteurRecherche, Recherche, ResultatRecherche } from "./types";
@@ -35,16 +36,17 @@ export async function rechercherWeb(requeteBrute: string, opts: OptionsRecherche
   const cache = await opts.kv?.get<Recherche>(cle);
   if (cache) return cache;
 
-  const moteurs: Array<[MoteurRecherche, () => Promise<ResultatRecherche[]>]> = [
-    ["duckduckgo", () => rechercherDuckDuckGo(requete, max, f)],
-  ];
+  // Ordre : moteurs à clé si configurés (fiables), sinon Bing (joignable depuis Vercel), DuckDuckGo, Wikipédia.
+  const moteurs: Array<[MoteurRecherche, () => Promise<ResultatRecherche[]>]> = [];
   if (env.BRAVE_API_KEY) moteurs.push(["brave", () => rechercherBrave(requete, max, env.BRAVE_API_KEY!, f)]);
   if (env.TAVILY_API_KEY) moteurs.push(["tavily", () => rechercherTavily(requete, max, env.TAVILY_API_KEY!, f)]);
   if (env.JINA_API_KEY) moteurs.push(["jina", () => rechercherJina(requete, max, env.JINA_API_KEY!, f)]);
+  moteurs.push(["bing", () => rechercherBing(requete, max, f)]);
+  moteurs.push(["duckduckgo", () => rechercherDuckDuckGo(requete, max, f)]);
   moteurs.push(["wikipedia", () => rechercherWikipedia(requete, max, f)]);
 
   let resultats: ResultatRecherche[] = [];
-  let moteur: MoteurRecherche = "duckduckgo";
+  let moteur: MoteurRecherche = "bing";
   const erreurs: string[] = [];
   for (const [nom, fn] of moteurs) {
     try {
@@ -55,8 +57,11 @@ export async function rechercherWeb(requeteBrute: string, opts: OptionsRecherche
         break;
       }
       erreurs.push(`${nom} : aucun résultat`);
+      log(`[recherche] ${nom} : aucun résultat pour « ${requete} »`);
     } catch (e) {
-      erreurs.push(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      erreurs.push(msg);
+      log(`[recherche] ${nom} : ${msg}`);
     }
   }
   if (!resultats.length) {

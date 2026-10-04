@@ -8,6 +8,8 @@ export async function GET(req: Request) {
   try {
     return NextResponse.json({ conversations: await listerConversations(q) });
   } catch (e) {
-    return NextResponse.json({ erreur: e instanceof Error ? e.message : "Base de données indisponible." }, { status: 500 });
+    const message = e instanceof Error ? e.message : "Base de données indisponible.";
+    const absente = /DATABASE_URL/.test(message);
+    return NextResponse.json({ erreur: message, code: absente ? "db_absente" : "db_erreur" }, { status: 503 });
   }
 }

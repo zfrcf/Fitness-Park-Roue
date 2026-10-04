@@ -57,6 +57,7 @@ function grouper(liste: ResumeConversation[]) {
 
 export function BarreLaterale({ onNaviguer }: { onNaviguer?: () => void }) {
   const [liste, setListe] = useState<ResumeConversation[] | null>(null);
+  const [erreurDb, setErreurDb] = useState<string | null>(null);
   const [recherche, setRecherche] = useState("");
   const [renommage, setRenommage] = useState<ResumeConversation | null>(null);
   const [suppression, setSuppression] = useState<ResumeConversation | null>(null);
@@ -70,8 +71,18 @@ export function BarreLaterale({ onNaviguer }: { onNaviguer?: () => void }) {
   const charger = useCallback(async (q: string) => {
     try {
       const r = await fetch(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ""}`, { cache: "no-store" });
-      if (!r.ok) throw new Error();
-      setListe(((await r.json()) as { conversations: ResumeConversation[] }).conversations);
+      const j = (await r.json()) as { conversations?: ResumeConversation[]; code?: string; erreur?: string };
+      if (!r.ok) {
+        setErreurDb(
+          j.code === "db_absente"
+            ? "Historique indisponible : aucune base Postgres n'est connectée (DATABASE_URL). Voir le README, section « Stockage »."
+            : `Historique indisponible : ${j.erreur ?? "erreur de base de données"}`,
+        );
+        setListe([]);
+        return;
+      }
+      setErreurDb(null);
+      setListe(j.conversations ?? []);
     } catch {
       setListe([]);
     }
@@ -162,6 +173,11 @@ export function BarreLaterale({ onNaviguer }: { onNaviguer?: () => void }) {
         )}
       </div>
       <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label="Historique">
+        {erreurDb && (
+          <p role="alert" className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+            {erreurDb}
+          </p>
+        )}
         {liste === null ? (
           <div className="flex flex-col gap-2 p-1">
             {[0, 1, 2, 3].map((i) => (

@@ -1,0 +1,22 @@
+# dépendances
+node_modules
+.pnpm-store
+
+# next.js
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+
+# environnement — ne jamais committer de clés
+.env
+.env.*
+!.env.example
+
+# vercel
+.vercel
+
+# divers
+.DS_Store
+npm-debug.log*
+coverage

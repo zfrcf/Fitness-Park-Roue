@@ -31,7 +31,7 @@ dans `.env.local` (ignoré par git) et dans les variables chiffrées de Vercel.
 
 - [x] Étape 1 : squelette, thème clair/sombre, interface en français
 - [x] Étape 2 : accès privé par mot de passe
-- [ ] Étape 3 : registre des fournisseurs et page « État »
+- [x] Étape 3 : registre des fournisseurs et page « État »
 - [ ] Étape 4 : chat en streaming avec rotation automatique
 - [ ] Étape 5 : historique des conversations
 - [ ] Étape 6 : interface complète

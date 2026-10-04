@@ -1,0 +1,60 @@
+"use client";
+
+import { Activity, LogOut, MessageSquare } from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+
+const LIENS = [
+  { href: "/", libelle: "Chat", icone: MessageSquare },
+  { href: "/etat", libelle: "État", icone: Activity },
+] as const;
+
+export function Entete({ children }: { children?: React.ReactNode }) {
+  const chemin = usePathname();
+  const routeur = useRouter();
+
+  async function deconnecter() {
+    await fetch("/api/deconnexion", { method: "POST" });
+    routeur.replace("/connexion");
+    routeur.refresh();
+  }
+
+  return (
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
+      {children}
+      <nav className="flex items-center gap-1">
+        {LIENS.map(({ href, libelle, icone: Icone }) => {
+          const actif = href === "/" ? chemin === "/" || chemin.startsWith("/c/") : chemin.startsWith(href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-colors hover:bg-muted",
+                actif ? "bg-muted text-foreground" : "text-muted-foreground",
+              )}
+            >
+              <Icone className="size-4" />
+              <span className="hidden sm:inline">{libelle}</span>
+            </Link>
+          );
+        })}
+      </nav>
+      <div className="ml-auto flex items-center gap-1">
+        <ThemeToggle />
+        <Tooltip>
+          <TooltipTrigger
+            render={<Button variant="ghost" size="icon" aria-label="Se déconnecter" onClick={deconnecter} />}
+          >
+            <LogOut className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent>Se déconnecter</TooltipContent>
+        </Tooltip>
+      </div>
+    </header>
+  );
+}

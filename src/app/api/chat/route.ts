@@ -1,6 +1,7 @@
 import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, tool } from "ai";
 import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
+import { fuseauHoraire } from "@/lib/fuseau";
 import { executerChat, genererAvecRotation } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
     reglages = normaliserReglages(corps.reglages);
   }
   // Le modèle ne connaît pas la date : on la lui donne, avec la consigne sur la recherche web.
-  const dateDuJour = new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeZone: process.env.TZ || "Europe/Paris" }).format(new Date());
+  const dateDuJour = new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeZone: fuseauHoraire() }).format(new Date());
   reglages = {
     ...reglages,
     systeme:

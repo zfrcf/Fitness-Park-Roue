@@ -9,6 +9,7 @@
  * - résume les anciens messages quand le contexte du suivant est plus court.
  */
 import { generateText, stepCountIs, streamText, type LanguageModel, type ModelMessage, type ToolSet, type UIMessageStreamWriter } from "ai";
+import { fuseauHoraire } from "@/lib/fuseau";
 import type { KV } from "@/lib/kv";
 import { lireQuota } from "@/lib/fournisseurs/entetes";
 import { classerErreur, type ErreurClassee } from "@/lib/fournisseurs/erreurs";
@@ -424,7 +425,7 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
         .filter((c) => c.etat.reessaiA)
         .sort((a, b) => (a.etat.reessaiA ?? 0) - (b.etat.reessaiA ?? 0))[0];
       const quand = prochain?.etat.reessaiA
-        ? new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: process.env.TZ || "Europe/Paris" }).format(new Date(prochain.etat.reessaiA))
+        ? new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: fuseauHoraire() }).format(new Date(prochain.etat.reessaiA))
         : undefined;
       const message = texte
         ? `La réponse a été interrompue : plus aucun fournisseur disponible.${quand ? ` Prochain réessai possible vers ${quand} (${prochain!.f.nom}).` : ""}`

@@ -4,6 +4,7 @@ import { Activity, LogOut, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { ReglagesDialogue } from "@/components/chat/reglages-dialogue";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ export function Entete({ children }: { children?: React.ReactNode }) {
         })}
       </nav>
       <div className="ml-auto flex items-center gap-1">
+        <ReglagesDialogue />
         <ThemeToggle />
         <Tooltip>
           <TooltipTrigger

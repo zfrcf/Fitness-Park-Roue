@@ -2,49 +2,31 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { ArrowUp, Bot, Loader2, Square, User } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { ArrowDown, Bot } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
-import type { MessageUI, MetaMessage } from "@/lib/chat/types";
+import { Button } from "@/components/ui/button";
+import type { MessageUI } from "@/lib/chat/types";
+import { Message } from "./message";
 import { useReglages } from "./reglages-contexte";
-import { formatNombre } from "@/lib/format";
-import { cn } from "@/lib/utils";
-import { partiesVisibles } from "./utils";
+import { Saisie } from "./saisie";
 
-function MetaReponse({ meta }: { meta?: MetaMessage }) {
-  if (!meta?.fournisseur) return null;
-  const u = meta.usage;
-  return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-      <span>{meta.fournisseur}</span>
-      <span className="font-mono">{meta.modele}</span>
-      {u && u.total > 0 && (
-        <span>
-          {formatNombre(u.entree)} → {formatNombre(u.sortie)} tokens
-        </span>
-      )}
-      {meta.cout ? <span>{meta.cout.toFixed(4)} $</span> : null}
-      {meta.bascules && meta.bascules.length > 0 && (
-        <span title={meta.bascules.map((b) => `${b.de} → ${b.vers} (${b.raison})`).join("\n")}>
-          {meta.bascules.length} bascule{meta.bascules.length > 1 ? "s" : ""}
-        </span>
-      )}
-      {meta.resume && <span>historique résumé</span>}
-    </div>
-  );
-}
+const SUGGESTIONS = [
+  "Résume cet article : https://fr.wikipedia.org/wiki/Fitness",
+  "Rédige un message pour relancer un adhérent inactif, ton chaleureux",
+  "Explique-moi la différence entre marge brute et marge nette avec un exemple",
+  "Propose un plan de réunion d'équipe de 30 minutes",
+];
 
 export function FenetreChat({ conversationId, messagesInitiaux = [] }: { conversationId: string; messagesInitiaux?: MessageUI[] }) {
   const [saisie, setSaisie] = useState("");
   const { reglages } = useReglages();
   const urlRemplacee = useRef(messagesInitiaux.length > 0);
-  const zone = useRef<HTMLTextAreaElement>(null);
-  const bas = useRef<HTMLDivElement>(null);
+  const zoneDefilement = useRef<HTMLDivElement>(null);
+  const [collé, setCollé] = useState(true); // suit-on le bas de la conversation ?
 
-  const { messages, sendMessage, status, stop, error } = useChat<MessageUI>({
+  const { messages, sendMessage, status, stop, error, regenerate, setMessages, clearError } = useChat<MessageUI>({
     id: conversationId,
     messages: messagesInitiaux,
     transport: new DefaultChatTransport({ api: "/api/chat", body: () => ({ conversationId, reglages }) }),
@@ -54,111 +36,134 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
         const b = part.data;
         toast.message(`Bascule ${b.de} → ${b.vers}`, { description: `${b.raison}${b.continuation ? " · reprise à la suite" : ""}` });
       } else if (part.type === "data-tous-epuises") {
-        toast.error(part.data.message);
+        toast.error(part.data.message, { duration: 10_000 });
       }
     },
   });
 
   const occupe = status === "submitted" || status === "streaming";
 
+  // Défilement : on suit le bas tant que l'utilisateur n'a pas remonté.
+  const defilerEnBas = useCallback((lisse = false) => {
+    const el = zoneDefilement.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: lisse ? "smooth" : "auto" });
+  }, []);
   useEffect(() => {
-    bas.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+    if (collé) defilerEnBas();
+  }, [messages, collé, defilerEnBas]);
+  function surDefilement() {
+    const el = zoneDefilement.current;
+    if (!el) return;
+    setCollé(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+  }
 
-  function envoyer(e?: FormEvent) {
-    e?.preventDefault();
-    const texte = saisie.trim();
-    if (!texte || occupe) return;
-    void sendMessage({ text: texte });
+  function premiereFois() {
+    if (urlRemplacee.current) return;
+    urlRemplacee.current = true;
+    window.history.replaceState(null, "", `/c/${conversationId}`);
+    setTimeout(signalerMajConversations, 800);
+  }
+
+  function envoyer(texte = saisie) {
+    const t = texte.trim();
+    if (!t || occupe) return;
+    clearError();
+    void sendMessage({ text: t });
     setSaisie("");
-    zone.current?.focus();
-    if (!urlRemplacee.current) {
-      // Première question : l'URL devient /c/<id> sans recharger la page.
-      urlRemplacee.current = true;
-      window.history.replaceState(null, "", `/c/${conversationId}`);
-      setTimeout(signalerMajConversations, 800);
-    }
+    setCollé(true);
+    premiereFois();
   }
 
-  function clavier(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      envoyer();
-    }
+  function editer(index: number, texte: string) {
+    if (occupe) return;
+    clearError();
+    setMessages((prev) => prev.slice(0, index));
+    void sendMessage({ text: texte });
+    setCollé(true);
   }
+
+  function regenerer(messageId?: string) {
+    if (occupe) return;
+    clearError();
+    setCollé(true);
+    void regenerate(messageId ? { messageId } : undefined);
+  }
+
+  const dernierIndex = messages.length - 1;
 
   return (
-    <div className="flex flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={zoneDefilement} onScroll={surDefilement} className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
           {messages.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
-              <Bot className="size-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Posez une question pour commencer.</p>
+            <div className="flex flex-col items-center gap-6 py-16 text-center sm:py-24">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
+                <Bot className="size-6" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight">Comment puis-je vous aider ?</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Les réponses s&apos;appuient sur plusieurs fournisseurs gratuits, avec bascule automatique.
+                </p>
+              </div>
+              <div className="grid w-full gap-2 sm:grid-cols-2">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => envoyer(s)}
+                    className="rounded-xl border px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          {messages.map((m) => {
-            const parts = partiesVisibles(m);
-            const texte = parts
-              .filter((p) => p.type === "text")
-              .map((p) => p.text)
-              .join("");
-            const estUtilisateur = m.role === "user";
-            return (
-              <div key={m.id} className={cn("flex gap-3", estUtilisateur && "justify-end")}>
-                {!estUtilisateur && (
-                  <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <Bot className="size-4" />
-                  </div>
-                )}
-                <div className={cn("max-w-[85%]", estUtilisateur && "rounded-2xl bg-muted px-4 py-2.5")}>
-                  <div className="whitespace-pre-wrap text-[15px] leading-relaxed">
-                    {texte}
-                    {!estUtilisateur && occupe && m === messages.at(-1) && !texte && (
-                      <Loader2 className="inline size-4 animate-spin text-muted-foreground" />
-                    )}
-                  </div>
-                  {!estUtilisateur && <MetaReponse meta={m.metadata} />}
-                </div>
-                {estUtilisateur && (
-                  <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <User className="size-4" />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {error && (
-            <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error.message}
-            </p>
+          {messages.map((m, i) => (
+            <Message
+              key={m.id}
+              message={m}
+              dernier={i === dernierIndex}
+              enCours={occupe && i === dernierIndex && m.role === "assistant"}
+              occupe={occupe}
+              onRegenerer={m.role === "assistant" ? () => regenerer(i === dernierIndex ? undefined : m.id) : undefined}
+              onEditer={m.role === "user" ? (t) => editer(i, t) : undefined}
+            />
+          ))}
+          {status === "submitted" && messages.at(-1)?.role === "user" && (
+            <Message
+              message={{ id: "attente", role: "assistant", parts: [] }}
+              dernier
+              enCours
+              occupe
+            />
           )}
-          <div ref={bas} />
+          {error && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <span>{error.message}</span>
+              <Button size="xs" variant="outline" onClick={() => regenerer()}>
+                Réessayer
+              </Button>
+            </div>
+          )}
         </div>
       </div>
-      <form onSubmit={envoyer} className="border-t bg-background p-3 sm:p-4">
-        <div className="mx-auto flex w-full max-w-3xl items-end gap-2">
-          <Textarea
-            ref={zone}
-            value={saisie}
-            onChange={(e) => setSaisie(e.target.value)}
-            onKeyDown={clavier}
-            placeholder="Écrivez votre message… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
-            rows={1}
-            className="max-h-48 min-h-10 flex-1 resize-none"
-            autoFocus
-          />
-          {occupe ? (
-            <Button type="button" variant="outline" size="icon" aria-label="Arrêter" onClick={() => stop()}>
-              <Square className="size-4" />
-            </Button>
-          ) : (
-            <Button type="submit" size="icon" aria-label="Envoyer" disabled={!saisie.trim()}>
-              <ArrowUp className="size-4" />
-            </Button>
-          )}
-        </div>
-      </form>
+      {!collé && messages.length > 0 && (
+        <Button
+          size="icon-sm"
+          variant="outline"
+          aria-label="Aller en bas"
+          className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+          onClick={() => {
+            setCollé(true);
+            defilerEnBas(true);
+          }}
+        >
+          <ArrowDown className="size-4" />
+        </Button>
+      )}
+      <Saisie valeur={saisie} onChange={setSaisie} onEnvoyer={() => envoyer()} onArreter={() => stop()} occupe={occupe} />
     </div>
   );
 }

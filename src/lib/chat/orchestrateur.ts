@@ -293,11 +293,24 @@ async function tenter(
       onError: () => {}, // les erreurs arrivent aussi dans le flux
     });
 
+    let raisonnementId: string | undefined;
     for await (const part of resultat.stream) {
       armer();
       if (part.type === "text-delta") {
         tampon += part.text;
         if (tamponFerme || tampon.length >= 300) vider();
+      } else if (part.type === "reasoning-delta") {
+        // Raisonnement (si activé dans les réglages) : transmis tel quel, affiché replié côté client.
+        if (!raisonnementId) {
+          raisonnementId = `${partId}-r`;
+          p.writer.write({ type: "reasoning-start", id: raisonnementId });
+        }
+        p.writer.write({ type: "reasoning-delta", id: raisonnementId, delta: part.text });
+      } else if (part.type === "reasoning-end") {
+        if (raisonnementId) {
+          p.writer.write({ type: "reasoning-end", id: raisonnementId });
+          raisonnementId = undefined;
+        }
       } else if (part.type === "error") {
         erreur = classerErreur(part.error, deps.maintenant?.() ?? Date.now());
         break;
@@ -313,6 +326,7 @@ async function tenter(
       }
     }
     vider();
+    if (raisonnementId) p.writer.write({ type: "reasoning-end", id: raisonnementId });
     if (!erreur) {
       try {
         const rep = await resultat.response;

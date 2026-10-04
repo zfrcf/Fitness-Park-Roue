@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, primaryKey, real, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp } from "drizzle-orm/pg-core";
 import type { MetaMessage } from "@/lib/chat/types";
 
 export const conversations = pgTable(
@@ -59,10 +59,11 @@ export const compilations = pgTable("compilations", {
   brancheUrl: text("branche_url"),
   nbFichiers: integer("nb_fichiers").notNull().default(0),
   statut: text("statut").notNull().default("en_attente"), // en_attente | en_cours | reussie | echouee | erreur
-  runId: integer("run_id"),
+  // Les identifiants GitHub dépassent 2^31 : BIGINT obligatoire.
+  runId: bigint("run_id", { mode: "number" }),
   runUrl: text("run_url"),
   jarNom: text("jar_nom"),
-  jarArtefactId: integer("jar_artefact_id"),
+  jarArtefactId: bigint("jar_artefact_id", { mode: "number" }),
   journal: text("journal"),
   erreur: text("erreur"),
   creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
@@ -115,14 +116,16 @@ CREATE TABLE IF NOT EXISTS compilations (
   branche_url TEXT,
   nb_fichiers INTEGER NOT NULL DEFAULT 0,
   statut TEXT NOT NULL DEFAULT 'en_attente',
-  run_id INTEGER,
+  run_id BIGINT,
   run_url TEXT,
   jar_nom TEXT,
-  jar_artefact_id INTEGER,
+  jar_artefact_id BIGINT,
   journal TEXT,
   erreur TEXT,
   cree_a TIMESTAMPTZ NOT NULL DEFAULT now(),
   maj_a TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS compilations_message_idx ON compilations (message_id);
+ALTER TABLE compilations ALTER COLUMN run_id TYPE BIGINT;
+ALTER TABLE compilations ALTER COLUMN jar_artefact_id TYPE BIGINT;
 `;

@@ -441,6 +441,31 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
       return { ok: false, texte, meta, erreur: "annulé" };
     }
 
+    if (e.categorie === "trop-grand") {
+      const autre = candidats.find((c) => !tentes.has(c.id));
+      if (!autre && erreurContexte < 3) {
+        // Personne d'autre : on réduit le contexte et on retente ici (résumé des anciens messages).
+        erreurContexte++;
+        tentes.delete(f.id);
+        const reduit = { ...f, contexte: Math.max(1024, Math.floor(Math.min(f.contexte, t.tokensEstimes || f.contexte) * 0.6)) };
+        deps = { ...deps, fournisseurs: deps.fournisseurs.map((x) => (x.id === f.id ? reduit : x)) };
+        continue;
+      }
+      // Un autre fournisseur peut prendre la requête entière : on ne marque pas celui-ci épuisé
+      // (il reste valable pour des requêtes plus petites), on bascule simplement.
+      if (autre) {
+        precedent = f;
+        const b: Bascule = { de: f.nom, vers: autre.nom, raison: "requête trop grande pour sa fenêtre de débit", continuation: texte.length > 0 };
+        if (texte.length > 0) {
+          continuation = true;
+          continuationEnCours = true;
+        }
+        bascules.push(b);
+        writer.write({ type: "data-bascule", data: b, transient: true });
+        continue;
+      }
+    }
+
     if (e.categorie === "contexte" && erreurContexte < 3) {
       // Le fournisseur juge le contexte trop long malgré notre estimation : on retente sur le
       // même fournisseur avec une fenêtre recalibrée à 60 % de la requête qui vient d'échouer.
@@ -494,6 +519,41 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
   writer.write({ type: "message-metadata", messageMetadata: meta });
   writer.write({ type: "error", errorText: message });
   return { ok: false, texte, meta, erreur: message };
+}
+
+/**
+ * Génération simple (non diffusée) avec rotation : utilisée pour condenser les pages lues.
+ * Essaie les fournisseurs disponibles dans l'ordre ; note les épuisés comme pour le chat.
+ */
+export async function genererAvecRotation(
+  deps: DepsOrchestrateur,
+  p: { systeme: string; prompt: string; maxTokens: number; conversationId: string; signal?: AbortSignal },
+): Promise<string> {
+  const { candidats } = await ordonnerFournisseurs(deps, p.conversationId);
+  let derniere: ErreurClassee | undefined;
+  for (const f of candidats) {
+    const maintenant = deps.maintenant?.() ?? Date.now();
+    try {
+      const r = await generateText({
+        model: deps.creerModele(f, { raisonnement: "aucun" }),
+        system: p.systeme,
+        prompt: p.prompt,
+        temperature: 0.2,
+        maxOutputTokens: p.maxTokens,
+        maxRetries: 0,
+        abortSignal: p.signal ?? AbortSignal.timeout(90_000),
+      });
+      await noterReussite(deps, f, r.response.headers, maintenant);
+      if (r.text.trim()) return r.text;
+      derniere = { categorie: "temporaire", message: "réponse vide", reessaiA: maintenant, basculer: true };
+    } catch (err) {
+      derniere = classerErreur(err, maintenant);
+      if (derniere.categorie === "abandon") throw err;
+      await noterEchec(deps, f, derniere, maintenant);
+      if (!derniere.basculer && derniere.categorie !== "contexte") throw err;
+    }
+  }
+  throw new Error(derniere?.message ?? "aucun fournisseur disponible");
 }
 
 export { texteDe };

@@ -37,6 +37,8 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
         toast.message(`Bascule ${b.de} → ${b.vers}`, { description: `${b.raison}${b.continuation ? " · reprise à la suite" : ""}` });
       } else if (part.type === "data-tous-epuises") {
         toast.error(part.data.message, { duration: 10_000 });
+      } else if (part.type === "data-info") {
+        toast.message(part.data.texte, { duration: 3000 });
       }
     },
   });

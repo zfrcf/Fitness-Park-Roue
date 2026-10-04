@@ -141,7 +141,7 @@ export async function ajouterMessage(conversationId: string, m: MessageUI, fourn
       meta: (m.metadata as MetaMessage | undefined) ?? null,
     })
     .onConflictDoUpdate({
-      target: messages.id,
+      target: [messages.conversationId, messages.id],
       set: { contenu: texteDesParties(parts), parts: parts as unknown[], meta: (m.metadata as MetaMessage | undefined) ?? null },
     });
   await db

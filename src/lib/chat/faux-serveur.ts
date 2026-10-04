@@ -17,6 +17,7 @@ export type Scenario =
   | "coupe-socket" // émet du texte puis ferme brutalement la connexion
   | "muet" // ne répond jamais (chien de garde)
   | "contexte" // 400 contexte trop long sauf si le prompt est court
+  | "413-itpm" // Groq : requête trop grande pour la fenêtre de tokens par minute, sauf si le prompt est court
   | "cf-3036"; // Cloudflare quota journalier
 
 export interface Appel {
@@ -119,6 +120,16 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
           return json(400, { error: { message: "This model's maximum context length is 1000 tokens. However, you requested 1500 tokens. Please reduce the length of the messages.", type: "invalid_request_error", code: "context_length_exceeded" } });
         }
         if (nonStream) return reponseJson(resume ? "RÉSUMÉ-DES-ANCIENS-MESSAGES" : "Réponse courte.", 50, 3);
+        sse();
+        res.write(chunk(id, "Réponse courte."));
+        res.end(finChunk(id, 50, 3));
+        return;
+      }
+      case "413-itpm": {
+        if (prompt.length > 2000) {
+          return json(413, { error: { message: "Request too large for model on input tokens per minute (ITPM): Limit 7000, Requested 12069, please reduce your message size and try again.", type: "tokens", code: "rate_limit_exceeded" } });
+        }
+        if (nonStream) return reponseJson("Réponse courte.", 50, 3);
         sse();
         res.write(chunk(id, "Réponse courte."));
         res.end(finChunk(id, 50, 3));

@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, real, text, timestamp } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, primaryKey, real, text, timestamp } from "drizzle-orm/pg-core";
 import type { MetaMessage } from "@/lib/chat/types";
 
 export const conversations = pgTable(
@@ -16,7 +16,7 @@ export const conversations = pgTable(
 export const messages = pgTable(
   "messages",
   {
-    id: text("id").primaryKey(),
+    id: text("id").notNull(),
     conversationId: text("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
@@ -29,7 +29,7 @@ export const messages = pgTable(
     meta: jsonb("meta").$type<MetaMessage | null>(),
     creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("messages_conversation_idx").on(t.conversationId, t.ordre)],
+  (t) => [primaryKey({ columns: [t.conversationId, t.id] }), index("messages_conversation_idx").on(t.conversationId, t.ordre)],
 );
 
 export const reglages = pgTable("reglages", {
@@ -60,14 +60,15 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 CREATE INDEX IF NOT EXISTS conversations_maj_idx ON conversations (maj_a);
 CREATE TABLE IF NOT EXISTS messages (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
   conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   ordre INTEGER NOT NULL,
   role TEXT NOT NULL,
   contenu TEXT NOT NULL DEFAULT '',
   parts JSONB NOT NULL DEFAULT '[]'::jsonb,
   meta JSONB,
-  cree_a TIMESTAMPTZ NOT NULL DEFAULT now()
+  cree_a TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (conversation_id, id)
 );
 CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, ordre);
 CREATE TABLE IF NOT EXISTS reglages (

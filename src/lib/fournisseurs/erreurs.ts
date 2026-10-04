@@ -7,6 +7,7 @@ export type Categorie =
   | "auth" // 401/403 : clé invalide ou modèle non autorisé → basculer
   | "temporaire" // 5xx, 408, réseau, timeout → basculer
   | "contexte" // 400 : contexte trop long → résumer puis réessayer
+  | "trop-grand" // 413 : requête au-dessus de la limite de tokens par minute → basculer, sinon réduire
   | "requete" // 400/404/422 autre : erreur de notre côté → ne pas basculer
   | "abandon"; // annulé par l'utilisateur
 
@@ -111,6 +112,10 @@ export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClas
 
   const reessaiA = estimerReessai({ statut, message, code, enTetes }, maintenant);
 
+  // Groq : « Request too large … on input tokens per minute (ITPM): Limit 7000, Requested 12069 »
+  if ((statut === 413 || statut === 429) && /per minute|TPM|ITPM/i.test(message) && /requested/i.test(message)) {
+    return { categorie: "trop-grand", statut, code, message, reessaiA, basculer: true };
+  }
   if (statut === 429) return { categorie: "quota", statut, code, message, reessaiA, basculer: true };
   if (statut === 402) return { categorie: "credits", statut, code, message, reessaiA, basculer: true };
   if (statut === 401 || statut === 403) return { categorie: "auth", statut, code, message, reessaiA, basculer: true };

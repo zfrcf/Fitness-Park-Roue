@@ -35,6 +35,6 @@ dans `.env.local` (ignoré par git) et dans les variables chiffrées de Vercel.
 - [x] Étape 4 : chat en streaming avec rotation automatique
 - [x] Étape 5 : historique des conversations
 - [x] Étape 6 : interface complète
-- [ ] Étape 7 : lecture des liens
+- [x] Étape 7 : lecture des liens
 - [ ] Étape 8 : fournisseur payant plafonné
 - [ ] Étape 9 : déploiement Vercel

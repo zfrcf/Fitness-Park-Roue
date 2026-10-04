@@ -41,6 +41,11 @@ describe("classerErreur", () => {
     expect(e.statut).toBe(502);
     expect(e.basculer).toBe(true);
   });
+  it("413 Groq ITPM → trop-grand, bascule", () => {
+    const e = classerErreur(api(413, { error: { message: "Request too large for model on input tokens per minute (ITPM): Limit 7000, Requested 12069, please reduce your message size", type: "tokens", code: "rate_limit_exceeded" } }), T0);
+    expect(e.categorie).toBe("trop-grand");
+    expect(e.basculer).toBe(true);
+  });
   it("400 contexte trop long → contexte, pas de bascule", () => {
     const e = classerErreur(api(400, { error: { message: "This model's maximum context length is 32768 tokens" } }), T0);
     expect(e.categorie).toBe("contexte");

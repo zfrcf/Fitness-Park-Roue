@@ -46,7 +46,17 @@ export type DonneesChat = {
   regeneration: { raison: string };
   info: { texte: string };
   "tous-epuises": { message: string; reessaiA?: number; fournisseur?: string };
-  "page-lue": { url: string; titre: string; source: "direct" | "jina" | "pdf"; caracteres: number; ok: boolean; erreur?: string };
+  "page-lue": {
+    url: string;
+    titre: string;
+    source: "direct" | "jina" | "pdf";
+    caracteres: number;
+    ok: boolean;
+    erreur?: string;
+    /** Contenu condensé, réinjecté dans le contexte des tours suivants (non affiché). */
+    contenu?: string;
+    condense?: boolean;
+  };
 };
 
 export type MessageUI = UIMessage<MetaMessage, DonneesChat>;

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Brain, ChevronDown, Check, Loader2, Pencil, RefreshCw, X } from "lucide-react";
+import { AlertCircle, Bot, Brain, ChevronDown, Check, ExternalLink, FileText, Globe, Loader2, Pencil, RefreshCw, Sparkles, X } from "lucide-react";
 import { memo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,6 +71,64 @@ function MetaReponse({ meta }: { meta?: MetaMessage }) {
   );
 }
 
+type PageLue = Extract<MessageUI["parts"][number], { type: "data-page-lue" }>["data"];
+
+const SOURCES: Record<PageLue["source"], string> = { direct: "lecture directe", jina: "via Jina Reader", pdf: "PDF" };
+
+function PastillesPages({ pages }: { pages: PageLue[] }) {
+  if (!pages.length) return null;
+  return (
+    <ul className="flex flex-wrap gap-1.5" aria-label="Pages lues">
+      {pages.map((p) => {
+        const Icone = !p.ok ? AlertCircle : p.source === "pdf" ? FileText : Globe;
+        let hote = p.url;
+        try {
+          hote = new URL(p.url).hostname.replace(/^www\./, "");
+        } catch {
+          /* brut */
+        }
+        return (
+          <li key={p.url}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <a
+                    href={p.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cn(
+                      "inline-flex max-w-[280px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-muted",
+                      !p.ok && "border-destructive/40 text-destructive",
+                    )}
+                  />
+                }
+              >
+                <Icone className="size-3.5 shrink-0" />
+                <span className="truncate">{p.ok ? p.titre : hote}</span>
+                {p.ok && p.condense && <Sparkles className="size-3 shrink-0 text-muted-foreground" />}
+                <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {p.ok ? (
+                  <>
+                    <p className="font-medium">{p.titre}</p>
+                    <p className="text-xs opacity-80">
+                      {hote} · {SOURCES[p.source]} · {Intl.NumberFormat("fr-FR").format(p.caracteres)} caractères
+                      {p.condense ? " · condensée pour tenir dans le contexte" : ""}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs">Page non lue : {p.erreur}</p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function Raisonnement({ texte, enCours }: { texte: string; enCours: boolean }) {
   const [ouvert, setOuvert] = useState(false);
   if (!texte.trim()) return null;
@@ -112,6 +170,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
     .filter((p) => p.type === "reasoning")
     .map((p) => p.text)
     .join("");
+  const pages = m.parts.filter((p) => p.type === "data-page-lue").map((p) => p.data);
   const estUtilisateur = m.role === "user";
 
   if (estUtilisateur) {
@@ -171,6 +230,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
         <Bot className="size-4" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <PastillesPages pages={pages} />
         <Raisonnement texte={raisonnement} enCours={enCours && !texte} />
         {texte ? (
           <Markdown texte={texte} />

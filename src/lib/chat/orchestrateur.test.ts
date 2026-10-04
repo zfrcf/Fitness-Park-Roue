@@ -230,6 +230,41 @@ describe("rotation des fournisseurs", () => {
     expect(dernier.at(-1)?.content).toBe("Question finale ?");
   });
 
+  it("requête trop grande pour la fenêtre de débit : bascule si possible, sinon contexte réduit", async () => {
+    const long = "mot ".repeat(400);
+    const msgs = [
+      { role: "user" as const, content: "A " + long },
+      { role: "assistant" as const, content: "B " + long },
+      { role: "user" as const, content: "C " + long },
+      { role: "assistant" as const, content: "D " + long },
+      { role: "user" as const, content: "Fin ?" },
+    ];
+    const lire = async (liste: Fournisseur[], conv: string) => {
+      const chunks: UIMessageChunk[] = [];
+      const flux = createUIMessageStream<MessageUI>({
+        execute: async ({ writer }) => {
+          await executerChat({ fournisseurs: liste, kv, creerModele }, { writer, messages: msgs, reglages: { ...REGLAGES_DEFAUT, maxTokens: 100 }, conversationId: conv });
+        },
+      });
+      const lecteur = flux.getReader();
+      for (;;) {
+        const { done, value } = await lecteur.read();
+        if (done) break;
+        chunks.push(value as UIMessageChunk);
+      }
+      return chunks;
+    };
+    // Avec un autre fournisseur : bascule, sans marquer le premier épuisé.
+    const c1 = await lire([fournisseur("G", "413-itpm"), fournisseur("B", "ok")], "conv-tg1");
+    const metas1 = c1.filter((c) => c.type === "message-metadata").map((c) => c.messageMetadata as MetaMessage);
+    expect(metas1.at(-1)?.fournisseur).toBe("B");
+    expect(c1.filter((c) => c.type === "data-bascule")).toHaveLength(1);
+    expect(await kv.get("fournisseur:etat:g")).toBeNull();
+    // Seul : contexte réduit puis réponse.
+    const c2 = await lire([fournisseur("G", "413-itpm")], "conv-tg2");
+    expect(c2.filter((c) => c.type === "text-delta").map((c) => c.delta).join("")).toBe("Réponse courte.");
+  });
+
   it("retente avec un contexte réduit si le fournisseur renvoie « contexte trop long »", async () => {
     const f = fournisseur("Ctx", "contexte", { contexte: 100_000 });
     const long = "mot ".repeat(400);

@@ -56,6 +56,8 @@ export function chargerFournisseurs(env: NodeJS.ProcessEnv = process.env): Fourn
       continue;
     }
     const payant = /^(1|true|oui|yes)$/i.test(lire(env, n, "PAID") ?? "");
+    const prixEntree = Number(lire(env, n, "PRICE_INPUT") ?? "");
+    const prixSortie = Number(lire(env, n, "PRICE_OUTPUT") ?? "");
     liste.push({
       id: `${n}-${slug(nom!)}`,
       rang: n,
@@ -65,6 +67,8 @@ export function chargerFournisseurs(env: NodeJS.ProcessEnv = process.env): Fourn
       modele: modele!,
       contexte,
       payant,
+      prixEntree: prixEntree > 0 ? prixEntree : undefined,
+      prixSortie: prixSortie > 0 ? prixSortie : undefined,
       famille: detecterFamille(baseUrl!),
     });
   }

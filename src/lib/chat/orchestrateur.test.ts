@@ -182,12 +182,19 @@ describe("rotation des fournisseurs", () => {
     expect(r.meta.fournisseur).toBe("B");
   });
 
-  it("n'utilise un fournisseur payant que si autorisé", async () => {
-    const payant = fournisseur("P", "ok", { payant: true });
+  it("n'utilise un fournisseur payant que si autorisé, et enregistre sa dépense", async () => {
+    const payant = fournisseur("P", "ok", { payant: true, prixEntree: 1, prixSortie: 2 });
     const r1 = await executer([fournisseur("A", "429"), payant]);
     expect(r1.erreur).toMatch(/épuisés/);
-    const r2 = await executer([fournisseur("A", "429"), payant], { autoriserPayant: async () => true }, "Bonjour", "conv-p");
+    const depenses: Array<{ id: string; usage: { entree: number; sortie: number }; cout?: number }> = [];
+    const r2 = await executer(
+      [fournisseur("A", "429"), payant],
+      { autoriserPayant: async () => true, enregistrerDepense: async (f, usage, cout) => void depenses.push({ id: f.id, usage, cout }) },
+      "Bonjour",
+      "conv-p",
+    );
     expect(r2.meta.fournisseur).toBe("P");
+    expect(depenses).toEqual([{ id: "p", usage: { entree: 30, sortie: 7, total: 37 }, cout: 0.001 }]);
   });
 
   it("résume les anciens messages quand le contexte du suivant est plus court", async () => {

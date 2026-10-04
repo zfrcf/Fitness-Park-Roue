@@ -8,15 +8,26 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDureeRelative, formatHeure, formatNombre, formatTokens } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { EtatFournisseur, FournisseurPublic } from "@/lib/fournisseurs/types";
 
-type Ligne = FournisseurPublic & { etat: EtatFournisseur };
+interface Depense {
+  montant: number;
+  tokensEntree: number;
+  tokensSortie: number;
+  requetes: number;
+}
+type Ligne = FournisseurPublic & { etat: EtatFournisseur; depense: Depense | null };
 interface Reponse {
   fournisseurs: Ligne[];
   stockage: { kv: "redis" | "memoire" };
   plafondMensuel: number;
+  mois: string;
+  depenseTotale: number;
   maintenant: number;
 }
+
+const fmtUSD = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "USD", maximumFractionDigits: 4 });
 
 function BadgeStatut({ etat }: { etat: EtatFournisseur }) {
   switch (etat.statut) {
@@ -203,6 +214,27 @@ export function TableauEtat() {
                 )}
                 {f.famille === "cloudflare" && (
                   <LigneInfo libelle="Quota gratuit" valeur="10 000 neurons / jour (non exposé par l'API)" />
+                )}
+                {f.payant && (
+                  <>
+                    <LigneInfo
+                      libelle={`Dépense du mois (${donnees.mois})`}
+                      valeur={`${fmtUSD.format(f.depense?.montant ?? 0)}${donnees.plafondMensuel > 0 ? ` / ${fmtUSD.format(donnees.plafondMensuel)}` : ""}`}
+                    />
+                    {donnees.plafondMensuel > 0 ? (
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.min(100, Math.round((donnees.depenseTotale / donnees.plafondMensuel) * 100))} aria-valuemin={0} aria-valuemax={100}>
+                        <div
+                          className={cn("h-full rounded-full", donnees.depenseTotale >= donnees.plafondMensuel ? "bg-destructive" : "bg-primary")}
+                          style={{ width: `${Math.min(100, (donnees.depenseTotale / donnees.plafondMensuel) * 100)}%` }}
+                        />
+                      </div>
+                    ) : (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">PAID_MONTHLY_CAP est à 0 : ce fournisseur n&apos;est jamais utilisé.</p>
+                    )}
+                    {f.depense && (
+                      <LigneInfo libelle="Requêtes payantes" valeur={`${formatNombre(f.depense.requetes)} · ${formatTokens(f.depense.tokensEntree)} → ${formatTokens(f.depense.tokensSortie)} tokens`} />
+                    )}
+                  </>
                 )}
                 {e.derniereReussiteA && <LigneInfo libelle="Dernière réussite" valeur={formatHeure(e.derniereReussiteA)} />}
                 {e.raison && (

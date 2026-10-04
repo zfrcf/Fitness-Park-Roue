@@ -23,8 +23,10 @@ export interface DepsOrchestrateur {
   maintenant?: () => number;
   /** Délai sans aucun octet reçu avant de considérer le fournisseur en panne. */
   delaiInactiviteMs?: number;
-  /** Autorise-t-on un fournisseur payant maintenant ? (plafond mensuel, étape 8) */
+  /** Autorise-t-on un fournisseur payant maintenant ? (plafond mensuel) */
   autoriserPayant?: (f: Fournisseur) => Promise<boolean>;
+  /** Enregistre la consommation d'un fournisseur payant (coût rapporté par l'API si disponible). */
+  enregistrerDepense?: (f: Fournisseur, usage: { entree: number; sortie: number }, cout?: number) => Promise<void>;
   /** Journalisation (désactivée en test). */
   log?: (message: string) => void;
 }
@@ -418,6 +420,9 @@ export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution):
       usageTotal = { entree: usageTotal.entree + t.usage.entree, sortie: usageTotal.sortie + t.usage.sortie, total: usageTotal.total + t.usage.total };
     }
     if (t.cout) coutTotal += t.cout;
+    if (f.payant && t.usage && deps.enregistrerDepense) {
+      await deps.enregistrerDepense(f, t.usage, t.cout).catch(() => {});
+    }
 
     if (!t.erreur) {
       await noterReussite(deps, f, t.enTetes, maintenant);
@@ -544,6 +549,10 @@ export async function genererAvecRotation(
         abortSignal: p.signal ?? AbortSignal.timeout(90_000),
       });
       await noterReussite(deps, f, r.response.headers, maintenant);
+      if (f.payant && deps.enregistrerDepense) {
+        const meta = r.providerMetadata as Record<string, { cout?: number }> | undefined;
+        await deps.enregistrerDepense(f, { entree: r.usage.inputTokens ?? 0, sortie: r.usage.outputTokens ?? 0 }, meta?.[f.famille]?.cout).catch(() => {});
+      }
       if (r.text.trim()) return r.text;
       derniere = { categorie: "temporaire", message: "réponse vide", reessaiA: maintenant, basculer: true };
     } catch (err) {

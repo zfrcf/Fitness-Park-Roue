@@ -4,6 +4,7 @@ import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, typ
 import { normaliserReglages } from "@/lib/chat/reglages";
 import type { CorpsRequeteChat, MessageUI } from "@/lib/chat/types";
 import { ajouterMessage, enregistrerMessages } from "@/lib/db/conversations";
+import { autoriserPayant, calculerCout, enregistrerDepense } from "@/lib/depenses";
 import { lireReglages } from "@/lib/db/reglages";
 import { creerModele } from "@/lib/fournisseurs/client";
 import { fournisseurs } from "@/lib/fournisseurs/registre";
@@ -67,7 +68,15 @@ export async function POST(req: Request) {
   }
 
   let fournisseurUtilise: string | undefined;
-  const deps = { fournisseurs: liste, kv: getKV(), creerModele, log: (m: string) => console.warn(m) };
+  const deps = {
+    fournisseurs: liste,
+    kv: getKV(),
+    creerModele,
+    log: (m: string) => console.warn(m),
+    autoriserPayant,
+    enregistrerDepense: (f: (typeof liste)[number], usage: { entree: number; sortie: number }, cout?: number) =>
+      enregistrerDepense(f.id, usage, calculerCout(f, usage, cout)),
+  };
   const stream = createUIMessageStream<MessageUI>({
     originalMessages: corps.messages,
     execute: async ({ writer }) => {

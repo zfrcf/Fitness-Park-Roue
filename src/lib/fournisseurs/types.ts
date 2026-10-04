@@ -13,6 +13,9 @@ export interface Fournisseur {
   contexte: number;
   /** Fournisseur payant à l'usage (dernier recours, plafonné). */
   payant: boolean;
+  /** Prix en USD par million de tokens (facultatif, pour estimer la dépense si l'API ne la renvoie pas). */
+  prixEntree?: number;
+  prixSortie?: number;
   famille: FamilleAPI;
 }
 

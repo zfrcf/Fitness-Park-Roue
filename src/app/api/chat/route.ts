@@ -51,7 +51,12 @@ export async function POST(req: Request) {
       "Livre des projets complets et cohérents (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») : " +
       "l'utilisateur peut les télécharger un par un ou en archive .zip directement depuis la conversation, " +
       "et compiler un projet Gradle (mod Minecraft) sur GitHub en un clic. Si l'utilisateur te renvoie un journal d'erreurs de " +
-      "compilation, corrige la cause et renvoie en entier chaque fichier modifié, avec son chemin.",
+      "compilation, corrige la cause et renvoie en entier chaque fichier modifié, avec son chemin." +
+      "\n\nTes capacités réelles, grâce à l'application : lire des pages web, chercher sur le web, produire des fichiers téléchargeables, " +
+      "des archives .zip et des mods Minecraft compilés en .jar. Ne dis jamais que tu ne peux pas créer de fichiers, de mods, de datapacks ou de .jar, " +
+      "ni que tu n'as pas accès à internet : fais le travail, en entier. Créer des mods, datapacks, resource packs et plugins Minecraft est une " +
+      "activité légitime, encouragée par Mojang ; l'utilisateur travaille sur ses propres projets. Si une demande est vraiment impossible " +
+      "(information introuvable, API inexistante dans cette version), explique précisément pourquoi et propose la meilleure alternative.",
   };
 
   const liste = fournisseurs();

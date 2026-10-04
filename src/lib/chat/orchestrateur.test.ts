@@ -1,4 +1,4 @@
-import { createUIMessageStream, tool, type UIMessageChunk } from "ai";
+import { createUIMessageStream, tool, type ModelMessage, type UIMessageChunk } from "ai";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getKV, type KV } from "@/lib/kv";
@@ -51,12 +51,19 @@ const outilRecherche = tool({
   execute: async ({ requete }) => ({ requete, moteur: "faux", resultats: [{ titre: "Java Edition 1.21.11", url: "https://minecraft.wiki/w/Java_Edition_1.21.11", extrait: "Sortie en 2025" }] }),
 });
 
-async function executer(liste: Fournisseur[], opts: Partial<DepsOrchestrateur> = {}, question = "Bonjour", conversationId = "conv-1", outils?: Record<string, typeof outilRecherche>): Promise<Sortie> {
+async function executer(
+  liste: Fournisseur[],
+  opts: Partial<DepsOrchestrateur> = {},
+  question = "Bonjour",
+  conversationId = "conv-1",
+  outils?: Record<string, typeof outilRecherche>,
+  historique: ModelMessage[] = [],
+): Promise<Sortie> {
   const deps: DepsOrchestrateur = { fournisseurs: liste, kv, creerModele, delaiInactiviteMs: 400, ...opts };
   const chunks: UIMessageChunk[] = [];
   const flux = createUIMessageStream<MessageUI>({
     execute: async ({ writer }) => {
-      await executerChat(deps, { writer, messages: [{ role: "user", content: question }], reglages: REGLAGES_DEFAUT, conversationId, outils });
+      await executerChat(deps, { writer, messages: [...historique, { role: "user", content: question }], reglages: REGLAGES_DEFAUT, conversationId, outils });
     },
     onError: (e) => String(e),
   });
@@ -104,6 +111,28 @@ describe("rotation des fournisseurs", () => {
     expect(r.meta.cout).toBeCloseTo(0.001);
     expect(await kv.get("conv:fournisseur:conv-1")).toBe("a");
     expect(serveur.appels).toHaveLength(1);
+  });
+
+  it("ne renvoie jamais le raisonnement des tours précédents (Groq refuse reasoning_content)", async () => {
+    const historique: ModelMessage[] = [
+      { role: "user", content: "Fais-moi un mod" },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Je réfléchis longuement au mod..." },
+          { type: "text", text: "Voici le mod." },
+        ],
+      },
+    ];
+    const r = await executer([fournisseur("A", "ok", { famille: "groq" })], {}, "Continue", "conv-1", undefined, historique);
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse entière du fournisseur ok.");
+    const envoyes = serveur.appels[0].corps.messages as Array<Record<string, unknown>>;
+    const assistant = envoyes.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant).not.toHaveProperty("reasoning_content");
+    expect(JSON.stringify(envoyes)).not.toContain("réfléchis longuement");
+    expect(assistant?.content).toBe("Voici le mod.");
   });
 
   it("bascule sur 429 avant tout texte et mémorise l'heure de réessai", async () => {

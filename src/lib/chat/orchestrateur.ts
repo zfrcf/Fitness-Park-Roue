@@ -14,7 +14,7 @@ import type { KV } from "@/lib/kv";
 import { lireQuota } from "@/lib/fournisseurs/entetes";
 import { classerErreur, type ErreurClassee } from "@/lib/fournisseurs/erreurs";
 import type { EtatFournisseur, Fournisseur, NiveauRaisonnement } from "@/lib/fournisseurs/types";
-import { ajusterAuContexte, estimerTokens, INSTRUCTION_RESUME, promptResume, texteDe, tokensMessage } from "./contexte";
+import { ajusterAuContexte, estimerTokens, INSTRUCTION_RESUME, promptResume, sansRaisonnement, texteDe, tokensMessage } from "./contexte";
 import type { Bascule, MessageUI, MetaMessage, Reglages } from "./types";
 
 export interface DepsOrchestrateur {
@@ -392,7 +392,9 @@ async function tenter(
 
 /* ───────────── Exécution complète ───────────── */
 
-export async function executerChat(deps: DepsOrchestrateur, p: ParamsExecution): Promise<ResultatExecution> {
+export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecution): Promise<ResultatExecution> {
+  // Le raisonnement des tours précédents n'est jamais renvoyé aux fournisseurs.
+  const p: ParamsExecution = { ...params, messages: sansRaisonnement(params.messages) };
   const debut = deps.maintenant?.() ?? Date.now();
   const { writer } = p;
   const bascules: Bascule[] = [];

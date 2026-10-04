@@ -154,3 +154,18 @@ export function promptResume(anciens: ModelMessage[]): string {
     .map((m) => `${m.role === "user" ? "Utilisateur" : m.role === "assistant" ? "Assistant" : "Système"} : ${texteDe(m)}`)
     .join("\n\n");
 }
+
+/**
+ * Retire le raisonnement des anciens messages de l'assistant : il ne sert à rien au modèle
+ * pour la suite, coûte des tokens, et certains fournisseurs (Groq) refusent la propriété
+ * `reasoning_content` dans l'historique.
+ */
+export function sansRaisonnement(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((m) => {
+    if (m.role !== "assistant" || typeof m.content === "string") return m;
+    const parts = m.content.filter((part) => part.type !== "reasoning");
+    if (parts.length === m.content.length) return m;
+    if (parts.length === 0) return { ...m, content: "" };
+    return { ...m, content: parts };
+  });
+}

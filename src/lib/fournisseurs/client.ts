@@ -19,6 +19,16 @@ export function adapterCorps(
   { raisonnement }: OptionsModele,
 ): Record<string, unknown> {
   const c = { ...corps };
+  // Filet de sécurité : jamais de `reasoning_content` dans l'historique envoyé
+  // (Groq le refuse : « property 'reasoning_content' is unsupported »).
+  if (Array.isArray(c.messages)) {
+    c.messages = (c.messages as unknown[]).map((m) => {
+      if (!m || typeof m !== "object" || !("reasoning_content" in m)) return m;
+      const { reasoning_content: _ignore, ...reste } = m as Record<string, unknown>;
+      void _ignore;
+      return reste;
+    });
+  }
   switch (f.famille) {
     case "groq":
       // Doc Groq : reasoning_effort none/low/medium/high (modèles raisonneurs).

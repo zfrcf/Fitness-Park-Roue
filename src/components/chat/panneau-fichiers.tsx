@@ -29,7 +29,7 @@ export async function fabriquerZip(fichiers: FichierGenere[]): Promise<Blob> {
   return zip.generateAsync({ type: "blob", compression: "DEFLATE" });
 }
 
-export function PanneauFichiers({ fichiers, actions }: { fichiers: FichierGenere[]; actions?: React.ReactNode }) {
+export function PanneauFichiers({ fichiers, actions, pied }: { fichiers: FichierGenere[]; actions?: React.ReactNode; pied?: React.ReactNode }) {
   const [zipEnCours, setZipEnCours] = useState(false);
   if (!fichiers.length) return null;
   const nom = nomArchive(fichiers);
@@ -74,6 +74,7 @@ export function PanneauFichiers({ fichiers, actions }: { fichiers: FichierGenere
           </li>
         ))}
       </ul>
+      {pied}
     </div>
   );
 }

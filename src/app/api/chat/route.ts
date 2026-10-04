@@ -2,10 +2,11 @@ import { convertToModelMessages, createUIMessageStream, createUIMessageStreamRes
 import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { fuseauHoraire } from "@/lib/fuseau";
+import { blocContexteMinecraft, detecterDemandeMod, versionsMinecraft } from "@/lib/minecraft/contexte";
 import { executerChat, genererAvecRotation } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
-import type { CorpsRequeteChat, MessageUI } from "@/lib/chat/types";
+import type { CorpsRequeteChat, MessageUI, Reglages } from "@/lib/chat/types";
 import { ajouterMessage, enregistrerMessages } from "@/lib/db/conversations";
 import { autoriserPayant, calculerCout, enregistrerDepense } from "@/lib/depenses";
 import { lireReglages } from "@/lib/db/reglages";
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
   }
   const conversationId = typeof corps.conversationId === "string" && corps.conversationId ? corps.conversationId.slice(0, 64) : "sans-id";
   // Réglages : ceux de la base, surchargés par ceux envoyés par le client.
-  let reglages;
+  let reglages: Reglages;
   try {
     reglages = normaliserReglages({ ...(await lireReglages()), ...(corps.reglages ?? {}) });
   } catch {
@@ -48,7 +49,9 @@ export async function POST(req: Request) {
       "\n\nQuand tu produis des fichiers (projet, script, configuration, datapack, mod…), écris chaque fichier dans son propre bloc de code " +
       "avec son chemin complet sur la ligne d'ouverture, par exemple ```java src/main/java/com/exemple/MonMod.java ou ```json fabric.mod.json. " +
       "Livre des projets complets et cohérents (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») : " +
-      "l'utilisateur peut les télécharger un par un ou en archive .zip directement depuis la conversation.",
+      "l'utilisateur peut les télécharger un par un ou en archive .zip directement depuis la conversation, " +
+      "et compiler un projet Gradle (mod Minecraft) sur GitHub en un clic. Si l'utilisateur te renvoie un journal d'erreurs de " +
+      "compilation, corrige la cause et renvoie en entier chaque fichier modifié, avec son chemin.",
   };
 
   const liste = fournisseurs();
@@ -119,6 +122,16 @@ export async function POST(req: Request) {
         const dernierUI = messagesUI.at(-1);
         if (dernierUI && dernierUI.parts[0]?.type === "text") {
           dernierUI.parts[0] = { type: "text", text: dernierUI.parts[0].text + blocPagesPourModele(pages) };
+        }
+      }
+      // 1 bis. Demande de mod Minecraft : versions à jour et modèle de projet compilable.
+      const demandeMod = detecterDemandeMod(texteDernier);
+      if (demandeMod.mod) {
+        try {
+          const v = await versionsMinecraft(demandeMod.version, { kv: deps.kv });
+          reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${blocContexteMinecraft(v)}` };
+        } catch (e) {
+          console.warn("[chat] contexte Minecraft indisponible :", e instanceof Error ? e.message : e);
         }
       }
       // 2. Recherche web forcée (bouton globe) : résultats injectés dans le dernier message.

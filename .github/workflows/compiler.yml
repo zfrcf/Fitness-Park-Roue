@@ -1,0 +1,52 @@
+# Compilation d'un projet Gradle (mod Minecraft Fabric/NeoForge, application Java/Kotlin)
+# poussé par l'application de chat sur une branche compilation/<id>.
+# Le .jar produit est publié comme artefact « jar », le journal complet comme artefact « journal ».
+name: compilation
+on:
+  push:
+    branches: ["compilation/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Récupération du projet
+        uses: actions/checkout@v6
+      - name: JDK 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: "25"
+          distribution: "microsoft"
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.7.1"
+          cache-read-only: false
+      - name: Compilation
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle build -x test --no-daemon --console=plain --warning-mode=none 2>&1 | tee journal-compilation.txt
+      - name: Journal (toujours)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: journal
+          path: journal-compilation.txt
+          retention-days: 14
+      - name: Jar (si réussite)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jar
+          path: |
+            build/libs/*.jar
+            !build/libs/*-sources.jar
+            !build/libs/*-dev.jar
+            !build/libs/*-javadoc.jar
+          if-no-files-found: error
+          retention-days: 14

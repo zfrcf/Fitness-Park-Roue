@@ -35,6 +35,8 @@ suivant, sans action de votre part.
   recherche web automatique.
 - **Recherche web** : outil que le modèle déclenche lui-même, ou bouton globe pour forcer une
   recherche ; sources citées et cliquables.
+- **Fichiers générés** téléchargeables un par un ou en .zip ; **compilation des mods Minecraft**
+  (projets Gradle) sur GitHub Actions avec téléchargement du .jar et renvoi des erreurs au modèle.
 - **Rotation automatique** des fournisseurs (429, 402, 401, 5xx, délai dépassé, coupure) avec
   reprise exacte en plein flux, résumé automatique de l'historique si le contexte du suivant
   est plus court, mémoire des épuisements et de l'heure de réessai.
@@ -90,6 +92,7 @@ Le fichier `.env.example` est commenté ligne par ligne. Résumé :
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | recommandé en production | Redis (injectées par l'intégration Upstash) |
 | `JINA_API_KEY` | non | clé Jina Reader (sans clé : 20 lectures/min ; avec : 500/min) et Jina Search |
 | `BRAVE_API_KEY` / `TAVILY_API_KEY` | non | moteurs de recherche de secours si DuckDuckGo est bloqué |
+| `GITHUB_REPO` / `GITHUB_TOKEN` | pour compiler | dépôt et jeton fin utilisés par la compilation GitHub Actions |
 | `APP_URL` | non | URL publique, envoyée à OpenRouter dans `HTTP-Referer` |
 
 Les clés API ne vont **que** dans `.env.local` (ignoré par git) et dans les variables
@@ -234,6 +237,44 @@ pour fournir du contenu, pas seulement des extraits. Les recherches sont mises e
 
 Coût en contexte : environ 2 000 tokens par recherche. Chez Groq, dont la limite est de 7 000 tokens
 d'entrée par minute, une réponse avec recherche bascule souvent vers Cloudflare : c'est normal.
+
+## Fichiers générés et archive .zip
+
+Quand une réponse contient des blocs de code nommés (chemin sur la ligne d'ouverture, par exemple
+\`\`\`java src/main/java/com/exemple/Mod.java), un panneau « Fichiers » apparaît sous la réponse :
+téléchargement de chaque fichier, ou de tout le projet en **.zip** avec son arborescence (fabriqué
+dans le navigateur). Le prompt système demande au modèle ce format et des projets complets. Cela
+couvre les datapacks et resource packs Minecraft, les scripts, les configurations, les sites statiques.
+
+## Compilation sur GitHub (mods Minecraft, projets Gradle)
+
+Un `.jar` de mod ne peut pas être compilé sur Vercel (ni Java ni Gradle, 300 s maximum). La
+compilation est donc confiée à **GitHub Actions**, gratuit pour un dépôt public :
+
+1. Sous un projet Gradle généré (présence de `build.gradle`), le bouton **Compiler sur GitHub**
+   pousse les fichiers sur une branche `compilation/<id>` du dépôt `GITHUB_REPO`, avec le workflow
+   `.github/workflows/compiler.yml` (JDK 25, Gradle 9.7.1, `gradle build -x test`).
+2. L'application suit l'exécution (file d'attente, en cours, réussie, échouée) et affiche le lien
+   vers le journal GitHub. Un mod Fabric met 3 à 8 minutes.
+3. Réussite : bouton **Télécharger le .jar** (l'application récupère l'artefact et le transmet,
+   car les artefacts GitHub exigent une session GitHub). Échec : les erreurs de compilation sont
+   extraites du journal et un bouton **Demander une correction** les renvoie au modèle, qui
+   renvoie les fichiers corrigés. La branche est supprimée une fois le résultat récupéré.
+
+Pour que le modèle produise un projet compilable, toute demande de mod Minecraft injecte un
+**contexte à jour** : versions actuelles (Minecraft, Fabric Loader, Fabric API, Loom, NeoForge,
+récupérées des API Fabric meta, Modrinth et Maven, cache 6 h) et un modèle de projet Fabric minimal
+avec mappings Mojang, un seul source set, sans wrapper Gradle. Le wrapper (`gradlew`) est refusé à
+l'envoi : la chaîne fournit Gradle.
+
+Variables : `GITHUB_REPO` (par défaut `zfrcf/Fitness-Park-Roue`) et `GITHUB_TOKEN`, un jeton
+d'accès fin créé sur github.com → Settings → Developer settings → Fine-grained tokens, limité à ce
+dépôt, avec les permissions **Contents : lecture et écriture**, **Actions : lecture et écriture**
+et **Metadata : lecture**. Sans jeton, le bouton renvoie une erreur explicite.
+
+Limites : les modèles gratuits écrivent du code Minecraft imparfait ; comptez un ou deux
+allers-retours de correction. Les artefacts sont conservés 14 jours. Seuls les projets Gradle
+(Fabric, NeoForge, Java, Kotlin) sont compilés ; les autres fichiers se téléchargent en .zip.
 
 ## Lecture des liens
 

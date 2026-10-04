@@ -17,7 +17,8 @@ import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { BoutonCopier } from "./bloc-code";
 import { Markdown } from "./markdown";
-import { extraireFichiers } from "@/lib/fichiers/extraire";
+import { estProjetGradle, extraireFichiers } from "@/lib/fichiers/extraire";
+import { BoutonCompiler, ListeCompilations, useCompilations } from "./carte-compilation";
 import { PanneauFichiers } from "./panneau-fichiers";
 import { partiesVisibles } from "./utils";
 
@@ -212,16 +213,45 @@ function Raisonnement({ texte, enCours }: { texte: string; enCours: boolean }) {
   );
 }
 
+function PanneauFichiersAvecCompilation({
+  fichiers,
+  conversationId,
+  messageId,
+  occupe,
+  onEnvoyer,
+}: {
+  fichiers: ReturnType<typeof extraireFichiers>;
+  conversationId?: string;
+  messageId: string;
+  occupe: boolean;
+  onEnvoyer?: (texte: string) => void;
+}) {
+  const gradle = estProjetGradle(fichiers) && !!conversationId;
+  const liste = useMemo(() => fichiers.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [fichiers]);
+  const { liste: compilations, compiler, lancement, enCours } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
+  if (!gradle) return <PanneauFichiers fichiers={fichiers} />;
+  return (
+    <PanneauFichiers
+      fichiers={fichiers}
+      actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
+      pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} />}
+    />
+  );
+}
+
 export interface PropsMessage {
   message: MessageUI;
   dernier: boolean;
   enCours: boolean;
   occupe: boolean;
+  conversationId?: string;
   onRegenerer?: () => void;
   onEditer?: (texte: string) => void;
+  /** Envoie un nouveau message utilisateur (demande de correction après compilation). */
+  onEnvoyer?: (texte: string) => void;
 }
 
-export const Message = memo(function Message({ message: m, dernier, enCours, occupe, onRegenerer, onEditer }: PropsMessage) {
+export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer }: PropsMessage) {
   const [edition, setEdition] = useState(false);
   const fichiers = useMemo(() => (m.role === "assistant" && !enCours ? extraireFichiers(texteDe(m)) : []), [m, enCours]);
   const [brouillon, setBrouillon] = useState("");
@@ -305,7 +335,9 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : null}
-        {fichiers.length > 0 && <PanneauFichiers fichiers={fichiers} />}
+        {fichiers.length > 0 && (
+          <PanneauFichiersAvecCompilation fichiers={fichiers} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
+        )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <MetaReponse meta={m.metadata} />
           {!enCours && (

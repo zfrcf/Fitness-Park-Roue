@@ -1,0 +1,161 @@
+"use client";
+
+import { AlertCircle, CheckCircle2, ChevronDown, Download, ExternalLink, Hammer, Loader2, Wrench } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import type { CompilationPublique } from "@/lib/db/compilations";
+import { formatHeure } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+const LIBELLES: Record<CompilationPublique["statut"], string> = {
+  en_attente: "En file d'attente sur GitHub Actions…",
+  en_cours: "Compilation en cours…",
+  reussie: "Compilation réussie",
+  echouee: "Compilation échouée",
+  erreur: "Compilation impossible",
+};
+
+export function CarteCompilation({
+  compilation: initiale,
+  onDemanderCorrection,
+}: {
+  compilation: CompilationPublique;
+  onDemanderCorrection?: (texte: string) => void;
+}) {
+  const [c, setC] = useState(initiale);
+  const [journalOuvert, setJournalOuvert] = useState(false);
+  const terminal = c.statut === "reussie" || c.statut === "echouee" || c.statut === "erreur";
+
+  useEffect(() => {
+    if (terminal) return;
+    let actif = true;
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/compilations/${c.id}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as { compilation: CompilationPublique };
+        if (actif) setC(j.compilation);
+      } catch {
+        /* nouvel essai au prochain tour */
+      }
+    }, 10_000);
+    return () => {
+      actif = false;
+      clearInterval(t);
+    };
+  }, [c.id, terminal]);
+
+  const Icone = c.statut === "reussie" ? CheckCircle2 : c.statut === "echouee" || c.statut === "erreur" ? AlertCircle : Loader2;
+
+  return (
+    <div className={cn("rounded-lg border text-sm", c.statut === "reussie" && "border-emerald-500/40", (c.statut === "echouee" || c.statut === "erreur") && "border-destructive/40")}>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <Icone className={cn("size-4 shrink-0", !terminal && "animate-spin text-muted-foreground", c.statut === "reussie" && "text-emerald-600", (c.statut === "echouee" || c.statut === "erreur") && "text-destructive")} />
+        <span className="font-medium">{LIBELLES[c.statut]}</span>
+        <span className="text-xs text-muted-foreground">
+          {c.nom} · {c.nbFichiers} fichier{c.nbFichiers > 1 ? "s" : ""} · {formatHeure(new Date(c.creeA).getTime())}
+        </span>
+        {c.runUrl && (
+          <a href={c.runUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
+            journal GitHub <ExternalLink className="size-3" />
+          </a>
+        )}
+        <div className="ml-auto flex gap-1.5">
+          {c.statut === "reussie" && (
+            <Button size="sm" nativeButton={false} render={<a href={`/api/compilations/${c.id}/jar`} download />}>
+              <Download /> Télécharger {c.jarNom ?? "le .jar"}
+            </Button>
+          )}
+          {c.statut === "echouee" && onDemanderCorrection && c.journal && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                onDemanderCorrection(
+                  `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
+                )
+              }
+            >
+              <Wrench /> Demander une correction
+            </Button>
+          )}
+        </div>
+      </div>
+      {!terminal && <p className="border-t px-3 py-2 text-xs text-muted-foreground">Un mod Minecraft met en général 3 à 8 minutes (téléchargement de Minecraft et des mappings). Vous pouvez continuer à discuter, l&apos;état se met à jour seul.</p>}
+      {c.erreur && <p className="border-t px-3 py-2 text-xs text-destructive">{c.erreur}</p>}
+      {c.journal && (c.statut === "echouee" || c.statut === "reussie") && (
+        <div className="border-t">
+          <button type="button" onClick={() => setJournalOuvert((o) => !o)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground" aria-expanded={journalOuvert}>
+            <Hammer className="size-3.5" />
+            {c.statut === "echouee" ? "Erreurs de compilation" : "Fin du journal"}
+            <ChevronDown className={cn("ml-auto size-3.5 transition-transform", journalOuvert && "rotate-180")} />
+          </button>
+          {journalOuvert && <pre className="max-h-72 overflow-auto border-t bg-muted/40 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">{c.journal}</pre>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** État des compilations d'un message : liste persistée, lancement d'une nouvelle. */
+export function useCompilations(conversationId: string | undefined, messageId: string, fichiers: Array<{ chemin: string; contenu: string }>) {
+  const [liste, setListe] = useState<CompilationPublique[]>([]);
+  const [lancement, setLancement] = useState(false);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    let actif = true;
+    void fetch(`/api/compilations?messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { compilations: [] }))
+      .then((j: { compilations?: CompilationPublique[] }) => actif && setListe(j.compilations ?? []))
+      .catch(() => {});
+    return () => {
+      actif = false;
+    };
+  }, [messageId, conversationId]);
+
+  async function compiler() {
+    setLancement(true);
+    try {
+      const r = await fetch("/api/compilations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, messageId, fichiers }),
+      });
+      const j = (await r.json()) as { compilation?: CompilationPublique; erreur?: string };
+      if (j.compilation) {
+        const c = j.compilation;
+        setListe((l) => [c, ...l]);
+        if (c.statut === "erreur") toast.error(c.erreur ?? "Envoi impossible.");
+        else toast.message("Projet envoyé sur GitHub, compilation lancée.");
+      } else toast.error(j.erreur ?? "Compilation impossible.");
+    } catch {
+      toast.error("Le serveur ne répond pas.");
+    } finally {
+      setLancement(false);
+    }
+  }
+
+  const enCours = liste.some((c) => c.statut === "en_attente" || c.statut === "en_cours");
+  return { liste, compiler, lancement, enCours };
+}
+
+export function BoutonCompiler({ onClick, occupe }: { onClick: () => void; occupe: boolean }) {
+  return (
+    <Button size="sm" onClick={onClick} disabled={occupe}>
+      {occupe ? <Loader2 className="animate-spin" /> : <Hammer />} Compiler sur GitHub
+    </Button>
+  );
+}
+
+export function ListeCompilations({ liste, onDemanderCorrection }: { liste: CompilationPublique[]; onDemanderCorrection?: (texte: string) => void }) {
+  if (!liste.length) return null;
+  return (
+    <div className="flex flex-col gap-2 border-t p-2">
+      {liste.map((c) => (
+        <CarteCompilation key={c.id} compilation={c} onDemanderCorrection={onDemanderCorrection} />
+      ))}
+    </div>
+  );
+}

@@ -130,8 +130,10 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
               dernier={i === dernierIndex}
               enCours={occupe && i === dernierIndex && m.role === "assistant"}
               occupe={occupe}
+              conversationId={conversationId}
               onRegenerer={m.role === "assistant" ? () => regenerer(i === dernierIndex ? undefined : m.id) : undefined}
               onEditer={m.role === "user" ? (t) => editer(i, t) : undefined}
+              onEnvoyer={(t) => envoyer(t)}
             />
           ))}
           {status === "submitted" && messages.at(-1)?.role === "user" && (

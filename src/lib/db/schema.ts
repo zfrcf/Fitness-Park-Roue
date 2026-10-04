@@ -49,6 +49,26 @@ export const depenses = pgTable("depenses", {
   majA: timestamp("maj_a", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("depenses_pk_idx").on(t.mois, t.fournisseurId)]);
 
+/** Compilations lancées sur GitHub Actions. */
+export const compilations = pgTable("compilations", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull(),
+  messageId: text("message_id").notNull(),
+  nom: text("nom").notNull(),
+  branche: text("branche").notNull(),
+  brancheUrl: text("branche_url"),
+  nbFichiers: integer("nb_fichiers").notNull().default(0),
+  statut: text("statut").notNull().default("en_attente"), // en_attente | en_cours | reussie | echouee | erreur
+  runId: integer("run_id"),
+  runUrl: text("run_url"),
+  jarNom: text("jar_nom"),
+  jarArtefactId: integer("jar_artefact_id"),
+  journal: text("journal"),
+  erreur: text("erreur"),
+  creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
+  majA: timestamp("maj_a", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("compilations_message_idx").on(t.messageId)]);
+
 /** DDL idempotent, exécuté au premier accès (pas de système de migration à gérer). */
 export const DDL = `
 CREATE TABLE IF NOT EXISTS conversations (
@@ -86,4 +106,23 @@ CREATE TABLE IF NOT EXISTS depenses (
   maj_a TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (mois, fournisseur_id)
 );
+CREATE TABLE IF NOT EXISTS compilations (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  nom TEXT NOT NULL,
+  branche TEXT NOT NULL,
+  branche_url TEXT,
+  nb_fichiers INTEGER NOT NULL DEFAULT 0,
+  statut TEXT NOT NULL DEFAULT 'en_attente',
+  run_id INTEGER,
+  run_url TEXT,
+  jar_nom TEXT,
+  jar_artefact_id INTEGER,
+  journal TEXT,
+  erreur TEXT,
+  cree_a TIMESTAMPTZ NOT NULL DEFAULT now(),
+  maj_a TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS compilations_message_idx ON compilations (message_id);
 `;

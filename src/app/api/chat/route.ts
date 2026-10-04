@@ -2,6 +2,8 @@ import { convertToModelMessages, createUIMessageStream, createUIMessageStreamRes
 import { executerChat } from "@/lib/chat/orchestrateur";
 import { normaliserReglages } from "@/lib/chat/reglages";
 import type { CorpsRequeteChat, MessageUI } from "@/lib/chat/types";
+import { ajouterMessage, enregistrerMessages } from "@/lib/db/conversations";
+import { lireReglages } from "@/lib/db/reglages";
 import { creerModele } from "@/lib/fournisseurs/client";
 import { fournisseurs } from "@/lib/fournisseurs/registre";
 import { getKV } from "@/lib/kv";
@@ -21,7 +23,13 @@ export async function POST(req: Request) {
     return Response.json({ erreur: "Aucun message." }, { status: 400 });
   }
   const conversationId = typeof corps.conversationId === "string" && corps.conversationId ? corps.conversationId.slice(0, 64) : "sans-id";
-  const reglages = normaliserReglages(corps.reglages);
+  // Réglages : ceux de la base, surchargés par ceux envoyés par le client.
+  let reglages;
+  try {
+    reglages = normaliserReglages({ ...(await lireReglages()), ...(corps.reglages ?? {}) });
+  } catch {
+    reglages = normaliserReglages(corps.reglages);
+  }
 
   // Seules les parties texte comptent pour le modèle (les parties de données servent à l'affichage).
   const messagesUI = corps.messages.map((m) => ({
@@ -35,14 +43,34 @@ export async function POST(req: Request) {
     return Response.json({ erreur: "Aucun fournisseur configuré (variables PROVIDER_n_*)." }, { status: 503 });
   }
 
+  // L'historique envoyé par le client fait foi (édition, régénération) : on le persiste tel quel.
+  if (conversationId !== "sans-id") {
+    try {
+      await enregistrerMessages(conversationId, corps.messages);
+    } catch (e) {
+      console.warn("[chat] persistance impossible :", e instanceof Error ? e.message : e);
+    }
+  }
+
+  let fournisseurUtilise: string | undefined;
   const stream = createUIMessageStream<MessageUI>({
+    originalMessages: corps.messages,
     execute: async ({ writer }) => {
-      await executerChat(
+      const r = await executerChat(
         { fournisseurs: liste, kv: getKV(), creerModele, log: (m) => console.warn(m) },
         { writer, messages, reglages, conversationId, signal: req.signal },
       );
+      fournisseurUtilise = r.meta.fournisseurId;
     },
     onError: (e) => (e instanceof Error ? e.message : String(e)),
+    onEnd: async ({ responseMessage }) => {
+      if (conversationId === "sans-id") return;
+      try {
+        await ajouterMessage(conversationId, responseMessage, fournisseurUtilise);
+      } catch (e) {
+        console.warn("[chat] persistance de la réponse impossible :", e instanceof Error ? e.message : e);
+      }
+    },
   });
 
   return createUIMessageStreamResponse({ stream });

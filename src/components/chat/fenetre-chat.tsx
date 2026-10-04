@@ -7,7 +7,9 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { REGLAGES_DEFAUT, type MessageUI, type MetaMessage, type Reglages } from "@/lib/chat/types";
+import { signalerMajConversations } from "@/components/coque/barre-laterale";
+import type { MessageUI, MetaMessage } from "@/lib/chat/types";
+import { useReglages } from "./reglages-contexte";
 import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { partiesVisibles } from "./utils";
@@ -35,14 +37,18 @@ function MetaReponse({ meta }: { meta?: MetaMessage }) {
   );
 }
 
-export function FenetreChat({ conversationId, reglages = REGLAGES_DEFAUT }: { conversationId: string; reglages?: Reglages }) {
+export function FenetreChat({ conversationId, messagesInitiaux = [] }: { conversationId: string; messagesInitiaux?: MessageUI[] }) {
   const [saisie, setSaisie] = useState("");
+  const { reglages } = useReglages();
+  const urlRemplacee = useRef(messagesInitiaux.length > 0);
   const zone = useRef<HTMLTextAreaElement>(null);
   const bas = useRef<HTMLDivElement>(null);
 
   const { messages, sendMessage, status, stop, error } = useChat<MessageUI>({
     id: conversationId,
-    transport: new DefaultChatTransport({ api: "/api/chat", body: { conversationId, reglages } }),
+    messages: messagesInitiaux,
+    transport: new DefaultChatTransport({ api: "/api/chat", body: () => ({ conversationId, reglages }) }),
+    onFinish: () => signalerMajConversations(),
     onData: (part) => {
       if (part.type === "data-bascule") {
         const b = part.data;
@@ -66,6 +72,12 @@ export function FenetreChat({ conversationId, reglages = REGLAGES_DEFAUT }: { co
     void sendMessage({ text: texte });
     setSaisie("");
     zone.current?.focus();
+    if (!urlRemplacee.current) {
+      // Première question : l'URL devient /c/<id> sans recharger la page.
+      urlRemplacee.current = true;
+      window.history.replaceState(null, "", `/c/${conversationId}`);
+      setTimeout(signalerMajConversations, 800);
+    }
   }
 
   function clavier(e: KeyboardEvent<HTMLTextAreaElement>) {

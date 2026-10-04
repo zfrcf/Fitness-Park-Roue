@@ -1,11 +1,16 @@
-import { Entete } from "@/components/coque/entete";
 import { FenetreChat } from "@/components/chat/fenetre-chat";
+import { Coque } from "@/components/coque/coque";
+
+export const dynamic = "force-dynamic";
+
+function nouvelId() {
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+}
 
 export default function Accueil() {
   return (
-    <main className="flex h-dvh flex-col">
-      <Entete />
-      <FenetreChat conversationId="brouillon" />
-    </main>
+    <Coque>
+      <FenetreChat key={nouvelId()} conversationId={nouvelId()} />
+    </Coque>
   );
 }

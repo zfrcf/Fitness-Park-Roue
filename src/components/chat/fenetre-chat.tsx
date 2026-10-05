@@ -12,7 +12,7 @@ import { signalerMajConversations } from "@/components/coque/barre-laterale";
 import { Button } from "@/components/ui/button";
 import type { MessageUI } from "@/lib/chat/types";
 import { Message } from "./message";
-import { fusionnerProjet } from "@/lib/fichiers/projet";
+import { fusionnerProjetDetaille } from "@/lib/fichiers/projet";
 import { estimerTokens } from "@/lib/chat/contexte";
 import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -174,7 +174,7 @@ export function FenetreChat({
 
   // État du projet (fusion des fichiers de toutes les réponses) et taille estimée du contexte.
   const messagesStables = occupe ? messages.slice(0, -1) : messages;
-  const projet = useMemo(() => fusionnerProjet(messagesStables), [messagesStables]);
+  const { fichiers: projet, echecs } = useMemo(() => fusionnerProjetDetaille(messagesStables), [messagesStables]);
   // Estimation du contexte réellement envoyé : texte des messages + contenu des pages lues
   // (réinjecté au modèle) + état du projet (renvoyé à chaque tour). (#41)
   const tokensContexte = useMemo(() => {
@@ -309,6 +309,7 @@ export function FenetreChat({
               onEditer={m.role === "user" ? (t) => editer(i, t) : undefined}
               onEnvoyer={(t) => envoyer(t)}
               projet={m.role === "assistant" && i === dernierIndex && projet.length > 0 ? projet : undefined}
+              avertissements={m.role === "assistant" ? echecs.filter((e) => e.messageId === m.id).map((e) => `${e.chemin} : ${e.raison}`) : undefined}
             />
           ))}
           {status === "submitted" && messages.at(-1)?.role === "user" && (

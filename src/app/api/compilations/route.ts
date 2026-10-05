@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { compilationsDuMessage, creerCompilation, majCompilation, versPublic } from "@/lib/db/compilations";
+import { compilationsDuMessage, versPublic } from "@/lib/db/compilations";
 import type { FichierGenere } from "@/lib/fichiers/extraire";
-import { nomArchive } from "@/lib/fichiers/extraire";
-import { creerBranche, retirerReserves, validerFichiers } from "@/lib/github/compilation";
+import { ErreurGitHub } from "@/lib/github/api";
+import { lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -25,24 +25,17 @@ export async function POST(req: Request) {
   const fichiers = corps.fichiers
     .filter((f) => f && typeof f.chemin === "string" && typeof f.contenu === "string")
     .map((f) => ({ chemin: f.chemin, contenu: f.contenu }));
-  const fichiersPropres = retirerReserves(fichiers);
-  const erreurs = validerFichiers(fichiersPropres);
-  if (erreurs.length) return NextResponse.json({ erreur: `Projet refusé : ${erreurs.join(" ; ")}` }, { status: 400 });
-
-  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const nom = nomArchive(fichiersPropres, "projet");
-  let c;
   try {
-    c = await creerCompilation({ id, conversationId: corps.conversationId.slice(0, 64), messageId: corps.messageId.slice(0, 64), nom, branche: `compilation/${id}`, nbFichiers: fichiersPropres.length });
+    const c = await lancerCompilationProjet({ conversationId: corps.conversationId, messageId: corps.messageId, fichiers });
+    return NextResponse.json({ compilation: versPublic(c) });
   } catch (e) {
-    return NextResponse.json({ erreur: `Base de données indisponible : ${e instanceof Error ? e.message : ""}` }, { status: 503 });
+    if (e instanceof ProjetRefuse) return NextResponse.json({ erreur: e.message }, { status: 400 });
+    const message = e instanceof Error ? e.message : "échec";
+    // Base indisponible (création impossible) → 503 ; envoi GitHub impossible → 502 avec la compilation en erreur.
+    if (e instanceof ErreurGitHub) {
+      const derniere = (await compilationsDuMessage(corps.messageId).catch(() => []))[0];
+      return NextResponse.json(derniere ? { compilation: versPublic(derniere) } : { erreur: message }, { status: 502 });
+    }
+    return NextResponse.json({ erreur: `Base de données indisponible : ${message}` }, { status: 503 });
   }
-  try {
-    const b = await creerBranche(id, fichiersPropres, nom);
-    c = (await majCompilation(id, { brancheUrl: b.url })) ?? c;
-  } catch (e) {
-    c = (await majCompilation(id, { statut: "erreur", erreur: e instanceof Error ? e.message : "échec de l'envoi sur GitHub" })) ?? c;
-    return NextResponse.json({ compilation: versPublic(c) }, { status: 502 });
-  }
-  return NextResponse.json({ compilation: versPublic(c) });
 }

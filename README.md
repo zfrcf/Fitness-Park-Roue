@@ -293,7 +293,37 @@ sans jamais réécrire le reste (il peut aussi écrire « Supprimer : chemin »)
 réponse, le panneau montre le **projet complet** (fichiers de cette réponse marqués « modifié ») :
 c'est lui qui est téléchargé en .zip et compilé.
 
+### Modifications partielles (sans réécrire les fichiers)
+
+Pour un changement localisé, le modèle n'a pas à renvoyer le fichier entier : il émet un bloc
+de modification, appliqué à l'état du projet de la conversation :
+
+````markdown
+```modif src/main/java/com/exemple/MonMod.java
+<<<<<<< CHERCHER
+        int vitesse = 1;
+=======
+        int vitesse = 2;
+>>>>>>> REMPLACER
+```
+````
+
+Plusieurs paires CHERCHER / REMPLACER peuvent se suivre dans un même bloc. Le texte CHERCHER doit
+exister tel quel dans le fichier (espaces de fin de ligne et indentation sont tolérés). Une
+modification inapplicable est signalée sous la réponse (et au modèle au tour suivant, ou par le
+moteur des tâches de fond) pour qu'il renvoie le fichier entier. Les fichiers nouveaux ou
+largement réécrits restent livrés en entier dans un bloc classique avec leur chemin.
+
 ## Compilation sur GitHub (mods Minecraft, projets Gradle)
+
+### Compilation automatique
+
+Réglage **Compilation automatique** (activé par défaut, réglages de la conversation) : dès qu'une
+réponse crée ou modifie un projet Gradle, le serveur lance la compilation GitHub juste après la
+fin de la réponse, une seule fois par état du projet (empreinte mémorisée dans le KV), et jamais
+quand une tâche de fond est active sur la conversation (le moteur compile lui-même). Le résultat
+apparaît sous la réponse comme pour un lancement manuel.
+
 
 Un `.jar` de mod ne peut pas être compilé sur Vercel (ni Java ni Gradle, 300 s maximum). La
 compilation est donc confiée à **GitHub Actions**, gratuit pour un dépôt public :

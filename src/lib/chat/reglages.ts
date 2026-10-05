@@ -17,5 +17,6 @@ export function normaliserReglages(partiel: Partial<Reglages> | undefined): Regl
     r.raisonnement = partiel.raisonnement;
   }
   if (typeof partiel.rechercheAuto === "boolean") r.rechercheAuto = partiel.rechercheAuto;
+  if (typeof partiel.compilationAuto === "boolean") r.compilationAuto = partiel.compilationAuto;
   return r;
 }

@@ -160,6 +160,15 @@ export function ReglagesDialogue() {
               </div>
               <Switch id="recherche-auto" checked={brouillon.rechercheAuto} onCheckedChange={(v) => setBrouillon({ ...brouillon, rechercheAuto: v })} />
             </div>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="compilation-auto">Compilation automatique</Label>
+                <p className="text-xs text-muted-foreground">
+                  Dès qu&apos;une réponse crée ou modifie un projet Gradle (mod Minecraft), la compilation GitHub est lancée sans cliquer. Le résultat s&apos;affiche sous la réponse.
+                </p>
+              </div>
+              <Switch id="compilation-auto" checked={brouillon.compilationAuto} onCheckedChange={(v) => setBrouillon({ ...brouillon, compilationAuto: v })} />
+            </div>
             <div className="flex flex-col gap-2">
               <Label>Raccourcis clavier</Label>
               <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">

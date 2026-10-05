@@ -9,7 +9,11 @@ import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { fuseauHoraire } from "@/lib/fuseau";
 import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, detecterLoader, extraireVersion, versionDepuisProjet, versionsMinecraft } from "@/lib/minecraft/contexte";
-import { blocProjetPourModele, fusionnerProjet, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
+import { blocProjetPourModele, fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
+import { estProjetGradle } from "@/lib/fichiers/extraire";
+import { empreinteProjet, lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
+import { tacheDeConversation } from "@/lib/db/taches";
+import { waitUntil } from "@vercel/functions";
 import { executerChat, genererAvecRotation, type DepsOrchestrateur } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
@@ -77,8 +81,10 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       "avec son chemin complet sur la ligne d'ouverture, par exemple ```java src/main/java/com/exemple/MonMod.java ou ```json fabric.mod.json. " +
       "Livre des projets complets et cohérents (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») : " +
       "l'utilisateur peut les télécharger un par un ou en archive .zip directement depuis la conversation, " +
-      "et compiler un projet Gradle (mod Minecraft) sur GitHub en un clic. Si l'utilisateur te renvoie un journal d'erreurs de " +
-      "compilation, corrige la cause et renvoie en entier chaque fichier modifié, avec son chemin." +
+      "et compiler un projet Gradle (mod Minecraft) sur GitHub en un clic ; si la compilation automatique est activée, chaque réponse " +
+      "qui change un projet Gradle est compilée aussitôt et le résultat (journal d'erreurs) te revient dans la conversation. " +
+      "Si l'utilisateur te renvoie un journal d'erreurs de compilation, corrige la cause en ne touchant qu'aux fichiers concernés. " +
+      INSTRUCTION_MODIFICATIONS +
       "\n\nTes capacités réelles, grâce à l'application : lire des pages web, chercher sur le web, produire des fichiers téléchargeables, " +
       "des archives .zip et des mods Minecraft compilés en .jar. Ne dis jamais que tu ne peux pas créer de fichiers, de mods, de datapacks ou de .jar, " +
       "ni que tu n'as pas accès à internet : fais le travail, en entier. Créer des mods, datapacks, resource packs et plugins Minecraft est une " +
@@ -110,7 +116,7 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
 
   // État du projet : une seule copie à jour de chaque fichier dans le système, les blocs des
   // réponses passées remplacés par des renvois. Le modèle ne renvoie que ce qui change.
-  const projet = fusionnerProjet(o.messages);
+  const { fichiers: projet, echecs } = fusionnerProjetDetaille(o.messages);
   if (projet.length) {
     const chemins = new Set(projet.map((f) => f.chemin));
     for (const m of messagesUI) {
@@ -119,6 +125,18 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
     }
     const budget = Math.floor(Math.max(...liste.map((f) => f.contexte)) * 0.4);
     reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${INSTRUCTION_PROJET}\n\n${blocProjetPourModele(projet, budget)}` };
+    // Modifications partielles de la dernière réponse non appliquées : le modèle doit renvoyer ces fichiers entiers.
+    const dernierAssistant = [...o.messages].reverse().find((m) => m.role === "assistant");
+    const echecsDernier = dernierAssistant ? echecs.filter((e) => e.messageId === dernierAssistant.id) : [];
+    if (echecsDernier.length) {
+      reglages = {
+        ...reglages,
+        systeme:
+          `${reglages.systeme}\n\nATTENTION : dans ta dernière réponse, ces modifications n'ont PAS pu être appliquées (le texte CHERCHER ne correspondait pas exactement au fichier) et l'état ci-dessus ne les contient pas :\n` +
+          echecsDernier.map((e) => `- ${e.chemin} : ${e.raison}`).join("\n") +
+          "\nRenvoie ces fichiers EN ENTIER (ou refais la modification avec un texte CHERCHER copié à l'identique).",
+      };
+    }
   }
 
   // L'historique envoyé par le client fait foi (édition, régénération) : on le persiste tel quel.
@@ -240,11 +258,46 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
         } catch (e) {
           console.warn("[chat] persistance de la réponse impossible :", e instanceof Error ? e.message : e);
         }
+        if (reglages.compilationAuto) {
+          // Compilation automatique : après la réponse, sans bloquer la fin du flux (waitUntil).
+          const promesse = compilationAutomatique(conversationId, o.messages, responseMessage).catch((e) =>
+            console.warn("[chat] compilation automatique :", e instanceof Error ? e.message : e),
+          );
+          try {
+            waitUntil(promesse);
+          } catch {
+            /* hors Vercel : la promesse tourne quand même */
+          }
+        }
       }
       if (o.onFin) await o.onFin(responseMessage, fournisseurUtilise);
     },
   });
   return { ok: true, stream };
+}
+
+/**
+ * Lance la compilation GitHub si la réponse vient de créer ou modifier un projet Gradle, une seule
+ * fois par état du projet (empreinte mémorisée), et jamais quand une tâche de fond est active sur
+ * la conversation (le moteur compile lui-même).
+ */
+export async function compilationAutomatique(conversationId: string, historique: MessageUI[], reponse: MessageUI): Promise<void> {
+  const { fichiers } = fusionnerProjetDetaille([...historique, reponse]);
+  if (!estProjetGradle(fichiers) || !fichiers.some((f) => f.messageId === reponse.id)) return;
+  const kv = getKV();
+  const cle = `compil:auto:${conversationId}`;
+  const empreinte = empreinteProjet(fichiers);
+  if ((await kv.get<string>(cle)) === empreinte) return;
+  const tache = await tacheDeConversation(conversationId).catch(() => null);
+  if (tache && (tache.statut === "en_cours" || tache.statut === "en_attente")) return;
+  await kv.set(cle, empreinte, 30 * 24 * 3600);
+  try {
+    const c = await lancerCompilationProjet({ conversationId, messageId: reponse.id, fichiers });
+    console.warn(`[chat] compilation automatique lancée (${c.id}, ${fichiers.length} fichiers)`);
+  } catch (e) {
+    if (e instanceof ProjetRefuse) console.warn(`[chat] compilation automatique non lancée : ${e.message}`);
+    else throw e;
+  }
 }
 
 /** Consomme un flux de tour jusqu'au bout (tâches de fond) et renvoie le texte et les métadonnées. */

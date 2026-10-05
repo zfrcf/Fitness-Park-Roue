@@ -8,6 +8,8 @@ export interface Reglages {
   raisonnement: NiveauRaisonnement;
   /** Le modèle peut déclencher lui-même une recherche web (outil). */
   rechercheAuto: boolean;
+  /** Après une réponse qui change un projet Gradle, la compilation GitHub est lancée automatiquement. */
+  compilationAuto: boolean;
 }
 
 export const REGLAGES_DEFAUT: Reglages = {
@@ -17,6 +19,7 @@ export const REGLAGES_DEFAUT: Reglages = {
   maxTokens: 16384,
   raisonnement: "aucun",
   rechercheAuto: true,
+  compilationAuto: true,
 };
 
 export interface Bascule {

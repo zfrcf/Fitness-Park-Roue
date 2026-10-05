@@ -64,6 +64,45 @@ interface BlocFichier extends FichierGenere {
   /** Indices de ligne du bloc (ouverture et clôture incluses). */
   debut: number;
   fin: number;
+  /** Bloc de modification partielle (```modif chemin) plutôt qu'un fichier entier. */
+  modification: boolean;
+}
+
+/** Langues qui désignent un bloc de modification partielle d'un fichier existant. */
+const RE_LANGUE_MODIF = /^(modif|modification|edit|patch)$/i;
+
+/** Une modification partielle : des paires « chercher → remplacer » appliquées à un fichier du projet. */
+export interface ModificationFichier {
+  chemin: string;
+  remplacements: Array<{ chercher: string; remplacer: string }>;
+}
+
+const RE_DEBUT_CHERCHER = /^<{4,}\s*(?:CHERCHER|SEARCH|ANCIEN|OLD)\s*$/i;
+const RE_SEPARATEUR = /^={4,}\s*$/;
+const RE_FIN_REMPLACER = /^>{4,}\s*(?:REMPLACER|REPLACE|NOUVEAU|NEW)\s*$/i;
+
+/** Lit les paires CHERCHER / REMPLACER d'un bloc de modification. */
+export function lirePairesModification(corps: string): Array<{ chercher: string; remplacer: string }> {
+  const paires: Array<{ chercher: string; remplacer: string }> = [];
+  let etat: "hors" | "chercher" | "remplacer" = "hors";
+  let chercher: string[] = [];
+  let remplacer: string[] = [];
+  for (const ligne of corps.split("\n")) {
+    if (etat === "hors") {
+      if (RE_DEBUT_CHERCHER.test(ligne)) {
+        etat = "chercher";
+        chercher = [];
+        remplacer = [];
+      }
+    } else if (etat === "chercher") {
+      if (RE_SEPARATEUR.test(ligne)) etat = "remplacer";
+      else chercher.push(ligne);
+    } else if (RE_FIN_REMPLACER.test(ligne)) {
+      paires.push({ chercher: chercher.join("\n"), remplacer: remplacer.join("\n") });
+      etat = "hors";
+    } else remplacer.push(ligne);
+  }
+  return paires;
 }
 
 /** Parcourt les blocs de code et renvoie ceux qui désignent un fichier. */
@@ -110,7 +149,8 @@ function analyserBlocs(lignes: string[]): BlocFichier[] {
       }
     }
     if (chemin && corps.length > 0) {
-      blocs.push({ chemin, langue, contenu: corps.join("\n").replace(/\s+$/, "") + "\n", debut: i, fin: Math.min(j, lignes.length - 1) });
+      const modification = !!langue && RE_LANGUE_MODIF.test(langue);
+      blocs.push({ chemin, langue, contenu: corps.join("\n").replace(/\s+$/, "") + "\n", debut: i, fin: Math.min(j, lignes.length - 1), modification });
     }
     i = j + 1;
   }
@@ -120,23 +160,37 @@ function analyserBlocs(lignes: string[]): BlocFichier[] {
 export function extraireFichiers(markdown: string): FichierGenere[] {
   const fichiers = new Map<string, FichierGenere>();
   for (const b of analyserBlocs(markdown.split("\n"))) {
+    if (b.modification) continue;
     fichiers.set(b.chemin, { chemin: b.chemin, langue: b.langue, contenu: b.contenu });
   }
   return [...fichiers.values()];
 }
 
 /**
+ * Modifications partielles d'une réponse (blocs ```modif chemin), dans l'ordre. Un bloc sans
+ * paire valide est renvoyé avec une liste vide : l'appelant le signale comme mal formé.
+ */
+export function extraireModifications(markdown: string): ModificationFichier[] {
+  const out: ModificationFichier[] = [];
+  for (const b of analyserBlocs(markdown.split("\n"))) {
+    if (!b.modification) continue;
+    out.push({ chemin: b.chemin, remplacements: lirePairesModification(b.contenu) });
+  }
+  return out;
+}
+
+/**
  * Remplace les blocs de code des fichiers désignés par un texte court (fourni par `remplacant`,
  * null pour conserver le bloc). Sert à ne pas renvoyer deux fois le même fichier au modèle.
  */
-export function remplacerBlocsFichiers(markdown: string, remplacant: (chemin: string) => string | null): string {
+export function remplacerBlocsFichiers(markdown: string, remplacant: (chemin: string, modification: boolean) => string | null): string {
   const lignes = markdown.split("\n");
   const blocs = analyserBlocs(lignes);
   if (!blocs.length) return markdown;
   const sortie: string[] = [];
   let i = 0;
   for (const b of blocs) {
-    const r = remplacant(b.chemin);
+    const r = remplacant(b.chemin, b.modification);
     if (r === null) continue;
     sortie.push(...lignes.slice(i, b.debut), r);
     i = b.fin + 1;

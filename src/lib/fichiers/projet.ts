@@ -3,7 +3,7 @@
  * la version la plus récente de chaque chemin faisant foi. Il est renvoyé au modèle à chaque
  * tour (une seule copie par fichier) pour qu'il ne reprenne que ce qui change.
  */
-import { extraireFichiers, remplacerBlocsFichiers, type FichierGenere } from "./extraire";
+import { extraireFichiers, extraireModifications, remplacerBlocsFichiers, type FichierGenere } from "./extraire";
 
 export interface FichierProjet extends FichierGenere {
   /** Message de l'assistant qui a produit cette version. */
@@ -37,18 +37,109 @@ export const RE_CHEMIN_RESERVE = /^\.github\/|^vercel\.json$|(^|\/)gradlew(\.bat
  * les chemins réservés (.github/, wrapper Gradle) sont ignorés.
  */
 export function fusionnerProjet(messages: MessageMinimal[]): FichierProjet[] {
+  return fusionnerProjetDetaille(messages).fichiers;
+}
+
+/** Une modification partielle qui n'a pas pu être appliquée (le modèle doit renvoyer le fichier entier). */
+export interface EchecModification {
+  messageId: string;
+  chemin: string;
+  raison: string;
+}
+
+/**
+ * Comme fusionnerProjet, mais applique aussi les blocs de modification partielle
+ * (```modif chemin, paires CHERCHER/REMPLACER) et renvoie les modifications qui ont échoué.
+ */
+export function fusionnerProjetDetaille(messages: MessageMinimal[]): { fichiers: FichierProjet[]; echecs: EchecModification[] } {
   const projet = new Map<string, FichierProjet>();
+  const echecs: EchecModification[] = [];
   let revision = 0;
   for (const m of messages) {
     if (m.role !== "assistant") continue;
     const texte = texteDuMessage(m);
     for (const chemin of suppressionsDemandees(texte)) projet.delete(chemin);
+    let change = false;
     const fichiers = extraireFichiers(texte).filter((f) => !RE_CHEMIN_RESERVE.test(f.chemin));
-    if (!fichiers.length) continue;
-    for (const f of fichiers) projet.set(f.chemin, { ...f, messageId: m.id, revision });
-    revision++;
+    for (const f of fichiers) {
+      projet.set(f.chemin, { ...f, messageId: m.id, revision });
+      change = true;
+    }
+    for (const modif of extraireModifications(texte)) {
+      if (RE_CHEMIN_RESERVE.test(modif.chemin)) continue;
+      const actuel = projet.get(modif.chemin);
+      if (!actuel) {
+        echecs.push({ messageId: m.id, chemin: modif.chemin, raison: "fichier inconnu dans le projet" });
+        continue;
+      }
+      if (!modif.remplacements.length) {
+        echecs.push({ messageId: m.id, chemin: modif.chemin, raison: "bloc mal formé (aucune paire CHERCHER / REMPLACER)" });
+        continue;
+      }
+      let contenu = actuel.contenu;
+      let ok = true;
+      for (const { chercher, remplacer } of modif.remplacements) {
+        const r = appliquerRemplacement(contenu, chercher, remplacer);
+        if (r === null) {
+          echecs.push({ messageId: m.id, chemin: modif.chemin, raison: `texte à remplacer introuvable : « ${resumer(chercher)} »` });
+          ok = false;
+          break;
+        }
+        contenu = r;
+      }
+      if (!ok) continue;
+      projet.set(modif.chemin, { ...actuel, contenu, messageId: m.id, revision });
+      change = true;
+    }
+    if (change) revision++;
   }
-  return [...projet.values()];
+  return { fichiers: [...projet.values()], echecs };
+}
+
+function resumer(s: string): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  return t.length > 60 ? `${t.slice(0, 60)}…` : t;
+}
+
+/**
+ * Remplace la première occurrence de `chercher` dans `contenu`. Tolérances, dans l'ordre :
+ * correspondance exacte ; espaces de fin de ligne ignorés ; indentation ignorée (le remplacement
+ * est alors ré-indenté comme la première ligne trouvée). Renvoie null si introuvable.
+ */
+export function appliquerRemplacement(contenu: string, chercher: string, remplacer: string): string | null {
+  const cible = chercher.replace(/\n$/, "");
+  if (!cible.trim()) return null;
+  const idx = contenu.indexOf(cible);
+  if (idx >= 0) return contenu.slice(0, idx) + remplacer.replace(/\n$/, "") + contenu.slice(idx + cible.length);
+
+  const lignes = contenu.split("\n");
+  const voulues = cible.split("\n");
+  const essais: Array<{ norm: (s: string) => string; reindenter: boolean }> = [
+    { norm: (s) => s.trimEnd(), reindenter: false },
+    { norm: (s) => s.trim(), reindenter: true },
+  ];
+  for (const { norm, reindenter } of essais) {
+    const v = voulues.map(norm);
+    for (let i = 0; i + v.length <= lignes.length; i++) {
+      let egal = true;
+      for (let k = 0; k < v.length; k++) {
+        if (norm(lignes[i + k]) !== v[k]) {
+          egal = false;
+          break;
+        }
+      }
+      if (!egal) continue;
+      let nouvelles = remplacer.replace(/\n$/, "").split("\n");
+      if (reindenter) {
+        // Décalage entre l'indentation du fichier et celle du bloc CHERCHER, appliqué au remplacement.
+        const indentFichier = /^\s*/.exec(lignes[i])?.[0] ?? "";
+        const indentBloc = /^\s*/.exec(voulues[0])?.[0] ?? "";
+        nouvelles = nouvelles.map((l) => (l.startsWith(indentBloc) ? indentFichier + l.slice(indentBloc.length) : l));
+      }
+      return [...lignes.slice(0, i), ...nouvelles, ...lignes.slice(i + v.length)].join("\n");
+    }
+  }
+  return null;
 }
 
 /** Fichiers produits par un message donné, dans l'état courant du projet. */
@@ -56,12 +147,21 @@ export function fichiersModifiesPar(projet: FichierProjet[], messageId: string):
   return projet.filter((f) => f.messageId === messageId);
 }
 
+/** Mode d'emploi des modifications partielles, donné au modèle (prompt système et messages de correction). */
+export const INSTRUCTION_MODIFICATIONS =
+  "Pour un changement localisé dans un fichier existant, n'écris pas le fichier entier : utilise un bloc de modification " +
+  "```modif chemin/du/fichier contenant une ou plusieurs paires exactes :\n" +
+  "<<<<<<< CHERCHER\n(lignes existantes, copiées à l'identique, assez longues pour être uniques)\n=======\n(nouvelles lignes)\n>>>>>>> REMPLACER\n" +
+  "Le texte CHERCHER doit exister tel quel dans le fichier (indentation comprise). Renvoie un fichier EN ENTIER seulement s'il est " +
+  "nouveau ou presque entièrement réécrit.";
+
 export const INSTRUCTION_PROJET =
   "Un projet est déjà en cours dans cette conversation : son état complet et à jour est donné ci-dessous " +
   "(c'est la seule version qui compte ; les blocs de code de tes réponses précédentes ont été remplacés par des renvois). " +
-  "Pour toute modification ou correction, renvoie UNIQUEMENT les fichiers nouveaux ou modifiés, chacun EN ENTIER dans son " +
-  "bloc de code avec son chemin, et ne récris jamais les fichiers inchangés. Pour supprimer un fichier, écris une ligne " +
-  "« Supprimer : chemin ». L'utilisateur compile et télécharge toujours le projet complet (état ci-dessous + tes modifications).";
+  "Pour toute modification ou correction, ne touche qu'aux fichiers concernés et ne récris jamais les fichiers inchangés. " +
+  INSTRUCTION_MODIFICATIONS +
+  " Pour supprimer un fichier, écris une ligne « Supprimer : chemin ». L'utilisateur compile et télécharge toujours le projet " +
+  "complet (état ci-dessous + tes modifications).";
 
 function estimerTokens(texte: string): number {
   return Math.ceil(texte.length / 3.2);
@@ -97,7 +197,9 @@ export function blocProjetPourModele(projet: FichierProjet[], budgetTokens: numb
 
 /** Remplace, dans une réponse passée, les blocs des fichiers connus par un renvoi à l'état du projet. */
 export function masquerFichiersConnus(markdown: string, chemins: Set<string>): string {
-  return remplacerBlocsFichiers(markdown, (chemin) => (chemins.has(chemin) ? `[fichier \`${chemin}\` : voir l'état du projet]` : null));
+  return remplacerBlocsFichiers(markdown, (chemin, modification) =>
+    chemins.has(chemin) ? (modification ? `[modification de \`${chemin}\` : appliquée, voir l'état du projet]` : `[fichier \`${chemin}\` : voir l'état du projet]`) : null,
+  );
 }
 
 /** Chemins à supprimer demandés dans une réponse (« Supprimer : chemin »). */

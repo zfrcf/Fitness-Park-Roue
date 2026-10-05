@@ -1,10 +1,9 @@
 /** Assemblage du moteur avec les vraies dépendances (base, GitHub, fournisseurs, planificateur). */
 import { consommerTour, executerTour } from "@/lib/chat/tour";
 import { ajouterMessage, lireConversation } from "@/lib/db/conversations";
-import { creerCompilation, lireCompilation, majCompilation } from "@/lib/db/compilations";
+import { lireCompilation } from "@/lib/db/compilations";
 import { journaliser, lireTache, majTache, tachesAReveiller } from "@/lib/db/taches";
-import { nomArchive } from "@/lib/fichiers/extraire";
-import { creerBranche, retirerReserves, validerFichiers } from "@/lib/github/compilation";
+import { lancerCompilationProjet } from "@/lib/github/lancer";
 import { rafraichirCompilation } from "@/lib/github/suivi";
 import { fournisseurs } from "@/lib/fournisseurs/registre";
 import { getKV } from "@/lib/kv";
@@ -44,22 +43,7 @@ export function depsReelles(): DepsMoteur {
       }
       return { texte: c.texte, fournisseurId: c.meta.fournisseurId ?? fidFin, usage: c.meta.usage, erreur: c.erreur, reessaiA: c.reessaiA };
     },
-    lancerCompilation: async ({ conversationId, messageId, fichiers }) => {
-      const fichiersPropres = retirerReserves(fichiers);
-      const erreurs = validerFichiers(fichiersPropres);
-      if (erreurs.length) throw new Error(`Projet refusé : ${erreurs.join(" ; ")}`);
-      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const nom = nomArchive(fichiersPropres, "projet");
-      let c = await creerCompilation({ id, conversationId, messageId, nom, branche: `compilation/${id}`, nbFichiers: fichiersPropres.length });
-      try {
-        const b = await creerBranche(id, fichiersPropres, nom);
-        c = (await majCompilation(id, { brancheUrl: b.url })) ?? c;
-      } catch (e) {
-        await majCompilation(id, { statut: "erreur", erreur: e instanceof Error ? e.message : "échec de l'envoi sur GitHub" });
-        throw e;
-      }
-      return versEtat(c);
-    },
+    lancerCompilation: async ({ conversationId, messageId, fichiers }) => versEtat(await lancerCompilationProjet({ conversationId, messageId, fichiers })),
     etatCompilation: async (id) => {
       const c = (await rafraichirCompilation(id)) ?? (await lireCompilation(id));
       return c ? versEtat(c) : null;

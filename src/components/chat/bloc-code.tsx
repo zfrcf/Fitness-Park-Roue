@@ -39,6 +39,10 @@ const LANGUES: Record<string, string> = {
   diff: "Diff",
   text: "Texte",
   plaintext: "Texte",
+  modif: "Modification",
+  modification: "Modification",
+  patch: "Modification",
+  edit: "Modification",
 };
 
 export function copierTexte(texte: string): Promise<void> {

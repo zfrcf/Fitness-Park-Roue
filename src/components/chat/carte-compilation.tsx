@@ -139,12 +139,25 @@ export function useCompilations(conversationId: string | undefined, messageId: s
   useEffect(() => {
     if (!conversationId) return;
     let actif = true;
-    void fetch(`/api/compilations?messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { compilations: [] }))
-      .then((j: { compilations?: CompilationPublique[] }) => actif && setListe(j.compilations ?? []))
-      .catch(() => {});
+    let minuteur: ReturnType<typeof setTimeout> | undefined;
+    // La compilation automatique (lancée côté serveur juste après la réponse) peut arriver quelques
+    // secondes après le montage : on re-interroge brièvement tant que la liste est vide.
+    const charger = async (essai: number) => {
+      try {
+        const r = await fetch(`/api/compilations?messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" });
+        const j = (r.ok ? await r.json() : { compilations: [] }) as { compilations?: CompilationPublique[] };
+        if (!actif) return;
+        const liste = j.compilations ?? [];
+        setListe((precedente) => (precedente.length && !liste.length ? precedente : liste));
+        if (!liste.length && essai < 6) minuteur = setTimeout(() => void charger(essai + 1), 5000);
+      } catch {
+        /* ignoré */
+      }
+    };
+    void charger(0);
     return () => {
       actif = false;
+      if (minuteur) clearTimeout(minuteur);
     };
   }, [messageId, conversationId]);
 

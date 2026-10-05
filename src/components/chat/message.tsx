@@ -227,6 +227,7 @@ function Raisonnement({ texte, enCours }: { texte: string; enCours: boolean }) {
 function PanneauFichiersAvecCompilation({
   fichiers,
   projet,
+  avertissements,
   conversationId,
   messageId,
   occupe,
@@ -236,6 +237,8 @@ function PanneauFichiersAvecCompilation({
   fichiers: ReturnType<typeof extraireFichiers>;
   /** État complet du projet de la conversation (dernier message seulement). */
   projet?: FichierProjet[];
+  /** Modifications partielles de ce message qui n'ont pas pu être appliquées. */
+  avertissements?: string[];
   conversationId?: string;
   messageId: string;
   occupe: boolean;
@@ -244,22 +247,52 @@ function PanneauFichiersAvecCompilation({
   // Sur le dernier message, on montre, télécharge et compile le projet complet ; les fichiers de ce message sont marqués.
   const complet = projet && projet.length > fichiers.length ? projet : undefined;
   const affiches = complet ?? fichiers;
-  const modifies = useMemo(() => (complet ? new Set(fichiers.map((f) => f.chemin)) : undefined), [complet, fichiers]);
+  // Fichiers touchés par CE message : ceux renvoyés en entier et ceux modifiés par bloc ```modif.
+  const modifies = useMemo(
+    () => (complet ? new Set([...fichiers.map((f) => f.chemin), ...complet.filter((f) => f.messageId === messageId).map((f) => f.chemin)]) : undefined),
+    [complet, fichiers, messageId],
+  );
   const gradle = estProjetGradle(affiches) && !!conversationId && !!projet;
   const liste = useMemo(() => affiches.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [affiches]);
   const { liste: compilations, compiler, lancement, enCours } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
   const titre = complet ? `Projet complet : ${complet.length} fichiers` : undefined;
-  const sousTitre = complet && fichiers.length > 0 ? `${fichiers.length} modifié${fichiers.length > 1 ? "s" : ""} dans cette réponse` : complet ? "aucun fichier modifié dans cette réponse" : undefined;
-  if (!gradle) return <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} />;
+  const nbModifies = modifies?.size ?? fichiers.length;
+  const sousTitre = complet && nbModifies > 0 ? `${nbModifies} modifié${nbModifies > 1 ? "s" : ""} dans cette réponse` : complet ? "aucun fichier modifié dans cette réponse" : undefined;
+  const alerte = avertissements?.length ? (
+    <div role="alert" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+      <p className="font-medium">Modifications non appliquées (le texte à remplacer ne correspond pas au fichier) :</p>
+      <ul className="mt-1 list-disc pl-4">
+        {avertissements.map((a) => (
+          <li key={a}>{a}</li>
+        ))}
+      </ul>
+      {onEnvoyer && !occupe && (
+        <Button size="xs" variant="outline" className="mt-2" onClick={() => onEnvoyer("Ces modifications n'ont pas pu être appliquées : renvoie ces fichiers en entier, chacun dans son bloc de code avec son chemin.")}>
+          Demander les fichiers entiers
+        </Button>
+      )}
+    </div>
+  ) : null;
+  if (!gradle) {
+    return (
+      <>
+        {alerte}
+        <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} />
+      </>
+    );
+  }
   return (
-    <PanneauFichiers
-      fichiers={affiches}
-      titre={titre}
-      sousTitre={sousTitre}
-      modifies={modifies}
-      actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
-      pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} />}
-    />
+    <>
+      {alerte}
+      <PanneauFichiers
+        fichiers={affiches}
+        titre={titre}
+        sousTitre={sousTitre}
+        modifies={modifies}
+        actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
+        pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} />}
+      />
+    </>
   );
 }
 
@@ -275,9 +308,11 @@ export interface PropsMessage {
   onEnvoyer?: (texte: string) => void;
   /** État complet du projet de la conversation (fourni au dernier message de l'assistant). */
   projet?: FichierProjet[];
+  /** Modifications partielles (blocs modif) de ce message non appliquées, à signaler. */
+  avertissements?: string[];
 }
 
-export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer, projet }: PropsMessage) {
+export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer, projet, avertissements }: PropsMessage) {
   const [edition, setEdition] = useState(false);
   const fichiers = useMemo(() => (m.role === "assistant" && !enCours ? extraireFichiers(texteDe(m)) : []), [m, enCours]);
   const [brouillon, setBrouillon] = useState("");
@@ -364,7 +399,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
         {/* Panneau projet : visible dès que CE message a des fichiers OU que le projet accumulé en a
             un (fourni au dernier message), même si la dernière réponse est de la prose. (#39) */}
         {(fichiers.length > 0 || (projet && projet.length > 0)) && (
-          <PanneauFichiersAvecCompilation fichiers={fichiers} projet={projet} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
+          <PanneauFichiersAvecCompilation fichiers={fichiers} projet={projet} avertissements={avertissements} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <MetaReponse meta={m.metadata} enCours={enCours} texte={texte} />

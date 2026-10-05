@@ -6,8 +6,8 @@
  */
 import type { MessageUI } from "@/lib/chat/types";
 import { estProjetGradle, type FichierGenere } from "@/lib/fichiers/extraire";
-import { createHash } from "node:crypto";
-import { fusionnerProjet } from "@/lib/fichiers/projet";
+import { fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS } from "@/lib/fichiers/projet";
+import { empreinteProjet } from "@/lib/github/lancer";
 import { validerFichiers } from "@/lib/github/compilation";
 import type { Fournisseur } from "@/lib/fournisseurs/types";
 import type { KV } from "@/lib/kv";
@@ -78,15 +78,10 @@ export async function ordonnerPourTache(deps: DepsMoteur, tacheId: string): Prom
   return [...libres, ...occupes];
 }
 
-/** Empreinte stable du projet (sha256 des fichiers triés) : détecte un projet strictement inchangé. */
-export function empreinteProjet(fichiers: Array<{ chemin: string; contenu: string }>): string {
-  const h = createHash("sha256");
-  for (const f of [...fichiers].sort((a, b) => a.chemin.localeCompare(b.chemin))) h.update(f.chemin + "\0" + f.contenu + "\0");
-  return h.digest("hex");
-}
+export { empreinteProjet };
 
 export function texteCorrection(journal: string): string {
-  return `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Personne ne répondra à une question : si tu hésites sur une API, choisis la plus probable et livre les fichiers. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
+  return `La compilation sur GitHub a échoué. Corrige le projet. ${INSTRUCTION_MODIFICATIONS} Personne ne répondra à une question : si tu hésites sur une API, choisis la plus probable et livre les corrections. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
 }
 
 type Fin = "continuer" | "arreter";
@@ -244,7 +239,25 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
       }
       let compilation: EtatCompilation | null = t.compilationId ? await deps.etatCompilation(t.compilationId) : null;
       if (!compilation) {
-        const projet = fusionnerProjet(messages);
+        const { fichiers: projet, echecs } = fusionnerProjetDetaille(messages);
+        // Modifications partielles de la dernière réponse non appliquées : on redemande les fichiers
+        // entiers concernés, sans consommer de run GitHub.
+        const echecsDernier = echecs.filter((e) => e.messageId === dernier.id);
+        if (echecsDernier.length) {
+          const cycles = t.cycles + 1;
+          if (t.auto !== 1 && cycles > t.maxCycles) {
+            await terminer("echouee", `modifications inapplicables après ${cycles} tentatives`, { cycles, erreur: echecsDernier.map((e) => `${e.chemin} : ${e.raison}`).join(" ; ") });
+            return;
+          }
+          await deps.journaliser(tacheId, `${echecsDernier.length} modification(s) non applicable(s), fichiers entiers redemandés`);
+          await deps.ajouterMessageUtilisateur(
+            t.conversationId,
+            `Ces modifications n'ont pas pu être appliquées (le texte CHERCHER ne correspond pas exactement au fichier) :\n${echecsDernier.map((e) => `- ${e.chemin} : ${e.raison}`).join("\n")}\nRenvoie ces fichiers EN ENTIER, chacun dans son bloc de code avec son chemin.`,
+          );
+          await deps.majTache(tacheId, { cycles });
+          await suspendre(0, "modifications inapplicables : fichiers redemandés");
+          return;
+        }
         if (!estProjetGradle(projet)) {
           // En mode automatique, on redemande le projet complet sans limite (borné par le plafond de tokens).
           if (t.cycles >= 1 && t.auto !== 1) {

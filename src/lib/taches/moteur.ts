@@ -20,6 +20,12 @@ export const PLAFOND_TOKENS_TACHE = 2_000_000;
 const MARGE_GENERATION_MS = 25_000;
 const INTERVALLE_SONDAGE_MS = 15_000;
 const TTL_OCCUPATION_S = 300;
+/** TTL du verrou de tranche : couvre une tranche entière + marge, auto-libéré si le process meurt. */
+const TTL_VERROU_TRANCHE_S = Math.ceil(BUDGET_TRANCHE_MS / 1000) + 60;
+/** Pendant la génération : battement de cœur + détection d'une pause/d'un arrêt demandés. */
+const INTERVALLE_SURVEILLANCE_MS = 10_000;
+/** Clé du verrou de tranche (un seul exécuteur à la fois par tâche). */
+export const cleVerrouTranche = (id: string) => `tache:tranche:${id}`;
 
 export interface EtatCompilation {
   id: string;
@@ -96,23 +102,42 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
   const t0 = await deps.lireTache(tacheId);
   if (!t0) return;
   if (t0.statut !== "en_attente" && t0.statut !== "en_cours") return;
-  if (t0.statut === "en_cours" && t0.battementA && maintenant() - t0.battementA.getTime() < 2 * 60_000) {
-    log(`[taches] ${tacheId} : une tranche est déjà en cours`);
-    return;
-  }
   if (t0.repriseA && t0.repriseA.getTime() > maintenant()) {
     await deps.programmer(tacheId, t0.repriseA.getTime() - maintenant());
     return;
   }
+  // Verrou atomique : une seule tranche à la fois par tâche. incr == 1 → on détient le verrou ;
+  // sinon une autre tranche tourne déjà (le TTL le libère si le process meurt). Remplace l'ancien
+  // garde-fou « battementA < 2 min » (lecture-puis-écriture non atomique → deux tranches parallèles).
+  const verrou = cleVerrouTranche(tacheId);
+  if ((await deps.kv.incr(verrou, TTL_VERROU_TRANCHE_S)) !== 1) {
+    log(`[taches] ${tacheId} : une tranche est déjà en cours`);
+    return;
+  }
+  let verrouTenu = true;
+  const relacher = async () => {
+    if (!verrouTenu) return;
+    verrouTenu = false;
+    await deps.kv.del(verrou).catch(() => {});
+  };
+
   await deps.majTache(tacheId, { statut: "en_cours", battementA: new Date(maintenant()), repriseA: null });
 
   const battre = () => deps.majTache(tacheId, { battementA: new Date(maintenant()) });
+  /** L'utilisateur a-t-il demandé une pause ou un arrêt entre-temps ? (ou la tâche supprimée) */
+  const interrompue = async (): Promise<boolean> => {
+    const a = await deps.lireTache(tacheId);
+    return !a || a.statut === "pause" || a.statut === "arretee";
+  };
   const terminer = async (statut: Tache["statut"], etape: string, extra: Partial<Tache> = {}) => {
+    if (await interrompue()) return; // ne pas écraser une pause/un arrêt demandé par l'utilisateur
     await deps.majTache(tacheId, { statut, etape, battementA: null, ...extra });
     await deps.journaliser(tacheId, etape);
   };
   const suspendre = async (delaiMs: number, etape: string) => {
+    if (await interrompue()) return; // respecter l'interruption plutôt que reprogrammer
     await deps.majTache(tacheId, { statut: "en_attente", etape, battementA: null, repriseA: delaiMs > 0 ? new Date(maintenant() + delaiMs) : null });
+    await relacher(); // libérer AVANT la relance : une relance immédiate (delai 0) se heurterait sinon au verrou
     await deps.programmer(tacheId, delaiMs);
   };
 
@@ -140,21 +165,37 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         if (premier) await deps.kv.set(PREFIXE_OCCUPE + premier.id, tacheId, TTL_OCCUPATION_S);
         await deps.majTache(tacheId, { etape: `génération (${t.cycles === 0 ? "projet initial" : t.auto === 1 ? `correction ${t.cycles} (auto)` : `correction ${t.cycles}/${t.maxCycles}`})` });
         const controleur = new AbortController();
+        let abandonInterruption = false;
         const minuteur = setTimeout(() => controleur.abort(), Math.max(10_000, restant() - 5_000));
-        const battement = setInterval(() => void battre(), 30_000);
+        // Surveillance : bat le cœur et, surtout, coupe la génération dès qu'une pause/un arrêt est demandé.
+        const surveillance = setInterval(() => {
+          void (async () => {
+            await battre();
+            if (await interrompue()) {
+              abandonInterruption = true;
+              controleur.abort();
+            }
+          })();
+        }, INTERVALLE_SURVEILLANCE_MS);
         let r: ResultatGeneration;
         try {
           r = await deps.generer({ conversationId: t.conversationId, messages, fournisseurs: ordre, signal: controleur.signal });
         } finally {
           clearTimeout(minuteur);
-          clearInterval(battement);
+          clearInterval(surveillance);
           if (premier) await deps.kv.del(PREFIXE_OCCUPE + premier.id);
         }
+        // On enregistre la consommation réelle même en cas d'interruption.
         await deps.majTache(tacheId, {
           fournisseurId: r.fournisseurId ?? t.fournisseurId,
           tokensEntree: t.tokensEntree + (r.usage?.entree ?? 0),
           tokensSortie: t.tokensSortie + (r.usage?.sortie ?? 0),
         });
+        // Pause/arrêt pendant la génération : on sort sans reprogrammer ni injecter de message de suite.
+        if (abandonInterruption || (await interrompue())) {
+          await deps.journaliser(tacheId, "interrompue par l'utilisateur pendant la génération");
+          return;
+        }
         if (r.reessaiA) {
           const delai = Math.max(60_000, r.reessaiA - maintenant());
           await deps.journaliser(tacheId, `tous les fournisseurs sont épuisés, reprise prévue dans ${Math.round(delai / 60_000)} min`);
@@ -295,5 +336,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
     log(`[taches] ${tacheId} : ${msg}`);
     await deps.journaliser(tacheId, `erreur : ${msg}`);
     await suspendre(60_000, "erreur, nouvel essai dans 1 min");
+  } finally {
+    await relacher();
   }
 }

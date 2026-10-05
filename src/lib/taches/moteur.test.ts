@@ -182,16 +182,52 @@ describe("moteur des tâches", () => {
     expect(t.statut).toBe("terminee");
   });
 
-  it("ne lance pas deux tranches en même temps et ignore une tâche en pause", async () => {
+  it("verrou atomique : ne lance pas deux tranches en même temps et ignore une tâche en pause", async () => {
     const m = monde();
-    tache(m, { statut: "en_cours", battementA: new Date(1_000_000 - 10_000) });
+    tache(m, { statut: "en_cours" });
     const d = deps(m);
+    // Verrou déjà détenu par une autre tranche → celle-ci ne génère rien.
+    await m.kv.incr("tache:tranche:t1", 300);
     await executerTranche(d, "t1");
     expect(m.conversations.get("c1")!.length).toBe(1); // rien généré
+    await m.kv.del("tache:tranche:t1");
+    // Tâche en pause → ignorée même sans verrou.
     m.taches.get("t1")!.statut = "pause";
-    m.taches.get("t1")!.battementA = null;
     await executerTranche(d, "t1");
     expect(m.conversations.get("c1")!.length).toBe(1);
+  });
+
+  it("libère le verrou en fin de tranche (une tranche ultérieure peut reprendre)", async () => {
+    const m = monde();
+    tache(m, { compiler: 0 });
+    const d = deps(m);
+    await executerTranche(d, "t1"); // réponse simple, pas de compilation → terminée
+    expect(m.taches.get("t1")!.statut).toBe("terminee");
+    expect(await m.kv.get("tache:tranche:t1")).toBeNull(); // verrou libéré
+  });
+
+  it("respecte une pause demandée PENDANT la génération : pas d'écrasement ni de relance", async () => {
+    const m = monde();
+    tache(m, { compiler: 1 });
+    const d = deps(m);
+    // Le modèle « met en pause » la tâche au moment où il répond (simule un clic Pause concurrent).
+    m.reponses = [
+      {
+        get texte() {
+          m.taches.get("t1")!.statut = "pause";
+          return "Réponse partielle.";
+        },
+        fournisseurId: "a",
+        usage: { entree: 10, sortie: 5 },
+      } as unknown as ResultatGeneration,
+    ];
+    await executerTranche(d, "t1");
+    const t = m.taches.get("t1")!;
+    expect(t.statut).toBe("pause"); // la pause n'est pas écrasée par en_attente/terminee
+    expect(m.programmations).toHaveLength(0); // aucune relance programmée
+    expect(await m.kv.get("tache:tranche:t1")).toBeNull(); // verrou tout de même libéré
+    // Aucun message « coupée par la limite de temps » injecté.
+    expect(m.conversations.get("c1")!.some((x) => (x.parts[0] as { text?: string }).text?.includes("coupée par une limite"))).toBe(false);
   });
 
   it("demande un projet complet si la réponse n'a pas de build.gradle, puis échoue si ça persiste", async () => {

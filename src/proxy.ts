@@ -36,6 +36,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Tout sauf les ressources statiques de Next et le favicon.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|svg|ico|webp|txt|xml)$).*)"],
+  // Tout sauf les ressources statiques de Next et le favicon. L'exemption par extension ne
+  // s'applique PAS sous /api/ : sinon /api/taches/x.txt passerait sans session. (#46)
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|(?!api/).*\\.(?:png|svg|ico|webp|txt|xml)$).*)"],
 };

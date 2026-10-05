@@ -77,7 +77,9 @@ class KVRedis implements KV {
   }
   async incr(cle: string, ttl: number) {
     const n = await this.redis.incr(cle);
-    if (n === 1) await this.redis.expire(cle, ttl);
+    // EXPIRE … NX : pose le TTL s'il manque (premier incr, ou expire précédent échoué après un crash)
+    // sans jamais l'étendre sur les incr suivants. Évite un verrou permanent. (#34)
+    await this.redis.expire(cle, ttl, "NX");
     return n;
   }
   async ttl(cle: string) {

@@ -70,6 +70,38 @@ export const compilations = pgTable("compilations", {
   majA: timestamp("maj_a", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("compilations_message_idx").on(t.messageId)]);
 
+/** Tâches de fond : une conversation pilotée par le serveur jusqu'à un résultat (ex. un .jar qui compile). */
+export const taches = pgTable(
+  "taches",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    titre: text("titre").notNull(),
+    objectif: text("objectif").notNull(),
+    /** Boucle génération → compilation → correction jusqu'au .jar ; sinon une seule réponse. */
+    compiler: integer("compiler").notNull().default(1),
+    statut: text("statut").notNull().default("en_attente"), // en_attente | en_cours | pause | terminee | echouee | arretee
+    etape: text("etape").notNull().default("en attente"),
+    cycles: integer("cycles").notNull().default(0),
+    maxCycles: integer("max_cycles").notNull().default(8),
+    compilationId: text("compilation_id"),
+    fournisseurId: text("fournisseur_id"),
+    tokensEntree: integer("tokens_entree").notNull().default(0),
+    tokensSortie: integer("tokens_sortie").notNull().default(0),
+    jarNom: text("jar_nom"),
+    jarCompilationId: text("jar_compilation_id"),
+    erreur: text("erreur"),
+    journal: jsonb("journal").$type<Array<{ a: number; texte: string }>>().notNull().default([]),
+    /** Heure de reprise automatique (quota épuisé) ; null = dès que possible. */
+    repriseA: timestamp("reprise_a", { withTimezone: true }),
+    /** Dernier signe de vie de la tranche en cours. */
+    battementA: timestamp("battement_a", { withTimezone: true }),
+    creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
+    majA: timestamp("maj_a", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("taches_statut_idx").on(t.statut)],
+);
+
 /** DDL idempotent, exécuté au premier accès (pas de système de migration à gérer). */
 export const DDL = `
 CREATE TABLE IF NOT EXISTS conversations (
@@ -128,4 +160,28 @@ CREATE TABLE IF NOT EXISTS compilations (
 CREATE INDEX IF NOT EXISTS compilations_message_idx ON compilations (message_id);
 ALTER TABLE compilations ALTER COLUMN run_id TYPE BIGINT;
 ALTER TABLE compilations ALTER COLUMN jar_artefact_id TYPE BIGINT;
+CREATE TABLE IF NOT EXISTS taches (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  titre TEXT NOT NULL,
+  objectif TEXT NOT NULL,
+  compiler INTEGER NOT NULL DEFAULT 1,
+  statut TEXT NOT NULL DEFAULT 'en_attente',
+  etape TEXT NOT NULL DEFAULT 'en attente',
+  cycles INTEGER NOT NULL DEFAULT 0,
+  max_cycles INTEGER NOT NULL DEFAULT 8,
+  compilation_id TEXT,
+  fournisseur_id TEXT,
+  tokens_entree INTEGER NOT NULL DEFAULT 0,
+  tokens_sortie INTEGER NOT NULL DEFAULT 0,
+  jar_nom TEXT,
+  jar_compilation_id TEXT,
+  erreur TEXT,
+  journal JSONB NOT NULL DEFAULT '[]'::jsonb,
+  reprise_a TIMESTAMPTZ,
+  battement_a TIMESTAMPTZ,
+  cree_a TIMESTAMPTZ NOT NULL DEFAULT now(),
+  maj_a TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS taches_statut_idx ON taches (statut);
 `;

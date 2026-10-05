@@ -1,0 +1,242 @@
+/**
+ * Moteur des tâches de fond. Une tâche pilote une conversation jusqu'à son résultat :
+ *   génération (tour de chat) → compilation GitHub → lecture du journal → correction → …
+ * Le travail est découpé en tranches (≤ ~4 min 30, limite Vercel Hobby) ; chaque tranche
+ * programme la suivante. Toutes les dépendances externes sont injectables pour les tests.
+ */
+import type { MessageUI } from "@/lib/chat/types";
+import { estProjetGradle, type FichierGenere } from "@/lib/fichiers/extraire";
+import { fusionnerProjet } from "@/lib/fichiers/projet";
+import type { Fournisseur } from "@/lib/fournisseurs/types";
+import type { KV } from "@/lib/kv";
+import type { Tache } from "@/lib/db/taches";
+
+export const BUDGET_TRANCHE_MS = 270_000;
+/** Une génération commence seulement si la tranche est encore « fraîche » (budget complet). */
+const MARGE_GENERATION_MS = 25_000;
+const INTERVALLE_SONDAGE_MS = 15_000;
+const TTL_OCCUPATION_S = 300;
+
+export interface EtatCompilation {
+  id: string;
+  statut: "en_attente" | "en_cours" | "reussie" | "echouee" | "erreur";
+  journal?: string | null;
+  jarNom?: string | null;
+  erreur?: string | null;
+  runUrl?: string | null;
+}
+
+export interface ResultatGeneration {
+  texte: string;
+  fournisseurId?: string;
+  usage?: { entree: number; sortie: number };
+  erreur?: string;
+  /** Tous les fournisseurs épuisés : heure de reprise. */
+  reessaiA?: number;
+}
+
+export interface DepsMoteur {
+  kv: KV;
+  fournisseurs: Fournisseur[];
+  maintenant?: () => number;
+  attendre?: (ms: number) => Promise<void>;
+  lireTache: (id: string) => Promise<Tache | null>;
+  majTache: (id: string, v: Partial<Tache>) => Promise<Tache | null>;
+  journaliser: (id: string, texte: string) => Promise<void>;
+  lireMessages: (conversationId: string) => Promise<MessageUI[]>;
+  ajouterMessageUtilisateur: (conversationId: string, texte: string) => Promise<void>;
+  /** Exécute un tour de chat sur la conversation (le message de l'assistant est persisté par le tour). */
+  generer: (p: { conversationId: string; messages: MessageUI[]; fournisseurs: Fournisseur[]; signal: AbortSignal }) => Promise<ResultatGeneration>;
+  lancerCompilation: (p: { conversationId: string; messageId: string; fichiers: FichierGenere[] }) => Promise<EtatCompilation>;
+  etatCompilation: (id: string) => Promise<EtatCompilation | null>;
+  programmer: (tacheId: string, delaiMs: number) => Promise<void>;
+  log?: (m: string) => void;
+}
+
+const PREFIXE_OCCUPE = "tache:fournisseur:";
+
+/** Fournisseurs libres d'abord (rang), occupés par une autre tâche ensuite. */
+export async function ordonnerPourTache(deps: DepsMoteur, tacheId: string): Promise<Fournisseur[]> {
+  const libres: Fournisseur[] = [];
+  const occupes: Fournisseur[] = [];
+  for (const f of deps.fournisseurs) {
+    const par = await deps.kv.get<string>(PREFIXE_OCCUPE + f.id);
+    (par && par !== tacheId ? occupes : libres).push(f);
+  }
+  return [...libres, ...occupes];
+}
+
+export function texteCorrection(journal: string): string {
+  return `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
+}
+
+type Fin = "continuer" | "arreter";
+
+/** Exécute une tranche de travail sur la tâche ; programme la suite si nécessaire. */
+export async function executerTranche(deps: DepsMoteur, tacheId: string): Promise<void> {
+  const maintenant = deps.maintenant ?? Date.now;
+  const attendre = deps.attendre ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const log = deps.log ?? (() => {});
+  const debut = maintenant();
+  const restant = () => BUDGET_TRANCHE_MS - (maintenant() - debut);
+
+  const t0 = await deps.lireTache(tacheId);
+  if (!t0) return;
+  if (t0.statut !== "en_attente" && t0.statut !== "en_cours") return;
+  if (t0.statut === "en_cours" && t0.battementA && maintenant() - t0.battementA.getTime() < 2 * 60_000) {
+    log(`[taches] ${tacheId} : une tranche est déjà en cours`);
+    return;
+  }
+  if (t0.repriseA && t0.repriseA.getTime() > maintenant()) {
+    await deps.programmer(tacheId, t0.repriseA.getTime() - maintenant());
+    return;
+  }
+  await deps.majTache(tacheId, { statut: "en_cours", battementA: new Date(maintenant()), repriseA: null });
+
+  const battre = () => deps.majTache(tacheId, { battementA: new Date(maintenant()) });
+  const terminer = async (statut: Tache["statut"], etape: string, extra: Partial<Tache> = {}) => {
+    await deps.majTache(tacheId, { statut, etape, battementA: null, ...extra });
+    await deps.journaliser(tacheId, etape);
+  };
+  const suspendre = async (delaiMs: number, etape: string) => {
+    await deps.majTache(tacheId, { statut: "en_attente", etape, battementA: null, repriseA: delaiMs > 0 ? new Date(maintenant() + delaiMs) : null });
+    await deps.programmer(tacheId, delaiMs);
+  };
+
+  try {
+    for (;;) {
+      const t = await deps.lireTache(tacheId);
+      if (!t || (t.statut !== "en_cours" && t.statut !== "en_attente")) return; // pause ou arrêt demandé entre-temps
+      const messages = await deps.lireMessages(t.conversationId);
+      const dernier = messages.at(-1);
+
+      // 1. Un message utilisateur attend une réponse : génération.
+      if (!dernier || dernier.role === "user") {
+        if (restant() < BUDGET_TRANCHE_MS - MARGE_GENERATION_MS) {
+          await suspendre(0, "génération reportée à la tranche suivante");
+          return;
+        }
+        const ordre = await ordonnerPourTache(deps, tacheId);
+        const premier = ordre[0];
+        if (premier) await deps.kv.set(PREFIXE_OCCUPE + premier.id, tacheId, TTL_OCCUPATION_S);
+        await deps.majTache(tacheId, { etape: `génération (${t.cycles === 0 ? "projet initial" : `correction ${t.cycles}/${t.maxCycles}`})` });
+        const controleur = new AbortController();
+        const minuteur = setTimeout(() => controleur.abort(), Math.max(10_000, restant() - 5_000));
+        const battement = setInterval(() => void battre(), 30_000);
+        let r: ResultatGeneration;
+        try {
+          r = await deps.generer({ conversationId: t.conversationId, messages, fournisseurs: ordre, signal: controleur.signal });
+        } finally {
+          clearTimeout(minuteur);
+          clearInterval(battement);
+          if (premier) await deps.kv.del(PREFIXE_OCCUPE + premier.id);
+        }
+        await deps.majTache(tacheId, {
+          fournisseurId: r.fournisseurId ?? t.fournisseurId,
+          tokensEntree: t.tokensEntree + (r.usage?.entree ?? 0),
+          tokensSortie: t.tokensSortie + (r.usage?.sortie ?? 0),
+        });
+        if (r.reessaiA) {
+          const delai = Math.max(60_000, r.reessaiA - maintenant());
+          await deps.journaliser(tacheId, `tous les fournisseurs sont épuisés, reprise prévue dans ${Math.round(delai / 60_000)} min`);
+          await suspendre(delai, "en attente de quota");
+          return;
+        }
+        if (r.erreur && !r.texte) {
+          await deps.journaliser(tacheId, `génération échouée : ${r.erreur}`);
+          await suspendre(120_000, "nouvel essai dans 2 min");
+          return;
+        }
+        if (controleur.signal.aborted) {
+          await deps.journaliser(tacheId, "réponse coupée par la limite de temps, demande de suite");
+          await deps.ajouterMessageUtilisateur(t.conversationId, "Ta réponse a été coupée par une limite de temps. Reprends exactement là où tu t'es arrêté, sans répéter ce qui est déjà écrit.");
+          await suspendre(0, "suite de la réponse");
+          return;
+        }
+        await deps.journaliser(tacheId, `réponse de ${r.fournisseurId ?? "?"} (${r.usage?.sortie ?? 0} tokens)`);
+        if (t.compiler !== 1) {
+          await terminer("terminee", "réponse livrée");
+          return;
+        }
+        continue; // → compilation
+      }
+
+      // 2. Dernière réponse de l'assistant : compiler le projet (ou conclure).
+      if (t.compiler !== 1) {
+        await terminer("terminee", "réponse livrée");
+        return;
+      }
+      let compilation: EtatCompilation | null = t.compilationId ? await deps.etatCompilation(t.compilationId) : null;
+      if (!compilation) {
+        const projet = fusionnerProjet(messages);
+        if (!estProjetGradle(projet)) {
+          if (t.cycles >= 1) {
+            await terminer("echouee", "aucun projet Gradle compilable n'a été produit", { erreur: "Le modèle n'a pas livré de build.gradle." });
+            return;
+          }
+          await deps.majTache(tacheId, { cycles: t.cycles + 1 });
+          await deps.journaliser(tacheId, "pas de projet Gradle dans la réponse : demande du projet complet");
+          await deps.ajouterMessageUtilisateur(
+            t.conversationId,
+            "Tu n'as pas livré de projet compilable. Livre maintenant le projet COMPLET (build.gradle, settings.gradle, gradle.properties, fabric.mod.json, sources), chaque fichier en entier dans son bloc de code avec son chemin.",
+          );
+          await suspendre(0, "demande du projet complet");
+          return;
+        }
+        await deps.majTache(tacheId, { etape: `envoi de ${projet.length} fichiers à GitHub` });
+        try {
+          compilation = await deps.lancerCompilation({ conversationId: t.conversationId, messageId: dernier.id, fichiers: projet.map(({ chemin, contenu }) => ({ chemin, contenu })) });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "échec de l'envoi";
+          await deps.journaliser(tacheId, `compilation impossible : ${msg}`);
+          await terminer("echouee", "compilation impossible", { erreur: msg });
+          return;
+        }
+        await deps.majTache(tacheId, { compilationId: compilation.id, etape: "compilation sur GitHub" });
+        await deps.journaliser(tacheId, `compilation lancée (${projet.length} fichiers)`);
+      }
+
+      // 3. Suivi de la compilation jusqu'à son terme (ou jusqu'à la fin de la tranche).
+      while (compilation && (compilation.statut === "en_attente" || compilation.statut === "en_cours")) {
+        if (restant() < INTERVALLE_SONDAGE_MS + 5_000) {
+          await suspendre(20_000, "compilation sur GitHub (suivi)");
+          return;
+        }
+        await attendre(INTERVALLE_SONDAGE_MS);
+        await battre();
+        compilation = await deps.etatCompilation(compilation.id);
+      }
+      if (!compilation) {
+        await terminer("echouee", "compilation introuvable");
+        return;
+      }
+      if (compilation.statut === "reussie") {
+        await terminer("terminee", `réussie : ${compilation.jarNom ?? "jar"} prêt`, { jarNom: compilation.jarNom ?? null, jarCompilationId: compilation.id, erreur: null });
+        return;
+      }
+      // Échec : correction, dans la limite des cycles.
+      const cycles = t.cycles + 1;
+      if (compilation.statut === "erreur" && !compilation.journal) {
+        await terminer("echouee", "erreur de la chaîne de compilation", { erreur: compilation.erreur ?? "erreur inconnue" });
+        return;
+      }
+      if (cycles >= t.maxCycles) {
+        await terminer("echouee", `échec après ${cycles} compilations`, { cycles, compilationId: null, erreur: "Nombre maximal de corrections atteint." });
+        return;
+      }
+      await deps.journaliser(tacheId, `compilation échouée (cycle ${cycles}/${t.maxCycles}), correction demandée`);
+      await deps.ajouterMessageUtilisateur(t.conversationId, texteCorrection(compilation.journal ?? compilation.erreur ?? "journal indisponible"));
+      await deps.majTache(tacheId, { cycles, compilationId: null, etape: `correction ${cycles}/${t.maxCycles}` });
+      const fin: Fin = restant() < BUDGET_TRANCHE_MS - MARGE_GENERATION_MS ? "arreter" : "continuer";
+      if (fin === "arreter") {
+        await suspendre(0, `correction ${cycles}/${t.maxCycles}`);
+        return;
+      }
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log(`[taches] ${tacheId} : ${msg}`);
+    await deps.journaliser(tacheId, `erreur : ${msg}`);
+    await suspendre(60_000, "erreur, nouvel essai dans 1 min");
+  }
+}

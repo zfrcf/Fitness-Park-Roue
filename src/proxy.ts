@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { NOM_COOKIE, verifierJeton } from "@/lib/auth/session";
 
 /** Chemins accessibles sans session. */
-const PUBLICS = new Set(["/connexion", "/api/connexion"]);
+// /api/taches/executer vérifie lui-même son jeton interne ; /api/taches/reveiller est idempotent et sans donnée.
+const PUBLICS = new Set(["/connexion", "/api/connexion", "/api/taches/executer", "/api/taches/reveiller"]);
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

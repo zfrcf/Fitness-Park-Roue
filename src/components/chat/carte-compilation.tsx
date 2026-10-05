@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, ChevronDown, Download, ExternalLink, Hammer, Loader2, Wrench } from "lucide-react";
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, Download, ExternalLink, Hammer, Loader2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,29 @@ export function CarteCompilation({
   compilation: CompilationPublique;
   onDemanderCorrection?: (texte: string) => void;
 }) {
+  const [tacheEnCours, setTacheEnCours] = useState(false);
+  async function lancerTache() {
+    setTacheEnCours(true);
+    try {
+      const r = await fetch("/api/taches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: initiale.conversationId,
+          objectif: "Corriger le projet jusqu'à une compilation réussie",
+          messageInitial: `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${initiale.journal ?? ""}\n\`\`\``,
+          compiler: true,
+        }),
+      });
+      const j = (await r.json()) as { erreur?: string };
+      if (!r.ok) throw new Error(j.erreur ?? "échec");
+      toast.success("Tâche de fond lancée : suivez-la dans l'onglet Tâches.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Impossible de lancer la tâche.");
+    } finally {
+      setTacheEnCours(false);
+    }
+  }
   const [c, setC] = useState(initiale);
   const [journalOuvert, setJournalOuvert] = useState(false);
   const terminal = c.statut === "reussie" || c.statut === "echouee" || c.statut === "erreur";
@@ -68,17 +91,22 @@ export function CarteCompilation({
             </Button>
           )}
           {c.statut === "echouee" && onDemanderCorrection && c.journal && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                onDemanderCorrection(
-                  `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
-                )
-              }
-            >
-              <Wrench /> Demander une correction
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  onDemanderCorrection(
+                    `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
+                  )
+                }
+              >
+                <Wrench /> Demander une correction
+              </Button>
+              <Button size="sm" variant="outline" disabled={tacheEnCours} onClick={() => void lancerTache()} title="Corrige et recompile en boucle sur le serveur, même si vous fermez la page">
+                {tacheEnCours ? <Loader2 className="animate-spin" /> : <Bot />} Corriger en tâche de fond
+              </Button>
+            </>
           )}
         </div>
       </div>

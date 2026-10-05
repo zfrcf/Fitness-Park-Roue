@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, LogOut, MessageSquare } from "lucide-react";
+import { Activity, ListChecks, LogOut, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 const LIENS = [
   { href: "/", libelle: "Chat", icone: MessageSquare },
+  { href: "/taches", libelle: "Tâches", icone: ListChecks },
   { href: "/etat", libelle: "État", icone: Activity },
 ] as const;
 

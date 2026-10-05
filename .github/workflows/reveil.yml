@@ -1,0 +1,21 @@
+name: Réveil des tâches de fond
+
+# Filet de sécurité : relance les tâches en attente (quota, tranche perdue) même si personne
+# n'ouvre l'application. GitHub exécute ce cron au mieux (souvent avec quelques minutes de retard).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  reveiller:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Appeler /api/taches/reveiller
+        env:
+          APP_URL: ${{ vars.APP_URL || 'https://fitness-park-roue.vercel.app' }}
+        run: |
+          code=$(curl -sS -o /tmp/rep.json -w '%{http_code}' --max-time 50 "$APP_URL/api/taches/reveiller")
+          echo "HTTP $code : $(cat /tmp/rep.json)"
+          test "$code" = "200"

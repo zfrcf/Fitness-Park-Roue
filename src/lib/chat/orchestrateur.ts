@@ -19,6 +19,8 @@ import { ajusterAuContexte, estimerTokens, INSTRUCTION_RESUME, promptResume, san
 import type { Bascule, MessageUI, MetaMessage, Reglages } from "./types";
 
 export interface DepsOrchestrateur {
+  /** Ne pas remettre en tête le fournisseur « collant » de la conversation. */
+  ignorerPreference?: boolean;
   fournisseurs: Fournisseur[];
   kv: KV;
   creerModele: (f: Fournisseur, opts: { raisonnement: NiveauRaisonnement }) => LanguageModel;
@@ -121,7 +123,7 @@ export interface Candidat {
 
 export async function ordonnerFournisseurs(deps: DepsOrchestrateur, conversationId: string): Promise<{ candidats: Fournisseur[]; indisponibles: Candidat[] }> {
   const maintenant = deps.maintenant?.() ?? Date.now();
-  const prefere = await deps.kv.get<string>(PREFIXE_CONV + conversationId);
+  const prefere = deps.ignorerPreference ? null : await deps.kv.get<string>(PREFIXE_CONV + conversationId);
   const ordre = [...deps.fournisseurs];
   if (prefere) {
     const i = ordre.findIndex((f) => f.id === prefere);

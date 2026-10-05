@@ -19,11 +19,15 @@ suivant, sans action de votre part.
 5. [Déploiement sur Vercel](#déploiement-sur-vercel)
 6. [Stockage : Neon et Upstash, clic par clic](#stockage--neon-et-upstash-clic-par-clic)
 7. [Comment fonctionne la rotation](#comment-fonctionne-la-rotation)
-8. [Lecture des liens](#lecture-des-liens)
-9. [Sécurité](#sécurité)
-10. [Tests](#tests)
-11. [Limites connues des offres gratuites](#limites-connues-des-offres-gratuites)
-12. [Dépannage](#dépannage)
+8. [Recherche web](#recherche-web)
+9. [Fichiers générés et archive .zip](#fichiers-générés-et-archive-zip)
+10. [Compilation sur GitHub](#compilation-sur-github-mods-minecraft-projets-gradle)
+11. [Tâches de fond](#tâches-de-fond-agents-qui-tournent-sans-vous)
+12. [Lecture des liens](#lecture-des-liens)
+13. [Sécurité](#sécurité)
+14. [Tests](#tests)
+15. [Limites connues des offres gratuites](#limites-connues-des-offres-gratuites)
+16. [Dépannage](#dépannage)
 
 ## Fonctionnalités
 
@@ -35,6 +39,7 @@ suivant, sans action de votre part.
   recherche web automatique.
 - **Recherche web** : outil que le modèle déclenche lui-même, ou bouton globe pour forcer une
   recherche ; sources citées et cliquables.
+- **Tâches de fond** : des agents qui tournent sur le serveur sans vous (génération → compilation → correction en boucle), plusieurs en parallèle, avec reprise automatique après un quota.
 - **Fichiers générés** téléchargeables un par un ou en .zip ; **compilation des mods Minecraft**
   (projets Gradle) sur GitHub Actions avec téléchargement du .jar et renvoi des erreurs au modèle.
 - **Rotation automatique** des fournisseurs (429, 402, 401, 5xx, délai dépassé, coupure) avec
@@ -93,6 +98,7 @@ Le fichier `.env.example` est commenté ligne par ligne. Résumé :
 | `JINA_API_KEY` | non | clé Jina Reader (sans clé : 20 lectures/min ; avec : 500/min) et Jina Search |
 | `BRAVE_API_KEY` / `TAVILY_API_KEY` | non | moteurs de recherche de secours si DuckDuckGo est bloqué |
 | `GITHUB_REPO` / `GITHUB_TOKEN` | pour compiler | dépôt et jeton fin utilisés par la compilation GitHub Actions |
+| `QSTASH_TOKEN` | non | jeton Upstash QStash pour relancer les tâches de fond (sinon relance interne et cron GitHub) |
 | `APP_URL` | non | URL publique, envoyée à OpenRouter dans `HTTP-Referer` |
 
 Les clés API ne vont **que** dans `.env.local` (ignoré par git) et dans les variables
@@ -291,6 +297,32 @@ et **Metadata : lecture**. Sans jeton, le bouton renvoie une erreur explicite.
 Limites : les modèles gratuits écrivent du code Minecraft imparfait ; comptez un ou deux
 allers-retours de correction. Les artefacts sont conservés 14 jours. Seuls les projets Gradle
 (Fabric, NeoForge, Java, Kotlin) sont compilés ; les autres fichiers se téléchargent en .zip.
+
+## Tâches de fond (agents qui tournent sans vous)
+
+L'onglet **Tâches** lance un travail que le serveur mène à son terme même si vous fermez le site :
+décrivez l'objectif comme dans le chat, la tâche crée une conversation, obtient une réponse, envoie
+le projet à GitHub, lit le journal de compilation, demande la correction au modèle, recompile… jusqu'au
+`.jar` ou jusqu'au nombre maximal de corrections (8 par défaut, réglable). Sous une compilation
+échouée dans le chat, **Corriger en tâche de fond** fait la même chose sur la conversation courante.
+
+- **Parallélisme** : chaque tâche prend le premier fournisseur libre (les fournisseurs occupés par
+  une autre tâche passent en fin de liste), donc deux tâches tournent par exemple sur Groq et
+  Cloudflare en même temps. Le vrai plafond reste les quotas gratuits, pas le nombre de tâches.
+- **Quotas** : quand tout est épuisé, la tâche passe « en attente de quota » avec l'heure de reprise
+  et repart seule.
+- **Mécanique** (Vercel Hobby : 300 s par fonction, pas de cron fréquent) : le travail est découpé en
+  tranches d'environ 4 min 30 ; chaque tranche programme la suivante par un appel HTTP différé
+  (`/api/taches/executer`, jeton interne dérivé de `SESSION_SECRET`, maintenu par `waitUntil`).
+  Filet de sécurité : `.github/workflows/reveil.yml` appelle `/api/taches/reveiller` toutes les
+  10 minutes (tâches dues ou tranche perdue), et la page Tâches le fait aussi à chaque affichage.
+  Avec `QSTASH_TOKEN` (Upstash QStash, 1 000 messages/jour gratuits), les relances passent par
+  QStash avec reprises automatiques.
+- **Suivi** : statut, étape, cycle, fournisseur, tokens, journal horodaté, pause / reprise / arrêt,
+  téléchargement du `.jar`, lien vers la conversation (fichiers et projet complet).
+
+Le workflow de réveil utilise la variable de dépôt `APP_URL` si elle existe (Settings → Secrets and
+variables → Actions → Variables), sinon `https://fitness-park-roue.vercel.app`.
 
 ## Lecture des liens
 

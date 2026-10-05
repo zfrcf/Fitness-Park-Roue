@@ -15,7 +15,7 @@ export interface LimitesFournisseur {
 const PREFIXE = "fournisseur:limites:";
 const TTL = 24 * 3600;
 
-const RE_ITPM = /input tokens per minute[^:]*:\s*Limit\s+(\d+)/i;
+const RE_ITPM = /(?:input tokens per minute|tokens per minute \(TPM\))[^:]*:\s*Limit\s+(\d+)/i;
 const RE_OTPM = /output tokens per minute[^:]*:\s*Limit\s+(\d+)/i;
 
 /** Extrait les limites présentes dans un message d'erreur (undefined si aucune). */

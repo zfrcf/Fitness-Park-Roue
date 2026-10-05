@@ -260,7 +260,13 @@ async function reserverOuAttendre(deps: DepsOrchestrateur, f: Fournisseur, signa
 
 /** Texte dégénéré : une longue suite du même caractère (ex. « !!!!!!!! »), défaut d'inférence passager. */
 export function estDegenere(texte: string): boolean {
-  return /(.)\1{19,}/u.test(texte.replace(/\s+/g, " ")) && !/[`#=\-_*]/.test(texte.match(/(.)\1{19,}/u)?.[1] ?? "");
+  const compact = texte.replace(/\s+/g, "");
+  if (compact.length < 20) return false;
+  const suites = compact.match(/(.)\1{19,}/gu) ?? [];
+  const repetes = suites.reduce((n, x) => n + x.length, 0);
+  // Dégénéré seulement si l'ESSENTIEL du texte est une répétition (évite d'effacer du vrai code :
+  // bannières « //// », littéraux « 100000000000L », cadres Unicode « ═══ », clôtures « ~~~ »).
+  return repetes / compact.length > 0.9;
 }
 
 /** Nombre maximal de suites automatiques quand une réponse est coupée par sa limite de tokens. */
@@ -555,7 +561,7 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
 
     // Réponse coupée par la limite de tokens de sortie : on fait continuer le même fournisseur.
     let suites = 0;
-    while (!t.erreur && t.finishReason === "length" && t.texte.length > 0 && suites < MAX_SUITES && !p.signal?.aborted) {
+    while (!t.erreur && t.finishReason === "length" && t.texte.length > 0 && !estDegenere(t.texte) && suites < MAX_SUITES && !p.signal?.aborted) {
       suites++;
       writer.write({ type: "data-info", data: { texte: `Réponse longue : suite automatique (${suites}/${MAX_SUITES})` }, transient: true });
       await reserverOuAttendre(deps, f, p.signal);

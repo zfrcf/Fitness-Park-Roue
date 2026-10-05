@@ -12,6 +12,17 @@ describe("detecterTacheLongue", () => {
       "travaille toute la nuit sur le projet",
     ]) expect(detecterTacheLongue(t), t).toBe(true);
   });
+  it("détecte « jusqu'à » même sans verbe déclencheur", () => {
+    for (const t of [
+      "Fais tourner le projet jusqu'à ce que le jar compile",
+      "Crée un mod et teste-le jusqu'à obtenir un jar",
+      "continue jusqu'à.",
+    ]) expect(detecterTacheLongue(t), t).toBe(true);
+  });
+  it("ne confond pas avec « jusqu'aujourd'hui » / « jusqu'alors »", () => {
+    expect(detecterTacheLongue("Donne l'historique jusqu'aujourd'hui")).toBe(false);
+    expect(detecterTacheLongue("Tout allait bien jusqu'alors, explique")).toBe(false);
+  });
   it("ignore les messages normaux", () => {
     for (const t of [
       "Explique-moi les mixins",

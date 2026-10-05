@@ -113,9 +113,17 @@ export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClas
 
   const reessaiA = estimerReessai({ statut, message, code, enTetes }, maintenant);
 
-  // Groq : « Request too large … on input tokens per minute (ITPM): Limit 7000, Requested 12069 »
-  if ((statut === 413 || statut === 429) && /per minute|TPM|ITPM/i.test(message) && /requested/i.test(message)) {
-    return { categorie: "trop-grand", statut, code, message, reessaiA, basculer: true };
+  // Groq « per minute » : distinguer une requête UNIQUE trop grande (trop-grand : réduire/basculer)
+  // d'un simple débit atteint (quota : attendre l'heure du message « try again in … »).
+  const fenetreMinute = (statut === 413 || statut === 429) && /per minute|TPM|ITPM/i.test(message) && /requested/i.test(message);
+  if (fenetreMinute) {
+    const lim = /\bLimit\s+(\d+)/i.exec(message);
+    const req = /\bRequested\s+~?(\d+)/i.exec(message);
+    const depasseSeul = !!(lim && req && Number(req[1]) > Number(lim[1]));
+    if (statut === 413 || /request too large/i.test(message) || depasseSeul) {
+      return { categorie: "trop-grand", statut, code, message, reessaiA, basculer: true };
+    }
+    // sinon : débit à la minute → quota, avec l'heure de réessai du message
   }
   if (statut === 429) return { categorie: "quota", statut, code, message, reessaiA, basculer: true };
   if (statut === 402) return { categorie: "credits", statut, code, message, reessaiA, basculer: true };

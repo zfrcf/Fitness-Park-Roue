@@ -44,10 +44,18 @@ describe("classerErreur", () => {
     expect(e.statut).toBe(502);
     expect(e.basculer).toBe(true);
   });
-  it("413 Groq ITPM → trop-grand, bascule", () => {
+  it("413 Groq ITPM (requête unique trop grande) → trop-grand, bascule", () => {
     const e = classerErreur(api(413, { error: { message: "Request too large for model on input tokens per minute (ITPM): Limit 7000, Requested 12069, please reduce your message size", type: "tokens", code: "rate_limit_exceeded" } }), T0);
     expect(e.categorie).toBe("trop-grand");
     expect(e.basculer).toBe(true);
+  });
+  it("429 Groq débit à la minute (TPM/RPM, requête qui tient) → quota avec heure de réessai, pas trop-grand", () => {
+    const tpm = classerErreur(api(429, { error: { message: "Rate limit reached for model `x` on tokens per minute (TPM): Limit 6000, Used 5500, Requested 900. Please try again in 4.2s", type: "tokens" } }), T0);
+    expect(tpm.categorie).toBe("quota");
+    expect(tpm.reessaiA).toBeCloseTo(T0 + 4200, -2);
+    const rpm = classerErreur(api(429, { error: { message: "Rate limit reached for model `x` on requests per minute (RPM): Limit 30, Used 30, Requested 1. Please try again in 1.5s", type: "requests" } }), T0);
+    expect(rpm.categorie).toBe("quota");
+    expect(rpm.reessaiA).toBeCloseTo(T0 + 1500, -2);
   });
   it("400 contexte trop long → contexte, pas de bascule", () => {
     const e = classerErreur(api(400, { error: { message: "This model's maximum context length is 32768 tokens" } }), T0);

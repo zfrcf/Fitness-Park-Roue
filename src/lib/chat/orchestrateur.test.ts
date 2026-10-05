@@ -5,7 +5,7 @@ import { getKV, type KV } from "@/lib/kv";
 import { creerModele } from "@/lib/fournisseurs/client";
 import type { Fournisseur } from "@/lib/fournisseurs/types";
 import { demarrerFauxServeur, type FauxServeur, type Scenario } from "./faux-serveur";
-import { executerChat, fusionnerContinuation, type DepsOrchestrateur } from "./orchestrateur";
+import { estDegenere, executerChat, fusionnerContinuation, type DepsOrchestrateur } from "./orchestrateur";
 import { REGLAGES_DEFAUT, type MessageUI, type MetaMessage } from "./types";
 
 let serveur: FauxServeur;
@@ -440,5 +440,18 @@ describe("rotation des fournisseurs", () => {
     const texte = chunks.filter((c) => c.type === "text-delta").map((c) => c.delta).join("");
     expect(texte).toBe("Réponse courte.");
     expect(serveur.appels.filter((a) => a.scenario === "contexte").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("estDegenere", () => {
+  it("ne confond pas du code légitime avec une dégénérescence", () => {
+    expect(estDegenere("// //////////////////////////////\npublic class A {}")).toBe(false);
+    expect(estDegenere("long x = 100000000000000000000L; // ok")).toBe(false);
+    expect(estDegenere("╔════════════════════════╗\n║ titre ║\n╚════════════════════════╝")).toBe(false);
+    expect(estDegenere("~~~~~~~~~~~~~~~~~~~~~~~~\ndu texte normal ensuite")).toBe(false);
+  });
+  it("repère une vraie dégénérescence", () => {
+    expect(estDegenere("!".repeat(40))).toBe(true);
+    expect(estDegenere("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).toBe(true);
   });
 });

@@ -4,7 +4,7 @@
  * Conservateur : mieux vaut ne rien proposer que de proposer à tort.
  */
 const MOTIFS = [
-  /\bjusqu'?(?:a|à|au)\b/i, // jusqu'à, jusqu'au
+  /\bjusqu['’]?(?:à|a|au)(?=\s|$|[,.;:!?…])/i, // jusqu'à, jusqu'au (pas « jusqu'aujourd'hui »)
   /\ben boucle\b/i,
   /\btant que\b.*\b(?:compil|marche|fonctionn|pass|vert|r[ée]ussi|ok)/i,
   /\b(?:corrige|r[ée]p[èe]te|recommence|relance|essaie|essaye|boucle)\b.*\bjusqu/i,

@@ -65,12 +65,23 @@ class KVMemoire implements KV {
 class KVRedis implements KV {
   readonly type = "redis" as const;
   constructor(private redis: Redis) {}
+  // La (dé)sérialisation automatique d'Upstash est désactivée (voir getKV) : on encode/décode nous-mêmes
+  // le JSON, de façon cohérente, pour éviter qu'une chaîne brute devienne « [object Object] » ou qu'un
+  // cache tombe systématiquement à côté. (#37)
   async get<T>(cle: string) {
-    return (await this.redis.get<T>(cle)) ?? null;
+    const brut = await this.redis.get<unknown>(cle);
+    if (brut === null || brut === undefined) return null;
+    if (typeof brut !== "string") return brut as T; // incr/ttl renvoient des nombres
+    try {
+      return JSON.parse(brut) as T;
+    } catch {
+      return brut as unknown as T; // valeur non-JSON stockée hors de ce module
+    }
   }
   async set(cle: string, valeur: unknown, ttl?: number) {
-    if (ttl) await this.redis.set(cle, valeur, { ex: ttl });
-    else await this.redis.set(cle, valeur);
+    const s = JSON.stringify(valeur);
+    if (ttl) await this.redis.set(cle, s, { ex: ttl });
+    else await this.redis.set(cle, s);
   }
   async del(cle: string) {
     await this.redis.del(cle);
@@ -111,6 +122,6 @@ export function getKV(): KV {
   const token =
     process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
   globalThis.__kv =
-    url && token ? new KVRedis(new Redis({ url, token })) : new KVMemoire();
+    url && token ? new KVRedis(new Redis({ url, token, automaticDeserialization: false })) : new KVMemoire();
   return globalThis.__kv;
 }

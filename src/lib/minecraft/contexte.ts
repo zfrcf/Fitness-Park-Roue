@@ -17,13 +17,15 @@ export interface VersionsMinecraft {
 
 const TTL = 6 * 3600;
 
+/** Depuis 26.1 le jeu n'est plus obfusqué : Loom sans remap, aucune ligne mappings. */
+export function jeuNonObfusque(jeu: string): boolean {
+  const m = /^(\d+)\./.exec(jeu);
+  return !m || Number(m[1]) >= 26;
+}
+
 function javaPour(jeu: string): number {
   // 1.20.5 → 1.21.x : Java 21 ; à partir de 26.x : Java 25 (voir fabricmc.net/develop).
-  const m = /^(\d+)\.(\d+)/.exec(jeu);
-  if (!m) return 25;
-  const majeur = Number(m[1]);
-  if (majeur >= 26) return 25;
-  return 21;
+  return jeuNonObfusque(jeu) ? 25 : 21;
 }
 
 async function json<T>(url: string, f: typeof fetch): Promise<T | null> {
@@ -86,13 +88,30 @@ export function detecterDemandeMod(texte: string): { mod: boolean; version?: str
 
 export function blocContexteMinecraft(v: VersionsMinecraft): string {
   const date = new Date(v.recupereA).toISOString().slice(0, 10);
+  const nonObfusque = jeuNonObfusque(v.jeu);
+  // 26.x : jeu non obfusqué → plugin net.fabricmc.fabric-loom, AUCUNE ligne mappings, dépendances implementation.
+  // 1.21.x et antérieur : plugin net.fabricmc.fabric-loom-remap + mappings Mojang + modImplementation.
+  // Les deux variantes ont été vérifiées par compilation réelle avec la chaîne du dépôt (JDK 25, Gradle 9.7.1,
+  // Loom 1.18.2) : 26.3 (run GitHub Actions 37257906221) et 1.21.11 avec release 21 (run 37258299909).
+  const plugin = nonObfusque ? "net.fabricmc.fabric-loom" : "net.fabricmc.fabric-loom-remap";
+  const regleMappings = nonObfusque
+    ? `- Minecraft ${v.jeu} n'est PAS obfusqué : plugin Gradle id '${plugin}', AUCUNE ligne « mappings » dans build.gradle (ni yarn, ni loom.officialMojangMappings() : Loom refuse « Cannot use Mojang mappings in a non-obfuscated environment »), dépendances déclarées avec implementation (pas modImplementation), tâche jar (pas de remapJar). Noms de classes Mojang (ex. net.minecraft.resources.Identifier, net.minecraft.world.item.Item, net.minecraft.server.MinecraftServer).`
+    : `- Minecraft ${v.jeu} est obfusqué : plugin Gradle id '${plugin}', ligne « mappings loom.officialMojangMappings() » (JAMAIS yarn, dont tu ne connais pas la version), Loader et Fabric API déclarés avec modImplementation. Noms de classes Mojang (ex. net.minecraft.resources.ResourceLocation, net.minecraft.world.item.Item).`;
+  const dependances = nonObfusque
+    ? `    implementation "net.fabricmc:fabric-loader:\${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:\${project.fabric_api_version}"`
+    : `    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:\${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:\${project.fabric_api_version}"`;
   return `<contexte_minecraft date="${date}">
 Versions actuelles (vérifiées automatiquement) : Minecraft ${v.jeu} · Fabric Loader ${v.loader} · Fabric API ${v.fabricApi} · Loom ${v.loom} · Java ${v.java}${v.neoforge ? ` · NeoForge ${v.neoforge}` : ""}.
 Depuis la 26.x, Minecraft n'utilise plus la numérotation 1.21.x ; la dernière version 1.x est la 1.21.11 (Java 21), les suivantes sont 26.1, 26.2, 26.3… (Java 25).
 
 Chaîne de compilation disponible : l'utilisateur peut cliquer « Compiler sur GitHub » sous tes fichiers. Le projet est compilé par GitHub Actions avec JDK 25 et Gradle 9.7.1 (commande : gradle build). Règles impératives pour que ça compile :
-- Projet Fabric avec Loom, un seul source set (src/main/java et src/main/resources), mappings officielles Mojang via loom.officialMojangMappings() (JAMAIS yarn, dont tu ne connais pas la version ; noms de classes Mojang, ex. net.minecraft.resources.Identifier, net.minecraft.world.item.Item).
+- Projet Fabric avec Loom, un seul source set (src/main/java et src/main/resources). Reprends le modèle ci-dessous tel quel pour build.gradle, settings.gradle et gradle.properties : il a été vérifié par compilation réelle.
+${regleMappings}
 - Version de Loom : exactement ${v.loom} (celle ci-dessus) ; n'invente aucun numéro de version de Loom, Loader ou Fabric API.
+- Mixins : sans refmap, cibles en noms Mojang (ex. @Mixin(MinecraftServer.class) + @Inject(method = "loadLevel", at = @At("HEAD"))), "compatibilityLevel": "JAVA_${v.java}" ; liste chaque mixin dans <modid>.mixins.json. Dans fabric.mod.json, dépends de "fabric-api" (l'ancien id "fabric" n'existe plus).
 - Ne fournis NI gradlew, NI gradle-wrapper.jar, NI fichier sous .github/ (le workflow de compilation existe déjà), NI icône : la chaîne les ignore ou les refuse.
 - Chaque fichier dans son propre bloc de code avec son chemin complet. Projet complet : build.gradle, settings.gradle, gradle.properties, fabric.mod.json, <modid>.mixins.json (même sans mixin), classe principale, et le reste.
 - Le mod id : minuscules, chiffres, tirets bas ; identique dans fabric.mod.json, settings.gradle (rootProject.name) et le nom du fichier mixins.
@@ -125,7 +144,7 @@ rootProject.name = 'monmod'
 
 \`\`\`groovy build.gradle
 plugins {
-    id 'net.fabricmc.fabric-loom' version "\${loom_version}"
+    id '${plugin}' version "\${loom_version}"
 }
 version = project.mod_version
 group = project.maven_group
@@ -133,8 +152,7 @@ base { archivesName = project.archives_base_name }
 repositories {}
 dependencies {
     minecraft "com.mojang:minecraft:\${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:\${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:\${project.fabric_api_version}"
+${dependances}
 }
 processResources {
     inputs.property "version", project.version

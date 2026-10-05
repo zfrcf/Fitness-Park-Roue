@@ -6,3 +6,4 @@
 - 05:05 — Bandeau « lancer en tâche de fond » quand le message demande un travail long : commit 1e913d7.
 - 05:06 — Page État : débit/min, limites apprises, badge « tâche en cours » : commit 29e697c.
 - 05:09 — Vérif locale (Playwright) : page État affiche débit/limites ; bandeau « lancer en tâche de fond » OK (NVIDIA Kimi K3 répond). Dev arrêté.
+- 05:13 — Modèle Fabric vérifié par compilation réelle sur GitHub Actions (JDK 25, Gradle 9.7.1) : 26.3 (plugin fabric-loom, aucune ligne mappings, run 37257906221) et 1.21.11 (plugin fabric-loom-remap, mappings Mojang, release 21 sous JDK 25, run 37258299909), les deux BUILD SUCCESSFUL avec jar. Modèle conditionnel par génération + 9 tests vitest ; lint/tsc/vitest verts (130 tests). Commit sur nuit/2026-10-05 (non poussé).

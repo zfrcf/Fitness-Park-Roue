@@ -51,6 +51,7 @@ function BadgeStatut({ t }: { t: TachePublique }) {
 function Formulaire({ onCreee }: { onCreee: () => void }) {
   const [objectif, setObjectif] = useState("");
   const [compiler, setCompiler] = useState(true);
+  const [auto, setAuto] = useState(false);
   const [maxCycles, setMaxCycles] = useState(8);
   const [envoi, setEnvoi] = useState(false);
 
@@ -58,7 +59,7 @@ function Formulaire({ onCreee }: { onCreee: () => void }) {
     if (objectif.trim().length < 3) return;
     setEnvoi(true);
     try {
-      const r = await fetch("/api/taches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objectif, compiler, maxCycles }) });
+      const r = await fetch("/api/taches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objectif, compiler, auto, maxCycles }) });
       const j = (await r.json()) as { erreur?: string };
       if (!r.ok) throw new Error(j.erreur ?? "échec");
       setObjectif("");
@@ -95,9 +96,13 @@ function Formulaire({ onCreee }: { onCreee: () => void }) {
             <input type="checkbox" checked={compiler} onChange={(e) => setCompiler(e.target.checked)} className="size-4" />
             Compiler et corriger jusqu&apos;au .jar
           </label>
-          <label className="flex items-center gap-2">
+          <label className={cn("flex items-center gap-2", !compiler && "opacity-40")} title="Corrige et recompile sans limite de corrections, jusqu'à ce que le jar compile. Seul un plafond de 2 M tokens arrête la tâche.">
+            <input type="checkbox" checked={auto} disabled={!compiler} onChange={(e) => setAuto(e.target.checked)} className="size-4" />
+            Mode automatique (jusqu&apos;au jar, sans limite)
+          </label>
+          <label className={cn("flex items-center gap-2", (auto || !compiler) && "opacity-40")}>
             Corrections max
-            <input type="number" min={1} max={20} value={maxCycles} onChange={(e) => setMaxCycles(Number(e.target.value) || 8)} className="w-16 rounded-md border bg-background px-2 py-1" />
+            <input type="number" min={1} max={50} value={maxCycles} disabled={auto || !compiler} onChange={(e) => setMaxCycles(Number(e.target.value) || 8)} className="w-16 rounded-md border bg-background px-2 py-1 disabled:opacity-60" />
           </label>
           <Button className="ml-auto" onClick={() => void creer()} disabled={envoi || objectif.trim().length < 3}>
             {envoi ? <Loader2 className="animate-spin" /> : <Play />} Lancer
@@ -129,6 +134,13 @@ function EditeurCorrections({ t, onMaj }: { t: TachePublique; onMaj: () => void 
     } finally {
       setEnvoi(false);
     }
+  }
+  if (t.auto) {
+    return (
+      <span className="inline-flex items-center gap-1" title="Mode automatique : corrige jusqu'au jar, sans limite de corrections (plafond 2 M tokens)">
+        cycle {t.cycles} · <span className="rounded bg-primary/10 px-1 text-[10px] text-primary">auto</span>
+      </span>
+    );
   }
   return (
     <span className="inline-flex items-center gap-1" title="Nombre maximal de corrections (modifiable à tout moment, même en cours)">

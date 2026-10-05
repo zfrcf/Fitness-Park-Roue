@@ -31,6 +31,7 @@ function tache(m: Monde, extra: Partial<Tache> = {}): Tache {
     titre: "Mod test",
     objectif: "Fais un mod",
     compiler: 1,
+    auto: 0,
     statut: "en_attente",
     etape: "en attente",
     cycles: 0,
@@ -203,6 +204,23 @@ describe("moteur des tâches", () => {
     m.horloge.t += 1000;
     await executerTranche(d, "t1"); // génération → toujours rien → échec
     expect(m.taches.get("t1")!.statut).toBe("echouee");
+  });
+
+  it("mode auto : continue à corriger au-delà de maxCycles jusqu'au jar", async () => {
+    const m = monde();
+    tache(m, { auto: 1, maxCycles: 2 }); // maxCycles bas : en mode normal il échouerait vite
+    const PROJ = PROJET;
+    m.reponses = [{ texte: PROJ, fournisseurId: "a" }, { texte: PROJ, fournisseurId: "a" }, { texte: PROJ, fournisseurId: "a" }, { texte: PROJ, fournisseurId: "a" }];
+    m.issues = ["echouee", "echouee", "echouee", "reussie"]; // 3 échecs (> maxCycles 2) puis succès
+    const d = deps(m);
+    for (let i = 0; i < 8 && m.taches.get("t1")!.statut !== "terminee" && m.taches.get("t1")!.statut !== "echouee"; i++) {
+      m.horloge.t += 1000;
+      await executerTranche(d, "t1");
+    }
+    const t = m.taches.get("t1")!;
+    expect(t.statut).toBe("terminee");
+    expect(t.jarNom).toBe("mod-1.0.jar");
+    expect(t.cycles).toBeGreaterThanOrEqual(3); // a dépassé maxCycles=2 sans s'arrêter
   });
 
   it("arrête une tâche qui dépasse le plafond de tokens (anti-emballement)", async () => {

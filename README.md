@@ -339,9 +339,11 @@ L'onglet **Tâches** lance un travail que le serveur mène à son terme même si
 décrivez l'objectif comme dans le chat, la tâche crée une conversation, obtient une réponse, envoie
 le projet à GitHub, lit le journal de compilation, demande la correction au modèle, recompile… jusqu'au
 `.jar` ou jusqu'au nombre maximal de corrections (8 par défaut, **modifiable à tout moment**, même en
-cours). Sous une compilation échouée dans le chat, **Corriger en tâche de fond** fait la même chose
-sur la conversation courante. Dans le chat, écrire « travaille jusqu'à… », « en boucle » ou « ne
-t'arrête pas » fait apparaître un bandeau proposant de basculer la demande en tâche de fond.
+cours). En **mode automatique** (case à cocher), la tâche n'a pas de limite de corrections : elle
+corrige et recompile jusqu'à ce que le jar compile, bornée uniquement par le plafond anti-emballement
+de 2 M tokens. Sous une compilation échouée dans le chat, **Corriger en tâche de fond** fait la même
+chose sur la conversation courante. Dans le chat, écrire « travaille jusqu'à… », « en boucle » ou
+« ne t'arrête pas » fait apparaître un bandeau qui lance la demande en tâche de fond **automatique**.
 
 - **Parallélisme** : chaque tâche prend le premier fournisseur libre (les fournisseurs occupés par
   une autre tâche passent en fin de liste), donc deux tâches tournent par exemple sur Groq et

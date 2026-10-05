@@ -24,6 +24,7 @@ interface Corps {
   /** Message utilisateur ajouté en fin de conversation existante (ex. demande de correction). */
   messageInitial?: string;
   compiler?: boolean;
+  auto?: boolean;
   maxCycles?: number;
 }
 
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
   const corps = ((await req.json().catch(() => null)) as Corps | null) ?? {};
   const objectif = typeof corps.objectif === "string" ? corps.objectif.trim() : "";
   const compiler = corps.compiler !== false;
+  const auto = corps.auto === true;
   const maxCycles = Math.min(20, Math.max(1, Math.round(Number(corps.maxCycles) || 8)));
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   try {
@@ -56,6 +58,7 @@ export async function POST(req: Request) {
       titre,
       objectif: objectif || corps.messageInitial?.slice(0, 500) || titre,
       compiler: compiler ? 1 : 0,
+      auto: auto ? 1 : 0,
       maxCycles,
       statut: "en_attente",
       etape: "en attente de démarrage",

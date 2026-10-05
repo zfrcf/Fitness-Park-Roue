@@ -224,7 +224,7 @@ export function FenetreChat({
       const r = await fetch("/api/taches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, objectif: dernierUser ? dernierUser.parts.filter((p) => p.type === "text").map((p) => p.text).join("").slice(0, 500) : "Poursuivre le travail en cours", compiler: true }),
+        body: JSON.stringify({ conversationId, objectif: dernierUser ? dernierUser.parts.filter((p) => p.type === "text").map((p) => p.text).join("").slice(0, 500) : "Poursuivre le travail en cours", compiler: true, auto: true }),
       });
       const j = (await r.json()) as { tache?: TachePublique; erreur?: string };
       if (!r.ok || !j.tache) throw new Error(j.erreur ?? "échec");

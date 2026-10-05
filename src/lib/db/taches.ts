@@ -74,6 +74,7 @@ export function versPublic(t: Tache) {
     titre: t.titre,
     objectif: t.objectif,
     compiler: t.compiler === 1,
+    auto: t.auto === 1,
     statut: t.statut as StatutTache,
     etape: t.etape,
     cycles: t.cycles,

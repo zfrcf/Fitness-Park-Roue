@@ -80,6 +80,8 @@ export const taches = pgTable(
     objectif: text("objectif").notNull(),
     /** Boucle génération → compilation → correction jusqu'au .jar ; sinon une seule réponse. */
     compiler: integer("compiler").notNull().default(1),
+    /** Mode automatique : corriger jusqu'au jar sans limite de corrections (borné par le plafond de tokens). */
+    auto: integer("auto").notNull().default(0),
     statut: text("statut").notNull().default("en_attente"), // en_attente | en_cours | pause | terminee | echouee | arretee
     etape: text("etape").notNull().default("en attente"),
     cycles: integer("cycles").notNull().default(0),
@@ -166,6 +168,7 @@ CREATE TABLE IF NOT EXISTS taches (
   titre TEXT NOT NULL,
   objectif TEXT NOT NULL,
   compiler INTEGER NOT NULL DEFAULT 1,
+  auto INTEGER NOT NULL DEFAULT 0,
   statut TEXT NOT NULL DEFAULT 'en_attente',
   etape TEXT NOT NULL DEFAULT 'en attente',
   cycles INTEGER NOT NULL DEFAULT 0,
@@ -184,4 +187,5 @@ CREATE TABLE IF NOT EXISTS taches (
   maj_a TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS taches_statut_idx ON taches (statut);
+ALTER TABLE taches ADD COLUMN IF NOT EXISTS auto INTEGER NOT NULL DEFAULT 0;
 `;

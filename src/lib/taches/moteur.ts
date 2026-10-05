@@ -129,7 +129,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         const ordre = await ordonnerPourTache(deps, tacheId);
         const premier = ordre[0];
         if (premier) await deps.kv.set(PREFIXE_OCCUPE + premier.id, tacheId, TTL_OCCUPATION_S);
-        await deps.majTache(tacheId, { etape: `génération (${t.cycles === 0 ? "projet initial" : `correction ${t.cycles}/${t.maxCycles}`})` });
+        await deps.majTache(tacheId, { etape: `génération (${t.cycles === 0 ? "projet initial" : t.auto === 1 ? `correction ${t.cycles} (auto)` : `correction ${t.cycles}/${t.maxCycles}`})` });
         const controleur = new AbortController();
         const minuteur = setTimeout(() => controleur.abort(), Math.max(10_000, restant() - 5_000));
         const battement = setInterval(() => void battre(), 30_000);
@@ -180,7 +180,8 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
       if (!compilation) {
         const projet = fusionnerProjet(messages);
         if (!estProjetGradle(projet)) {
-          if (t.cycles >= 1) {
+          // En mode automatique, on redemande le projet complet sans limite (borné par le plafond de tokens).
+          if (t.cycles >= 1 && t.auto !== 1) {
             await terminer("echouee", "aucun projet Gradle compilable n'a été produit", { erreur: "Le modèle n'a pas livré de build.gradle." });
             return;
           }
@@ -230,16 +231,18 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         await terminer("echouee", "erreur de la chaîne de compilation", { erreur: compilation.erreur ?? "erreur inconnue" });
         return;
       }
-      if (cycles >= t.maxCycles) {
+      // Mode automatique : on continue à corriger jusqu'au jar (seul le plafond de tokens arrête).
+      if (t.auto !== 1 && cycles >= t.maxCycles) {
         await terminer("echouee", `échec après ${cycles} compilations`, { cycles, compilationId: null, erreur: "Nombre maximal de corrections atteint." });
         return;
       }
-      await deps.journaliser(tacheId, `compilation échouée (cycle ${cycles}/${t.maxCycles}), correction demandée`);
+      const repere = t.auto === 1 ? `${cycles} (auto)` : `${cycles}/${t.maxCycles}`;
+      await deps.journaliser(tacheId, `compilation échouée (cycle ${repere}), correction demandée`);
       await deps.ajouterMessageUtilisateur(t.conversationId, texteCorrection(compilation.journal ?? compilation.erreur ?? "journal indisponible"));
-      await deps.majTache(tacheId, { cycles, compilationId: null, etape: `correction ${cycles}/${t.maxCycles}` });
+      await deps.majTache(tacheId, { cycles, compilationId: null, etape: `correction ${repere}` });
       const fin: Fin = restant() < BUDGET_TRANCHE_MS - MARGE_GENERATION_MS ? "arreter" : "continuer";
       if (fin === "arreter") {
-        await suspendre(0, `correction ${cycles}/${t.maxCycles}`);
+        await suspendre(0, `correction ${repere}`);
         return;
       }
     }

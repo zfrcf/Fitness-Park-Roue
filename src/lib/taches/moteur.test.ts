@@ -169,7 +169,9 @@ describe("moteur des tâches", () => {
     expect(t.statut).toBe("en_attente");
     expect(t.etape).toBe("en attente de quota");
     expect(t.repriseA!.getTime()).toBe(m.horloge.t + 30 * 60_000 - 5_000);
-    expect(m.programmations.at(-1)!.delai).toBeGreaterThan(29 * 60_000);
+    // Délai (30 min) bien plus long que le budget restant → relance immédiate ; l'attente est portée
+    // par repriseA et reprise par une fonction fraîche / le cron (#7).
+    expect(m.programmations.at(-1)!.delai).toBe(0);
     // Avant l'heure : rien ne se passe, juste une reprogrammation.
     await executerTranche(d, "t1");
     expect(m.taches.get("t1")!.statut).toBe("en_attente");
@@ -228,6 +230,15 @@ describe("moteur des tâches", () => {
     expect(await m.kv.get("tache:tranche:t1")).toBeNull(); // verrou tout de même libéré
     // Aucun message « coupée par la limite de temps » injecté.
     expect(m.conversations.get("c1")!.some((x) => (x.parts[0] as { text?: string }).text?.includes("coupée par une limite"))).toBe(false);
+  });
+
+  it("#7 : un délai court qui tient dans le budget est attendu dans la fonction courante (pas de relance immédiate)", async () => {
+    const m = monde();
+    tache(m);
+    m.reponses = [{ texte: "", erreur: "panne réseau" }];
+    await executerTranche(deps(m), "t1");
+    expect(m.taches.get("t1")!.statut).toBe("en_attente");
+    expect(m.programmations.at(-1)!.delai).toBe(120_000); // budget ample → attendu en fonction
   });
 
   it("demande un projet complet si la réponse n'a pas de build.gradle, puis échoue si ça persiste", async () => {

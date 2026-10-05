@@ -138,7 +138,12 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
     if (await interrompue()) return; // respecter l'interruption plutôt que reprogrammer
     await deps.majTache(tacheId, { statut: "en_attente", etape, battementA: null, repriseA: delaiMs > 0 ? new Date(maintenant() + delaiMs) : null });
     await relacher(); // libérer AVANT la relance : une relance immédiate (delai 0) se heurterait sinon au verrou
-    await deps.programmer(tacheId, delaiMs);
+    // Si le délai ne tient pas dans le budget restant de CETTE fonction, on relance tout de suite :
+    // une fonction fraîche attendra le délai (via repriseA) dans son propre budget de 300 s. Sinon un
+    // délai de 60-120 s en fin de tranche dépasse maxDuration, la relance n'a jamais lieu et la tâche
+    // dort jusqu'au cron (#7).
+    const delaiRelance = delaiMs > 0 && delaiMs > restant() ? 0 : delaiMs;
+    await deps.programmer(tacheId, delaiRelance);
   };
 
   try {

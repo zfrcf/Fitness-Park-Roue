@@ -198,6 +198,22 @@ describe("rotation des fournisseurs", () => {
     expect((await kv.get<{ statut: string }>("fournisseur:etat:a"))?.statut).toBe("disponible");
   });
 
+  it("limiteur partagé : fournisseur saturé par d'autres tâches → suivant sans le marquer ; attend si la fenêtre est proche", async () => {
+    const a = fournisseur("A", "ok", { rpm: 2 }); // 1 créneau utile par fenêtre
+    const fenetre = 1000;
+    // Sature A dans la fenêtre courante.
+    await kv.incr(`fournisseur:rpm:${a.id}:${Math.floor(Date.now() / fenetre)}`, 10);
+    const r = await executer([a, fournisseur("B", "ok")], { fenetreDebitMs: fenetre, attenteMaxReessaiMs: 0 });
+    expect(r.meta.fournisseur).toBe("B");
+    expect(r.bascules[0].raison).toMatch(/requêtes par minute/);
+    expect(await kv.get("fournisseur:etat:a")).toBeNull();
+    // Seul fournisseur : attend la fenêtre suivante puis répond.
+    await kv.incr(`fournisseur:rpm:${a.id}:${Math.floor(Date.now() / fenetre)}`, 10);
+    const r2 = await executer([a], { fenetreDebitMs: fenetre, attenteMaxReessaiMs: 2000 }, "Bonjour", "conv-9");
+    expect(r2.erreur).toBeUndefined();
+    expect(r2.meta.fournisseur).toBe("A");
+  });
+
   it("bascule sur 429 avant tout texte et mémorise l'heure de réessai", async () => {
     const t0 = Date.now();
     const r = await executer([fournisseur("A", "429"), fournisseur("B", "ok")]);

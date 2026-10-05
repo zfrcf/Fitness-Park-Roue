@@ -14,6 +14,7 @@ import type { KV } from "@/lib/kv";
 import { lireQuota } from "@/lib/fournisseurs/entetes";
 import { classerErreur, type ErreurClassee } from "@/lib/fournisseurs/erreurs";
 import { apprendreLimites, lireLimites } from "@/lib/fournisseurs/limites";
+import { reserverCreneau } from "@/lib/fournisseurs/debit";
 import type { EtatFournisseur, Fournisseur, NiveauRaisonnement } from "@/lib/fournisseurs/types";
 import { ajusterAuContexte, estimerTokens, INSTRUCTION_RESUME, promptResume, sansRaisonnement, texteDe, tokensMessage } from "./contexte";
 import type { Bascule, MessageUI, MetaMessage, Reglages } from "./types";
@@ -23,6 +24,8 @@ export interface DepsOrchestrateur {
   ignorerPreference?: boolean;
   /** Attente maximale avant un nouvel essai sur place après une limite de débit courte (15 s par défaut). */
   attenteMaxReessaiMs?: number;
+  /** Fenêtre du limiteur de débit partagé (60 s par défaut ; réduite dans les tests). */
+  fenetreDebitMs?: number;
   fournisseurs: Fournisseur[];
   kv: KV;
   creerModele: (f: Fournisseur, opts: { raisonnement: NiveauRaisonnement }) => LanguageModel;
@@ -236,6 +239,23 @@ interface Tentative {
   tokensEstimes: number;
   /** Raison de fin renvoyée par le fournisseur ("stop", "length", "tool-calls"…). */
   finishReason?: string;
+}
+
+const attendre = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Réserve une requête dans le limiteur partagé du fournisseur. Attend si la fenêtre se libère
+ * bientôt, sinon renvoie false (le fournisseur est saturé par d'autres requêtes ou tâches).
+ */
+async function reserverOuAttendre(deps: DepsOrchestrateur, f: Fournisseur, signal?: AbortSignal): Promise<boolean> {
+  const max = deps.attenteMaxReessaiMs ?? 15_000;
+  for (let essai = 0; essai < 3; essai++) {
+    const c = await reserverCreneau(deps.kv, f, deps.maintenant?.() ?? Date.now(), deps.fenetreDebitMs);
+    if (c.ok) return true;
+    if (c.attenteMs > max || signal?.aborted) return false;
+    await attendre(c.attenteMs);
+  }
+  return false;
 }
 
 /** Texte dégénéré : une longue suite du même caractère (ex. « !!!!!!!! »), défaut d'inférence passager. */
@@ -494,6 +514,28 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
     meta.modele = f.modele;
     writer.write({ type: "message-metadata", messageMetadata: { fournisseur: f.nom, fournisseurId: f.id, modele: f.modele } });
 
+    // Limiteur partagé (requêtes/min) : si le fournisseur est saturé par d'autres tâches, on passe au suivant sans le marquer.
+    if (!(await reserverOuAttendre(deps, f, p.signal))) {
+      log(`[chat] ${f.nom} : limite de requêtes par minute atteinte (partagée), suivant`);
+      const autre = candidats.find((c) => !tentes.has(c.id));
+      if (autre) {
+        const b: Bascule = { de: f.nom, vers: autre.nom, raison: "limite de requêtes par minute atteinte", continuation: texte.length > 0 };
+        if (texte.length > 0) {
+          continuation = true;
+          continuationEnCours = true;
+        }
+        bascules.push(b);
+        writer.write({ type: "data-bascule", data: b, transient: true });
+        precedent = f;
+        continue;
+      }
+      // Personne d'autre : on attend la prochaine fenêtre quoi qu'il en coûte.
+      const c = await reserverCreneau(deps.kv, f, deps.maintenant?.() ?? Date.now(), deps.fenetreDebitMs);
+      if (!c.ok) {
+        writer.write({ type: "data-info", data: { texte: `${f.nom} : limite de requêtes par minute, attente ${Math.ceil(c.attenteMs / 1000)} s` }, transient: true });
+        await attendre(c.attenteMs);
+      }
+    }
     const outilsPour = p.outils && !fournisseurSansOutils(f.id) ? p.outils : undefined;
     const cumuler = async (t: Tentative) => {
       texte += t.texte;
@@ -516,6 +558,7 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
     while (!t.erreur && t.finishReason === "length" && t.texte.length > 0 && suites < MAX_SUITES && !p.signal?.aborted) {
       suites++;
       writer.write({ type: "data-info", data: { texte: `Réponse longue : suite automatique (${suites}/${MAX_SUITES})` }, transient: true });
+      await reserverOuAttendre(deps, f, p.signal);
       t = await tenter(deps, f, pf, partId, texte, true, undefined);
       await cumuler(t);
       maintenant = deps.maintenant?.() ?? Date.now();

@@ -99,6 +99,7 @@ Le fichier `.env.example` est commenté ligne par ligne. Résumé :
 | `JINA_API_KEY` | non | clé Jina Reader (sans clé : 20 lectures/min ; avec : 500/min) et Jina Search |
 | `BRAVE_API_KEY` / `TAVILY_API_KEY` | non | moteurs de recherche de secours si DuckDuckGo est bloqué |
 | `GITHUB_REPO` / `GITHUB_TOKEN` | pour compiler | dépôt et jeton fin utilisés par la compilation GitHub Actions |
+| `PROVIDER_n_RPM` | non | requêtes par minute autorisées pour ce fournisseur (limiteur partagé entre chat et tâches ; défauts : NVIDIA 40, Groq 30, OpenRouter 20, Cloudflare 300) |
 | `QSTASH_TOKEN` | non | jeton Upstash QStash pour relancer les tâches de fond (sinon relance interne et cron GitHub) |
 | `APP_URL` | non | URL publique, envoyée à OpenRouter dans `HTTP-Referer` |
 
@@ -245,6 +246,9 @@ CLI Vercel.
   **dégénérée** (longue suite du même caractère, défaut passager chez NVIDIA) : un nouvel essai
   sur place, puis bascule vers le suivant, sans marquer le fournisseur indisponible ; le texte
   dégénéré est effacé et régénéré.
+- **Limiteur partagé** : un compteur de requêtes par minute et par fournisseur vit dans le KV, commun au
+  chat et à toutes les tâches de fond. Un fournisseur saturé par d'autres requêtes est passé (sans être
+  marqué indisponible) ou attendu quelques secondes si la fenêtre se libère bientôt.
 - **Tout épuisé** : message clair avec le prochain fournisseur disponible et son heure de réessai.
 
 Les mêmes réglages (prompt système, température, longueur, raisonnement) sont envoyés à tous.

@@ -59,6 +59,7 @@ export function chargerFournisseurs(env: NodeJS.ProcessEnv = process.env): Fourn
     const payant = /^(1|true|oui|yes)$/i.test(lire(env, n, "PAID") ?? "");
     const prixEntree = Number(lire(env, n, "PRICE_INPUT") ?? "");
     const prixSortie = Number(lire(env, n, "PRICE_OUTPUT") ?? "");
+    const rpm = Number(lire(env, n, "RPM") ?? "");
     liste.push({
       id: `${n}-${slug(nom!)}`,
       rang: n,
@@ -71,6 +72,7 @@ export function chargerFournisseurs(env: NodeJS.ProcessEnv = process.env): Fourn
       prixEntree: prixEntree > 0 ? prixEntree : undefined,
       prixSortie: prixSortie > 0 ? prixSortie : undefined,
       famille: detecterFamille(baseUrl!),
+      rpm: rpm > 0 ? rpm : undefined,
     });
   }
   if (problemes.length && process.env.NODE_ENV !== "test") {

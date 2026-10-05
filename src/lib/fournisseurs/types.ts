@@ -17,6 +17,8 @@ export interface Fournisseur {
   prixEntree?: number;
   prixSortie?: number;
   famille: FamilleAPI;
+  /** Requêtes par minute autorisées (PROVIDER_n_RPM), sinon valeur connue de la famille. */
+  rpm?: number;
 }
 
 /** Fournisseur sans secret, exposable au client. */

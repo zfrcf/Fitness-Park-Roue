@@ -9,7 +9,7 @@ import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { fuseauHoraire } from "@/lib/fuseau";
 import { blocContexteMinecraft, detecterDemandeMod, versionsMinecraft } from "@/lib/minecraft/contexte";
-import { blocProjetPourModele, fusionnerProjet, INSTRUCTION_PROJET, masquerFichiersConnus, suppressionsDemandees } from "@/lib/fichiers/projet";
+import { blocProjetPourModele, fusionnerProjet, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { executerChat, genererAvecRotation, type DepsOrchestrateur } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
@@ -103,11 +103,7 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
 
   // État du projet : une seule copie à jour de chaque fichier dans le système, les blocs des
   // réponses passées remplacés par des renvois. Le modèle ne renvoie que ce qui change.
-  const projet = fusionnerProjet(o.messages).filter((f) => {
-    const indexOrigine = o.messages.findIndex((x) => x.id === f.messageId);
-    const supprimeApres = o.messages.some((m, i) => i > indexOrigine && m.role === "assistant" && suppressionsDemandees(texteDe(m)).includes(f.chemin));
-    return !supprimeApres;
-  });
+  const projet = fusionnerProjet(o.messages);
   if (projet.length) {
     const chemins = new Set(projet.map((f) => f.chemin));
     for (const m of messagesUI) {

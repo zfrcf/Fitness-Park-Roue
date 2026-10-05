@@ -36,6 +36,18 @@ describe("fusionnerProjet", () => {
   });
 });
 
+describe("fusionnerProjet : suppressions et chemins réservés", () => {
+  it("applique « Supprimer : chemin » et ignore .github/ et le wrapper", () => {
+    const r3 = "Nettoyage.\n\nSupprimer : `src/main/java/com/ex/Mod.java`\n\n```yaml .github/workflows/build.yml\nname: x\n```\n\n```text gradlew\n#!/bin/sh\n```\n\n```java src/Neuf.java\nclass Neuf {}\n```\n";
+    const projet = fusionnerProjet([m("a1", "assistant", reponse1), m("a2", "assistant", reponse2), m("a3", "assistant", r3)]);
+    expect(projet.map((f) => f.chemin)).toEqual(["build.gradle", "fabric.mod.json", "src/Neuf.java"]);
+  });
+  it("un fichier supprimé puis renvoyé revient", () => {
+    const projet = fusionnerProjet([m("a1", "assistant", reponse1), m("a2", "assistant", "Supprimer : build.gradle"), m("a3", "assistant", reponse1)]);
+    expect(projet.map((f) => f.chemin)).toContain("build.gradle");
+  });
+});
+
 describe("blocProjetPourModele", () => {
   it("inclut le contenu dans la limite du budget, les plus récents d'abord", () => {
     const projet = fusionnerProjet([m("a1", "assistant", reponse1), m("a2", "assistant", reponse2)]);

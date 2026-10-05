@@ -25,13 +25,22 @@ export function texteDuMessage(m: MessageMinimal): string {
     .join("");
 }
 
-/** Fusionne les fichiers de toutes les réponses, dans l'ordre d'apparition des chemins. */
+/** Chemins que la chaîne de compilation fournit elle-même ou refuse : jamais dans le projet. */
+export const RE_CHEMIN_RESERVE = /^\.github\/|(^|\/)gradlew(\.bat)?$|gradle-wrapper\.(jar|properties)$/;
+
+/**
+ * Fusionne les fichiers de toutes les réponses, dans l'ordre d'apparition des chemins.
+ * Les lignes « Supprimer : chemin » d'une réponse retirent le fichier à ce moment-là ;
+ * les chemins réservés (.github/, wrapper Gradle) sont ignorés.
+ */
 export function fusionnerProjet(messages: MessageMinimal[]): FichierProjet[] {
   const projet = new Map<string, FichierProjet>();
   let revision = 0;
   for (const m of messages) {
     if (m.role !== "assistant") continue;
-    const fichiers = extraireFichiers(texteDuMessage(m));
+    const texte = texteDuMessage(m);
+    for (const chemin of suppressionsDemandees(texte)) projet.delete(chemin);
+    const fichiers = extraireFichiers(texte).filter((f) => !RE_CHEMIN_RESERVE.test(f.chemin));
     if (!fichiers.length) continue;
     for (const f of fichiers) projet.set(f.chemin, { ...f, messageId: m.id, revision });
     revision++;

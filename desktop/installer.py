@@ -207,6 +207,11 @@ def main() -> int:
         return 1
     vert(f"{version} : commande {lanceur}")
 
+    # Interface d'abord : le diagnostic affiché à la fin de « atelier installer » la voit alors installée.
+    ui_ok = False
+    if not a.sans_ui:
+        ui_ok = installer_interface(donnees, lanceur)
+
     if not a.sans_jdk:
         bleu("JDK 25 et Gradle 9.7.1 (téléchargés dans votre dossier personnel, sommes SHA-256 vérifiées)")
         if lancer([str(lanceur), "installer"]).returncode != 0:
@@ -215,9 +220,6 @@ def main() -> int:
     if a.importer:
         lancer([str(lanceur), "config", "--importer", a.importer], check=False)
 
-    ui_ok = False
-    if not a.sans_ui:
-        ui_ok = installer_interface(donnees, lanceur)
 
     ajouter_au_path(binaire)
     print()

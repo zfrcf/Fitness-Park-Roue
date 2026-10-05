@@ -66,9 +66,13 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
     systeme:
       `${reglages.systeme}\n\nNous sommes le ${dateDuJour}. Tes connaissances s'arrêtent avant cette date : ` +
       "pour tout ce qui est récent (versions de logiciels ou de jeux, actualités, prix, événements, personnes), " +
-      (reglages.rechercheAuto
-        ? "utilise l'outil recherche_web avant d'affirmer qu'une chose n'existe pas, puis cite tes sources en liens Markdown."
-        : "précise que tu n'as pas pu vérifier et invite l'utilisateur à activer la recherche web (bouton globe).") +
+      // On ne demande d'utiliser l'outil recherche_web que s'il est effectivement offert : en recherche
+      // forcée les résultats sont déjà injectés dans le message (l'outil n'est pas transmis). (#32)
+      (o.rechercheWeb === true
+        ? "des résultats de recherche web te sont fournis dans le message : appuie-toi dessus et cite tes sources en liens Markdown."
+        : reglages.rechercheAuto
+          ? "utilise l'outil recherche_web avant d'affirmer qu'une chose n'existe pas, puis cite tes sources en liens Markdown."
+          : "précise que tu n'as pas pu vérifier et invite l'utilisateur à activer la recherche web (bouton globe).") +
       "\n\nQuand tu produis des fichiers (projet, script, configuration, datapack, mod…), écris chaque fichier dans son propre bloc de code " +
       "avec son chemin complet sur la ligne d'ouverture, par exemple ```java src/main/java/com/exemple/MonMod.java ou ```json fabric.mod.json. " +
       "Livre des projets complets et cohérents (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») : " +

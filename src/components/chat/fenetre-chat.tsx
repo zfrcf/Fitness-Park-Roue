@@ -18,7 +18,7 @@ import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useReglages } from "./reglages-contexte";
 import { Saisie } from "./saisie";
-import { lirePremierMessage } from "./utils";
+import { lirePremierMessage, messageErreurLisible } from "./utils";
 
 const SUGGESTIONS = [
   "Résume cet article : https://fr.wikipedia.org/wiki/Fitness",
@@ -309,7 +309,7 @@ export function FenetreChat({
           )}
           {error && (
             <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              <span>{error.message}</span>
+              <span>{messageErreurLisible(error)}</span>
               <Button size="xs" variant="outline" onClick={() => regenerer()}>
                 Réessayer
               </Button>

@@ -44,3 +44,18 @@ export function ecrirePremierMessage(texte: string): void {
     /* mode privé : on se contente d'ouvrir le chat vide */
   }
 }
+
+/** Message d'erreur lisible : si le corps est un JSON {erreur|error|message}, on extrait le texte. (#36) */
+export function messageErreurLisible(err: { message?: string } | null | undefined): string {
+  const t = err?.message?.trim() ?? "";
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try {
+      const j = JSON.parse(t) as Record<string, unknown>;
+      const m = j.erreur ?? j.error ?? j.message;
+      if (typeof m === "string" && m.trim()) return m.trim();
+    } catch {
+      /* pas du JSON : on garde le texte brut */
+    }
+  }
+  return t || "Une erreur est survenue. Réessayez.";
+}

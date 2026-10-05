@@ -102,13 +102,17 @@ export function estimerReessai(e: InfosErreur, maintenant = Date.now()): number 
   const msg = e.message ?? "";
   const msgMin = msg.toLowerCase();
 
-  // Quota journalier atteint : attendre minuit UTC.
+  // Quota journalier atteint : attendre minuit UTC. Cloudflare (neurons) ne remet pas son
+  // compteur à minuit UTC pile (observé) : on revérifie au plus tard dans une heure.
   if (
     e.code === 3036 ||
+    e.code === 4006 ||
     /daily|per day|par jour|free allocation|quota journalier/.test(msgMin) ||
     (e.statut === 429 && /(^|\W)day(s)?\b/.test(msgMin) && !/minute/.test(msgMin))
   ) {
-    return prochainMinuitUTC(maintenant);
+    const minuit = prochainMinuitUTC(maintenant);
+    if (e.code === 3036 || e.code === 4006 || /neurons/.test(msgMin)) return Math.min(minuit, maintenant + 3_600_000);
+    return minuit;
   }
 
   const q = lireQuota(h, maintenant);

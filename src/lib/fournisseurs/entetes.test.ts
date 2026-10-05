@@ -70,8 +70,9 @@ describe("estimerReessai", () => {
     expect(estimerReessai({ statut: 429, message: "Please try again in 9m38.016s" }, T0)).toBeCloseTo(T0 + 578_016, 0);
     expect(parserDelaiDansMessage("x")).toBeUndefined();
   });
-  it("attend minuit UTC pour un quota journalier (Cloudflare 3036, OpenRouter)", () => {
-    expect(estimerReessai({ statut: 429, code: 3036, message: "daily free allocation" }, T0)).toBe(prochainMinuitUTC(T0));
+  it("attend minuit UTC pour un quota journalier (OpenRouter), au plus une heure pour Cloudflare", () => {
+    expect(estimerReessai({ statut: 429, code: 3036, message: "daily free allocation" }, T0)).toBe(Math.min(prochainMinuitUTC(T0), T0 + 3_600_000));
+    expect(estimerReessai({ statut: 429, code: 4006, message: "you have used up your daily free allocation of 10,000 neurons" }, T0)).toBe(Math.min(prochainMinuitUTC(T0), T0 + 3_600_000));
     expect(estimerReessai({ statut: 429, message: "Rate limit exceeded: free-models-per-day" }, T0)).toBe(prochainMinuitUTC(T0));
   });
   it("replis par statut", () => {

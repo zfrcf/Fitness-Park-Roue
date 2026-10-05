@@ -193,7 +193,9 @@ describe("rotation des fournisseurs", () => {
     expect(r.bascules.map((b) => b.de)).toEqual(["A", "B", "C", "D", "E"]);
     const minuit = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1);
     expect((await kv.get<{ reessaiA: number }>("fournisseur:etat:d"))?.reessaiA).toBe(minuit);
-    expect((await kv.get<{ reessaiA: number }>("fournisseur:etat:e"))?.reessaiA).toBe(minuit);
+    const reessaiE = (await kv.get<{ reessaiA: number }>("fournisseur:etat:e"))!.reessaiA;
+    expect(reessaiE).toBeLessThanOrEqual(Math.min(minuit, Date.now() + 3_600_000));
+    expect(reessaiE).toBeGreaterThan(Date.now() + 3_500_000 > minuit ? minuit - 1 : Date.now() + 3_500_000);
     expect((await kv.get<{ statut: string }>("fournisseur:etat:a"))?.statut).toBe("epuise");
     expect((await kv.get<{ statut: string }>("fournisseur:etat:c"))?.statut).toBe("erreur");
   });

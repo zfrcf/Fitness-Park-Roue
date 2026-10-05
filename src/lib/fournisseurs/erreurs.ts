@@ -102,7 +102,8 @@ export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClas
   if (!message) message = "Erreur inconnue";
 
   // Codes Cloudflare : 3036 quota journalier, 3040 capacité → 429 ; 5035 modèle payant → 403
-  if (code === 3036 || code === 3040 || code === 4006 || /daily free allocation/i.test(message)) statut = statut ?? 429;
+  if (code === 3036 || code === 4006 || /daily free allocation/i.test(message)) statut = 429; // quota journalier, quel que soit le statut HTTP
+  if (code === 3040) statut = statut ?? 429;
   if (code === 5035) statut = statut ?? 403;
 
   // Réseau (fetch échoué) sans statut

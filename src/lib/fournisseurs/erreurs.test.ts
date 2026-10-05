@@ -30,10 +30,13 @@ describe("classerErreur", () => {
     expect(e.categorie).toBe("credits");
     expect(e.basculer).toBe(true);
   });
-  it("Cloudflare 3036 → quota jusqu'à minuit UTC", () => {
+  it("Cloudflare 3036 / 4006 → quota, revérifié au plus tard dans une heure", () => {
     const e = classerErreur(api(429, { success: false, errors: [{ code: 3036, message: "Account limited: daily free allocation" }] }), T0);
     expect(e.categorie).toBe("quota");
-    expect(e.reessaiA).toBe(Date.UTC(2026, 9, 5));
+    expect(e.reessaiA).toBe(Math.min(Date.UTC(2026, 9, 5), T0 + 3_600_000));
+    const e2 = classerErreur(api(400, { success: false, errors: [{ code: 4006, message: "AiError: you have used up your daily free allocation of 10,000 neurons" }] }), T0);
+    expect(e2.categorie).toBe("quota");
+    expect(e2.basculer).toBe(true);
   });
   it("chunk d'erreur en plein flux (OpenRouter)", () => {
     const e = classerErreur({ code: 502, message: "Provider returned error", metadata: {} }, T0);

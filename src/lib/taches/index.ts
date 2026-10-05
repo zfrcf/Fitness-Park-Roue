@@ -8,6 +8,7 @@ import { creerBranche, validerFichiers } from "@/lib/github/compilation";
 import { rafraichirCompilation } from "@/lib/github/suivi";
 import { fournisseurs } from "@/lib/fournisseurs/registre";
 import { getKV } from "@/lib/kv";
+import { nettoyerBranchesCompilation } from "@/lib/github/menage";
 import { executerTranche, type DepsMoteur, type EtatCompilation } from "./moteur";
 import { planificateurHTTP } from "./planificateur";
 
@@ -66,5 +67,21 @@ export async function reveillerTaches(): Promise<string[]> {
     if (t.statut === "en_cours") await majTache(t.id, { statut: "en_attente", battementA: null });
     await planificateurHTTP.programmer(t.id, 0);
   }
+  // Ménage des branches de compilation orphelines, au plus une fois toutes les 30 min.
+  void menageThrottle();
   return liste.map((t) => t.id);
+}
+
+const CLE_MENAGE = "menage:branches:dernier";
+
+async function menageThrottle(): Promise<void> {
+  try {
+    const kv = getKV();
+    if (await kv.get<number>(CLE_MENAGE)) return; // un ménage récent tient encore
+    await kv.set(CLE_MENAGE, Date.now(), 30 * 60); // verrou 30 min
+    const r = await nettoyerBranchesCompilation();
+    if (r.supprimees.length) console.warn(`[menage] branches supprimées : ${r.supprimees.join(", ")}`);
+  } catch (e) {
+    console.warn("[menage] échec :", e instanceof Error ? e.message : e);
+  }
 }

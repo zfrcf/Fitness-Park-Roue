@@ -266,6 +266,9 @@ async function reserverOuAttendre(deps: DepsOrchestrateur, f: Fournisseur, signa
 
 /** Texte dégénéré : une longue suite du même caractère (ex. « !!!!!!!! »), défaut d'inférence passager. */
 export function estDegenere(texte: string): boolean {
+  // Signature du défaut passager de NVIDIA/Kimi : une rafale de « ! » (« ```mod!!!!!!… », « OK!!!!… »),
+  // qui n'apparaît jamais dans du vrai code, même quand un court préfixe la précède.
+  if (/!{16,}/.test(texte)) return true;
   const compact = texte.replace(/\s+/g, "");
   if (compact.length < 20) return false;
   const suites = compact.match(/(.)\1{19,}/gu) ?? [];

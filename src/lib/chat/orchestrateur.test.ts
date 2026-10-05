@@ -462,5 +462,8 @@ describe("estDegenere", () => {
   it("repère une vraie dégénérescence", () => {
     expect(estDegenere("!".repeat(40))).toBe(true);
     expect(estDegenere("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).toBe(true);
+    // Défaut réel observé chez NVIDIA : court préfixe puis rafale de « ! » (84 % de répétition seulement).
+    expect(estDegenere("```mod" + "!".repeat(32))).toBe(true);
+    expect(estDegenere('System.out.println("Bonjour !!!");')).toBe(false);
   });
 });

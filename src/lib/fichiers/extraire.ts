@@ -77,9 +77,10 @@ export interface ModificationFichier {
   remplacements: Array<{ chercher: string; remplacer: string }>;
 }
 
-const RE_DEBUT_CHERCHER = /^<{4,}\s*(?:CHERCHER|SEARCH|ANCIEN|OLD)\s*$/i;
+// Libellés facultatifs : les modèles ferment souvent par un « >>>>>>> » nu, comme un conflit git.
+const RE_DEBUT_CHERCHER = /^<{4,}\s*(?:CHERCHER|SEARCH|ANCIEN|OLD)?\s*$/i;
 const RE_SEPARATEUR = /^={4,}\s*$/;
-const RE_FIN_REMPLACER = /^>{4,}\s*(?:REMPLACER|REPLACE|NOUVEAU|NEW)\s*$/i;
+const RE_FIN_REMPLACER = /^>{4,}\s*(?:REMPLACER|REPLACE|NOUVEAU|NEW)?\s*$/i;
 
 /** Lit les paires CHERCHER / REMPLACER d'un bloc de modification. */
 export function lirePairesModification(corps: string): Array<{ chercher: string; remplacer: string }> {

@@ -37,6 +37,7 @@ function tache(m: Monde, extra: Partial<Tache> = {}): Tache {
     cycles: 0,
     maxCycles: 3,
     compilationId: null,
+    empreinteCompilee: null,
     fournisseurId: null,
     tokensEntree: 0,
     tokensSortie: 0,
@@ -146,8 +147,8 @@ describe("moteur des tâches", () => {
   it("abandonne après le nombre maximal de cycles", async () => {
     const m = monde();
     tache(m, { maxCycles: 2 });
-    m.reponses = [{ texte: PROJET, fournisseurId: "a" }, { texte: PROJET, fournisseurId: "a" }, { texte: PROJET, fournisseurId: "a" }];
-    m.issues = ["echouee", "echouee", "echouee"];
+    m.reponses = [0, 1, 2, 3].map((i) => ({ texte: PROJET.replace("class A {}", `class A { int v = ${i}; }`), fournisseurId: "a" }));
+    m.issues = ["echouee", "echouee", "echouee", "echouee"];
     const d = deps(m);
     for (let i = 0; i < 4 && m.taches.get("t1")!.statut !== "echouee"; i++) {
       m.horloge.t += 1000;
@@ -210,7 +211,7 @@ describe("moteur des tâches", () => {
     const m = monde();
     tache(m, { auto: 1, maxCycles: 2 }); // maxCycles bas : en mode normal il échouerait vite
     const PROJ = PROJET;
-    m.reponses = [{ texte: PROJ, fournisseurId: "a" }, { texte: PROJ, fournisseurId: "a" }, { texte: PROJ, fournisseurId: "a" }, { texte: PROJ, fournisseurId: "a" }];
+    m.reponses = [0, 1, 2, 3].map((i) => ({ texte: PROJ.replace("class A {}", `class A { int v = ${i}; }`), fournisseurId: "a" }));
     m.issues = ["echouee", "echouee", "echouee", "reussie"]; // 3 échecs (> maxCycles 2) puis succès
     const d = deps(m);
     for (let i = 0; i < 8 && m.taches.get("t1")!.statut !== "terminee" && m.taches.get("t1")!.statut !== "echouee"; i++) {
@@ -221,6 +222,23 @@ describe("moteur des tâches", () => {
     expect(t.statut).toBe("terminee");
     expect(t.jarNom).toBe("mod-1.0.jar");
     expect(t.cycles).toBeGreaterThanOrEqual(3); // a dépassé maxCycles=2 sans s'arrêter
+  });
+
+  it("ne recompile pas un projet strictement inchangé : correction redemandée sans run GitHub", async () => {
+    const m = monde();
+    tache(m, { maxCycles: 5 });
+    // Cycle 1 : projet, échec. Cycle 2 : le modèle renvoie le MÊME projet (aucune modification).
+    m.reponses = [{ texte: PROJET, fournisseurId: "a" }, { texte: "Je ne sais pas quoi changer.", fournisseurId: "a" }, { texte: PROJET.replace("class A {}", "class A { int v; }"), fournisseurId: "a" }];
+    m.issues = ["echouee", "reussie"]; // une seule compilation en échec attendue, puis succès après vraie modif
+    const d = deps(m);
+    for (let i = 0; i < 8 && !["terminee", "echouee"].includes(m.taches.get("t1")!.statut); i++) {
+      m.horloge.t += 1000;
+      await executerTranche(d, "t1");
+    }
+    const t = m.taches.get("t1")!;
+    // 2 compilations seulement (projet initial + projet réellement modifié), pas de recompilation à l'identique.
+    expect(m.compilations.size).toBe(2);
+    expect(t.journal.map((j) => j.texte).join("\n")).toMatch(/ne modifie aucun fichier/);
   });
 
   it("arrête une tâche qui dépasse le plafond de tokens (anti-emballement)", async () => {

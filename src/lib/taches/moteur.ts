@@ -6,7 +6,9 @@
  */
 import type { MessageUI } from "@/lib/chat/types";
 import { estProjetGradle, type FichierGenere } from "@/lib/fichiers/extraire";
+import { createHash } from "node:crypto";
 import { fusionnerProjet } from "@/lib/fichiers/projet";
+import { validerFichiers } from "@/lib/github/compilation";
 import type { Fournisseur } from "@/lib/fournisseurs/types";
 import type { KV } from "@/lib/kv";
 import type { Tache } from "@/lib/db/taches";
@@ -70,8 +72,15 @@ export async function ordonnerPourTache(deps: DepsMoteur, tacheId: string): Prom
   return [...libres, ...occupes];
 }
 
+/** Empreinte stable du projet (sha256 des fichiers triés) : détecte un projet strictement inchangé. */
+export function empreinteProjet(fichiers: Array<{ chemin: string; contenu: string }>): string {
+  const h = createHash("sha256");
+  for (const f of [...fichiers].sort((a, b) => a.chemin.localeCompare(b.chemin))) h.update(f.chemin + "\0" + f.contenu + "\0");
+  return h.digest("hex");
+}
+
 export function texteCorrection(journal: string): string {
-  return `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
+  return `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Personne ne répondra à une question : si tu hésites sur une API, choisis la plus probable et livre les fichiers. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
 }
 
 type Fin = "continuer" | "arreter";
@@ -194,16 +203,51 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await suspendre(0, "demande du projet complet");
           return;
         }
+        const fichiersProjet = projet.map(({ chemin, contenu }) => ({ chemin, contenu }));
+        // (a) Projet refusé par la validation locale : correction SANS consommer de run GitHub.
+        const refus = validerFichiers(fichiersProjet);
+        if (refus.length) {
+          const cycles = t.cycles + 1;
+          if (t.auto !== 1 && cycles >= t.maxCycles) {
+            await terminer("echouee", `projet refusé après ${cycles} tentatives`, { cycles, erreur: `Projet refusé : ${refus.join(" ; ")}` });
+            return;
+          }
+          await deps.journaliser(tacheId, `projet refusé avant envoi (${refus.join(" ; ")}), correction demandée`);
+          await deps.ajouterMessageUtilisateur(
+            t.conversationId,
+            `Le projet a été refusé avant l'envoi : ${refus.join(" ; ")}. Mets build.gradle, settings.gradle et gradle.properties à la RACINE, un seul projet Gradle sans sous-projet, un seul source set src/main ; renvoie en entier chaque fichier déplacé avec son nouveau chemin et « Supprimer : ancien/chemin ».`,
+          );
+          await deps.majTache(tacheId, { cycles, etape: `correction ${t.auto === 1 ? `${cycles} (auto)` : `${cycles}/${t.maxCycles}`}` });
+          await suspendre(0, "projet refusé : correction");
+          return;
+        }
+        // (b) Projet strictement identique au dernier compilé : le modèle n'a rien changé → ne pas recompiler.
+        const empreinte = empreinteProjet(fichiersProjet);
+        if (t.empreinteCompilee && empreinte === t.empreinteCompilee) {
+          const cycles = t.cycles + 1;
+          if (t.auto !== 1 && cycles >= t.maxCycles) {
+            await terminer("echouee", `aucune correction livrée après ${cycles} cycles`, { cycles, erreur: "Le modèle n'a renvoyé aucun fichier modifié." });
+            return;
+          }
+          await deps.journaliser(tacheId, "la réponse ne modifie aucun fichier : correction redemandée sans recompiler");
+          await deps.ajouterMessageUtilisateur(
+            t.conversationId,
+            "Ta réponse ne contenait aucun fichier modifié. Personne ne peut répondre à tes questions : décide toi-même et renvoie EN ENTIER chaque fichier corrigé, chacun dans son bloc de code avec son chemin.",
+          );
+          await deps.majTache(tacheId, { cycles });
+          await suspendre(0, "aucune modification : correction");
+          return;
+        }
         await deps.majTache(tacheId, { etape: `envoi de ${projet.length} fichiers à GitHub` });
         try {
-          compilation = await deps.lancerCompilation({ conversationId: t.conversationId, messageId: dernier.id, fichiers: projet.map(({ chemin, contenu }) => ({ chemin, contenu })) });
+          compilation = await deps.lancerCompilation({ conversationId: t.conversationId, messageId: dernier.id, fichiers: fichiersProjet });
         } catch (e) {
           const msg = e instanceof Error ? e.message : "échec de l'envoi";
           await deps.journaliser(tacheId, `compilation impossible : ${msg}`);
           await terminer("echouee", "compilation impossible", { erreur: msg });
           return;
         }
-        await deps.majTache(tacheId, { compilationId: compilation.id, etape: "compilation sur GitHub" });
+        await deps.majTache(tacheId, { compilationId: compilation.id, empreinteCompilee: empreinte, etape: "compilation sur GitHub" });
         await deps.journaliser(tacheId, `compilation lancée (${projet.length} fichiers)`);
       }
 

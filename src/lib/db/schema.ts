@@ -87,6 +87,8 @@ export const taches = pgTable(
     cycles: integer("cycles").notNull().default(0),
     maxCycles: integer("max_cycles").notNull().default(8),
     compilationId: text("compilation_id"),
+    /** Empreinte du dernier projet envoyé à la compilation (évite de recompiler un projet identique). */
+    empreinteCompilee: text("empreinte_compilee"),
     fournisseurId: text("fournisseur_id"),
     tokensEntree: integer("tokens_entree").notNull().default(0),
     tokensSortie: integer("tokens_sortie").notNull().default(0),
@@ -174,6 +176,7 @@ CREATE TABLE IF NOT EXISTS taches (
   cycles INTEGER NOT NULL DEFAULT 0,
   max_cycles INTEGER NOT NULL DEFAULT 8,
   compilation_id TEXT,
+  empreinte_compilee TEXT,
   fournisseur_id TEXT,
   tokens_entree INTEGER NOT NULL DEFAULT 0,
   tokens_sortie INTEGER NOT NULL DEFAULT 0,
@@ -188,4 +191,5 @@ CREATE TABLE IF NOT EXISTS taches (
 );
 CREATE INDEX IF NOT EXISTS taches_statut_idx ON taches (statut);
 ALTER TABLE taches ADD COLUMN IF NOT EXISTS auto INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE taches ADD COLUMN IF NOT EXISTS empreinte_compilee TEXT;
 `;

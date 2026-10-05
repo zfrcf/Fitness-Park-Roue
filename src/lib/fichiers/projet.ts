@@ -26,7 +26,7 @@ export function texteDuMessage(m: MessageMinimal): string {
 }
 
 /** Chemins que la chaîne de compilation fournit elle-même ou refuse : jamais dans le projet. */
-export const RE_CHEMIN_RESERVE = /^\.github\/|(^|\/)gradlew(\.bat)?$|gradle-wrapper\.(jar|properties)$/;
+export const RE_CHEMIN_RESERVE = /^\.github\/|^vercel\.json$|(^|\/)gradlew(\.bat)?$|gradle-wrapper\.(jar|properties)$/;
 
 /**
  * Fusionne les fichiers de toutes les réponses, dans l'ordre d'apparition des chemins.

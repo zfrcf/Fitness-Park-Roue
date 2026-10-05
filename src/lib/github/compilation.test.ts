@@ -30,7 +30,7 @@ describe("validerFichiers", () => {
 
 describe("retirerReserves", () => {
   it("retire .github/, gradlew et gradle-wrapper, garde le reste", () => {
-    const r = retirerReserves([f("build.gradle"), f(".github/workflows/x.yml"), f("gradlew"), f("gradlew.bat"), f("gradle/wrapper/gradle-wrapper.properties"), f("src/Main.java")]);
+    const r = retirerReserves([f("build.gradle"), f(".github/workflows/x.yml"), f("vercel.json"), f("gradlew"), f("gradlew.bat"), f("gradle/wrapper/gradle-wrapper.properties"), f("src/Main.java")]);
     expect(r.map((x) => x.chemin)).toEqual(["build.gradle", "src/Main.java"]);
   });
 });

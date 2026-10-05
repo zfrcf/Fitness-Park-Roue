@@ -13,7 +13,7 @@ export const MAX_FICHIERS = 400;
 export const MAX_OCTETS = 3 * 1024 * 1024;
 const RE_CHEMIN_SUR = /^(?!\.{1,2}(\/|$))(?!\/)(?!.*\/\.\.(\/|$))[\w@.+ -][\w@.+\/ -]*$/;
 /** Chemins que la chaîne fournit elle-même : jamais envoyés, retirés sans refuser le projet. */
-export const RE_CHEMIN_RESERVE = /^\.github\/|(^|\/)gradlew(\.bat)?$|(^|\/)gradle-wrapper\.(jar|properties)$/;
+export const RE_CHEMIN_RESERVE = /^\.github\/|^vercel\.json$|(^|\/)gradlew(\.bat)?$|(^|\/)gradle-wrapper\.(jar|properties)$/;
 
 /** Retire les fichiers réservés (workflow, wrapper Gradle) d'une liste. */
 export function retirerReserves(fichiers: FichierGenere[]): FichierGenere[] {
@@ -68,7 +68,12 @@ export async function creerBranche(id: string, fichiers: FichierGenere[], nom: s
   const { proprietaire, nom: depot } = depotCompilation();
   const base = `/repos/${proprietaire}/${depot}`;
   // On retire les fichiers réservés produits par le modèle (sinon collision avec le workflow ajouté ci-dessous).
-  const tous = [...retirerReserves(fichiers), { chemin: ".github/workflows/compiler.yml", contenu: contenuWorkflow() }];
+  const tous = [
+    ...retirerReserves(fichiers),
+    // Empêche Vercel de déployer la branche de compilation (sinon déploiement preview en échec, quota consommé).
+    { chemin: "vercel.json", contenu: JSON.stringify({ git: { deploymentEnabled: false } }) + "\n" },
+    { chemin: ".github/workflows/compiler.yml", contenu: contenuWorkflow() },
+  ];
   // Blobs par lots pour limiter la concurrence.
   const arbre: Array<{ path: string; mode: "100644"; type: "blob"; sha: string }> = [];
   for (let i = 0; i < tous.length; i += 10) {

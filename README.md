@@ -433,6 +433,14 @@ poursuivies automatiquement (voir la rotation).
 
 ## Dépannage
 
+- **Déploiements Vercel en échec nommés `compilation/…`, quota de déploiements atteint** : par défaut
+  `GITHUB_REPO` pointe sur le dépôt de l'application, relié à Vercel ; chaque branche de compilation
+  déclenchait un déploiement preview en échec. C'est désactivé par le `vercel.json` à la racine
+  (`git.deploymentEnabled: { "compilation/*": false }`) et par un `vercel.json` ajouté dans chaque
+  branche de compilation. **Correction recommandée** : utiliser un dépôt dédié pour la compilation
+  (voir la section Compilation), non relié à Vercel.
+
+
 - **« Tous les fournisseurs sont épuisés »** : ouvrez la page État ; l'heure de réessai est
   indiquée. « Réinitialiser » force un nouvel essai immédiat.
 - **La barre latérale affiche « Historique indisponible »** : `DATABASE_URL` est absente sur

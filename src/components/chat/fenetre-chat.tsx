@@ -132,7 +132,9 @@ export function FenetreChat({
     const el = zoneDefilement.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: lisse ? "smooth" : "auto" });
-    dernierScrollTop.current = el.scrollHeight;
+    // Position RÉELLE après défilement (≈ scrollHeight - clientHeight), pas scrollHeight : sinon dès que
+    // le contenu dépasse l'écran, surDefilement croit qu'on a remonté et « décolle » tout seul. (#19)
+    dernierScrollTop.current = el.scrollTop;
   }, []);
   useEffect(() => {
     if (collé) defilerEnBas();
@@ -316,18 +318,22 @@ export function FenetreChat({
         </div>
       </div>
       {!collé && messages.length > 0 && (
-        <Button
-          size="icon-sm"
-          variant="outline"
-          aria-label="Aller en bas"
-          className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full shadow-md"
-          onClick={() => {
-            setCollé(true);
-            defilerEnBas(true);
-          }}
-        >
-          <ArrowDown className="size-4" />
-        </Button>
+        // Flotte juste au-dessus de la zone de saisie (dans le flux) au lieu d'un bottom-24 absolu qui
+        // recouvrait la saisie. (#19)
+        <div className="pointer-events-none relative z-10 mx-auto -mt-11 flex w-full justify-center">
+          <Button
+            size="icon-sm"
+            variant="outline"
+            aria-label="Aller en bas"
+            className="pointer-events-auto rounded-full shadow-md"
+            onClick={() => {
+              setCollé(true);
+              defilerEnBas(true);
+            }}
+          >
+            <ArrowDown className="size-4" />
+          </Button>
+        </div>
       )}
       {suggestionTache && (
         <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 px-4 pb-1 text-xs">

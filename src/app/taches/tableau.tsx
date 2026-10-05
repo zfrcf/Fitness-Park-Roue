@@ -2,7 +2,8 @@
 
 import { Check, CheckCircle2, ChevronDown, Clock, Download, Loader2, MessageSquare, Pause, Play, Plus, Square, Trash2, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useSondage } from "@/hooks/use-sondage";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -264,26 +265,19 @@ export function TableauTaches() {
   const [liste, setListe] = useState<TachePublique[] | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
 
-  const charger = useCallback(async () => {
+  const charger = useCallback(async (signal?: AbortSignal) => {
     try {
-      const r = await fetch("/api/taches", { cache: "no-store" });
+      const r = await fetch("/api/taches", { cache: "no-store", signal });
       const j = (await r.json()) as { taches?: TachePublique[]; erreur?: string };
       if (!r.ok) throw new Error(j.erreur ?? "échec");
       setListe(j.taches ?? []);
       setErreur(null);
     } catch (e) {
-      setErreur(e instanceof Error ? e.message : "Impossible de charger les tâches.");
+      if ((e as Error).name !== "AbortError") setErreur(e instanceof Error ? e.message : "Impossible de charger les tâches.");
     }
   }, []);
-
-  useEffect(() => {
-    const premier = setTimeout(() => void charger(), 0);
-    const id = setInterval(() => void charger(), 5000);
-    return () => {
-      clearTimeout(premier);
-      clearInterval(id);
-    };
-  }, [charger]);
+  const actif = (liste ?? []).some((t) => t.statut === "en_cours" || t.statut === "en_attente");
+  useSondage(charger, actif ? 5000 : 30_000);
 
   return (
     <div className="flex flex-col gap-4">

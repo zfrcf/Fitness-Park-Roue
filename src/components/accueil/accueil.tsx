@@ -3,7 +3,8 @@
 import { ArrowRight, Bot, CheckCircle2, Clock, ListChecks, Loader2, MessageSquare, Pause, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useSondage } from "@/hooks/use-sondage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,26 +57,18 @@ export function Accueil() {
   const [maintenant, setMaintenant] = useState(0);
   const [salut] = useState(() => salutation());
 
-  const charger = useCallback(async () => {
+  const charger = useCallback(async (signal?: AbortSignal) => {
     const [t, c, e] = await Promise.allSettled([
-      fetch("/api/taches", { cache: "no-store" }).then((r) => r.json() as Promise<{ taches?: TachePublique[] }>),
-      fetch("/api/conversations", { cache: "no-store" }).then((r) => r.json() as Promise<{ conversations?: ResumeConversation[] }>),
-      fetch("/api/etat", { cache: "no-store" }).then((r) => r.json() as Promise<{ fournisseurs?: Array<FournisseurPublic & { etat: EtatFournisseur }> }>),
+      fetch("/api/taches", { cache: "no-store", signal }).then((r) => r.json() as Promise<{ taches?: TachePublique[] }>),
+      fetch("/api/conversations", { cache: "no-store", signal }).then((r) => r.json() as Promise<{ conversations?: ResumeConversation[] }>),
+      fetch("/api/etat", { cache: "no-store", signal }).then((r) => r.json() as Promise<{ fournisseurs?: Array<FournisseurPublic & { etat: EtatFournisseur }> }>),
     ]);
     if (t.status === "fulfilled") setTaches(t.value.taches ?? []);
     if (c.status === "fulfilled") setConversations(c.value.conversations ?? []);
     if (e.status === "fulfilled") setFournisseurs(e.value.fournisseurs ?? []);
     setMaintenant(Date.now());
   }, []);
-
-  useEffect(() => {
-    const premier = setTimeout(() => void charger(), 0);
-    const id = setInterval(() => void charger(), 10_000);
-    return () => {
-      clearTimeout(premier);
-      clearInterval(id);
-    };
-  }, [charger]);
+  useSondage(charger, 30_000);
 
   function demarrer(t = texte) {
     const q = t.trim();

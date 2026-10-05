@@ -1,7 +1,8 @@
 "use client";
 
 import { CheckCircle2, CircleHelp, Loader2, RefreshCw, RotateCcw, XCircle, Zap } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useSondage } from "@/hooks/use-sondage";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,27 +80,18 @@ export function TableauEtat() {
   const [enTest, setEnTest] = useState<Record<string, boolean>>({});
   const [maintenant, setMaintenant] = useState(() => Date.now());
 
-  const charger = useCallback(async () => {
+  const charger = useCallback(async (signal?: AbortSignal) => {
     try {
-      const r = await fetch("/api/etat", { cache: "no-store" });
+      const r = await fetch("/api/etat", { cache: "no-store", signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setDonnees((await r.json()) as Reponse);
+      setMaintenant(Date.now());
       setErreur(null);
     } catch (e) {
-      setErreur(e instanceof Error ? e.message : "Erreur de chargement");
+      if ((e as Error).name !== "AbortError") setErreur(e instanceof Error ? e.message : "Erreur de chargement");
     }
   }, []);
-
-  useEffect(() => {
-    const t = setInterval(() => void charger(), 30_000);
-    const tic = setInterval(() => setMaintenant(Date.now()), 1000);
-    const premier = setTimeout(() => void charger(), 0);
-    return () => {
-      clearInterval(t);
-      clearInterval(tic);
-      clearTimeout(premier);
-    };
-  }, [charger]);
+  useSondage(charger, 60_000);
 
   async function tester(f: Ligne) {
     setEnTest((s) => ({ ...s, [f.id]: true }));

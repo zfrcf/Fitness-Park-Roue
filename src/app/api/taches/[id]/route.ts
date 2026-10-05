@@ -13,14 +13,19 @@ export async function GET(_req: Request, { params }: Ctx) {
   return NextResponse.json({ tache: versPublic(t) });
 }
 
-/** Actions : pause, reprendre, arreter. */
+/** Actions : pause, reprendre, arreter, maxCycles (nombre de corrections, modifiable à tout moment). */
 export async function PATCH(req: Request, { params }: Ctx) {
   const { id } = await params;
-  const { action } = ((await req.json().catch(() => ({}))) as { action?: string }) ?? {};
+  const { action, maxCycles } = ((await req.json().catch(() => ({}))) as { action?: string; maxCycles?: number }) ?? {};
   const t = await lireTache(id).catch(() => null);
   if (!t) return NextResponse.json({ erreur: "Tâche introuvable." }, { status: 404 });
   let maj = t;
-  if (action === "pause" && (t.statut === "en_attente" || t.statut === "en_cours")) {
+  if (action === "maxCycles") {
+    const n = Math.min(50, Math.max(1, Math.round(Number(maxCycles) || 0)));
+    if (!n) return NextResponse.json({ erreur: "Nombre de corrections invalide." }, { status: 400 });
+    maj = (await majTache(id, { maxCycles: n })) ?? t;
+    await journaliser(id, `corrections max : ${n}`);
+  } else if (action === "pause" && (t.statut === "en_attente" || t.statut === "en_cours")) {
     maj = (await majTache(id, { statut: "pause", etape: "en pause", battementA: null, repriseA: null })) ?? t;
     await journaliser(id, "mise en pause");
   } else if (action === "reprendre" && (t.statut === "pause" || t.statut === "echouee" || t.statut === "arretee")) {

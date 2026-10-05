@@ -2,7 +2,9 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { ArrowDown, Bot } from "lucide-react";
+import { ArrowDown, Bot, ListChecks, Loader2 } from "lucide-react";
+import Link from "next/link";
+import type { TachePublique } from "@/lib/db/taches";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
@@ -12,6 +14,7 @@ import { Message } from "./message";
 import { fusionnerProjet } from "@/lib/fichiers/projet";
 import { estimerTokens } from "@/lib/chat/contexte";
 import { formatNombre } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { useReglages } from "./reglages-contexte";
 import { Saisie } from "./saisie";
 
@@ -22,8 +25,26 @@ const SUGGESTIONS = [
   "Propose un plan de réunion d'équipe de 30 minutes",
 ];
 
-export function FenetreChat({ conversationId, messagesInitiaux = [] }: { conversationId: string; messagesInitiaux?: MessageUI[] }) {
+function texteDe(m: MessageUI | undefined): string {
+  return m ? m.parts.filter((p) => p.type === "text").map((p) => p.text).join("") : "";
+}
+
+export function FenetreChat({
+  conversationId,
+  messagesInitiaux = [],
+  messageInitial,
+  tacheInitiale,
+}: {
+  conversationId: string;
+  messagesInitiaux?: MessageUI[];
+  /** Premier message envoyé automatiquement à l'arrivée (depuis l'accueil). */
+  messageInitial?: string;
+  /** Tâche de fond attachée à cette conversation : bandeau et mise à jour en direct. */
+  tacheInitiale?: TachePublique;
+}) {
   const [saisie, setSaisie] = useState("");
+  const [tache, setTache] = useState<TachePublique | undefined>(tacheInitiale);
+  const messageInitialEnvoye = useRef(false);
   const { reglages } = useReglages();
   const urlRemplacee = useRef(messagesInitiaux.length > 0);
   const zoneDefilement = useRef<HTMLDivElement>(null);
@@ -48,6 +69,53 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
   });
 
   const occupe = status === "submitted" || status === "streaming";
+  const tacheActive = !!tache && (tache.statut === "en_cours" || tache.statut === "en_attente");
+
+  // Premier message automatique (arrivée depuis l'accueil avec ?q=). Différé d'un tic : en
+  // développement, React monte/démonte le composant deux fois et le premier envoi serait perdu.
+  useEffect(() => {
+    if (!messageInitial || messageInitialEnvoye.current) return;
+    const t = setTimeout(() => {
+      messageInitialEnvoye.current = true;
+      void sendMessage({ text: messageInitial }, { body: { rechercheWeb: false } });
+      if (!urlRemplacee.current) {
+        urlRemplacee.current = true;
+        window.history.replaceState(null, "", `/c/${conversationId}`);
+        setTimeout(signalerMajConversations, 800);
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [messageInitial, sendMessage, conversationId]);
+
+  // Conversation pilotée par une tâche de fond : on suit la tâche et on recharge les messages ajoutés par le serveur.
+  useEffect(() => {
+    if (!tache) return;
+    let actif = true;
+    const tic = async () => {
+      try {
+        const rt = await fetch(`/api/taches/${tache.id}`, { cache: "no-store" });
+        if (rt.ok && actif) {
+          const { tache: t } = (await rt.json()) as { tache: TachePublique };
+          setTache(t);
+        }
+        if (occupe) return;
+        const rc = await fetch(`/api/conversations/${conversationId}`, { cache: "no-store" });
+        if (!rc.ok || !actif) return;
+        const { messages: serveur } = (await rc.json()) as { messages: MessageUI[] };
+        setMessages((prev) => {
+          const memeFin = prev.length === serveur.length && prev.at(-1)?.id === serveur.at(-1)?.id && texteDe(prev.at(-1)) === texteDe(serveur.at(-1));
+          return memeFin ? prev : serveur;
+        });
+      } catch {
+        /* réessai au prochain tic */
+      }
+    };
+    const id = setInterval(() => void tic(), tacheActive ? 4000 : 20_000);
+    return () => {
+      actif = false;
+      clearInterval(id);
+    };
+  }, [tache?.id, tacheActive, occupe, conversationId, setMessages, tache]);
 
   // Défilement : on suit le bas tant que l'utilisateur n'a pas remonté. Tout geste vers le haut
   // (molette, doigt, barre) décolle immédiatement ; on recolle seulement une fois revenu tout en bas.
@@ -138,6 +206,17 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
+      {tache && (
+        <div className={cn("flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs", tacheActive ? "bg-primary/5" : "bg-muted/40")} role="status">
+          {tacheActive ? <Loader2 className="size-3.5 animate-spin" /> : <ListChecks className="size-3.5" />}
+          <span className="font-medium">Tâche de fond {tacheActive ? "en cours" : tache.statut === "terminee" ? "terminée" : tache.statut === "pause" ? "en pause" : tache.statut === "echouee" ? "échouée" : "arrêtée"}</span>
+          <span className="text-muted-foreground">{tache.etape} · cycle {tache.cycles}/{tache.maxCycles}</span>
+          {tacheActive && <span className="text-muted-foreground">· les nouveaux échanges apparaissent ici en direct</span>}
+          <Link href="/taches" className="ml-auto underline decoration-dotted underline-offset-2">
+            gérer
+          </Link>
+        </div>
+      )}
       <div ref={zoneDefilement} onScroll={surDefilement} className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
           {messages.length === 0 && (

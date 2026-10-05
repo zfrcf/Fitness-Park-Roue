@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ChevronDown, Clock, Download, Loader2, Pause, Play, Plus, Square, Trash2, XCircle } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Clock, Download, Loader2, MessageSquare, Pause, Play, Plus, Square, Trash2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDureeRelative, formatHeure, formatNombre } from "@/lib/format";
+import { formatDepuis, formatDureeRelative, formatHeure, formatNombre } from "@/lib/format";
 import type { TachePublique } from "@/lib/db/taches";
 import { cn } from "@/lib/utils";
 
@@ -108,6 +108,53 @@ function Formulaire({ onCreee }: { onCreee: () => void }) {
   );
 }
 
+function EditeurCorrections({ t, onMaj }: { t: TachePublique; onMaj: () => void }) {
+  const [valeur, setValeur] = useState<number | null>(null); // null = pas d'édition en cours
+  const [envoi, setEnvoi] = useState(false);
+  const affiche = valeur ?? t.maxCycles;
+  async function enregistrer() {
+    if (valeur === null || valeur === t.maxCycles) {
+      setValeur(null);
+      return;
+    }
+    setEnvoi(true);
+    try {
+      const r = await fetch(`/api/taches/${t.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "maxCycles", maxCycles: valeur }) });
+      if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { erreur?: string }).erreur ?? "échec");
+      toast.success(`Corrections max : ${valeur}`);
+      setValeur(null);
+      onMaj();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Modification impossible.");
+    } finally {
+      setEnvoi(false);
+    }
+  }
+  return (
+    <span className="inline-flex items-center gap-1" title="Nombre maximal de corrections (modifiable à tout moment, même en cours)">
+      cycle {t.cycles}/
+      <input
+        type="number"
+        min={1}
+        max={50}
+        value={affiche}
+        aria-label="Corrections max"
+        onChange={(e) => setValeur(Number(e.target.value) || 1)}
+        onBlur={() => void enregistrer()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+        }}
+        className="w-12 rounded border bg-background px-1 py-0.5 text-center text-xs tabular-nums"
+      />
+      {valeur !== null && valeur !== t.maxCycles && (
+        <Button size="icon-xs" variant="ghost" aria-label="Enregistrer" disabled={envoi} onMouseDown={(e) => e.preventDefault()} onClick={() => void enregistrer()}>
+          {envoi ? <Loader2 className="animate-spin" /> : <Check />}
+        </Button>
+      )}
+    </span>
+  );
+}
+
 function LigneTache({ t, onMaj }: { t: TachePublique; onMaj: () => void }) {
   const [journalOuvert, setJournalOuvert] = useState(false);
   const [occupe, setOccupe] = useState(false);
@@ -140,6 +187,9 @@ function LigneTache({ t, onMaj }: { t: TachePublique; onMaj: () => void }) {
           {t.titre}
         </Link>
         <div className="flex gap-1">
+          <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/c/${t.conversationId}`} />} title="Voir la conversation de la tâche (mise à jour en direct)">
+            <MessageSquare /> Voir le chat
+          </Button>
           {t.jarCompilationId && t.jarNom && (
             <Button size="sm" nativeButton={false} render={<a href={`/api/compilations/${t.jarCompilationId}/jar`} download />}>
               <Download /> {t.jarNom}
@@ -169,15 +219,13 @@ function LigneTache({ t, onMaj }: { t: TachePublique; onMaj: () => void }) {
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{t.etape}</span>
-        <span>
-          cycle {t.cycles}/{t.maxCycles}
-        </span>
+        <EditeurCorrections t={t} onMaj={onMaj} />
         {t.fournisseurId && <span>{t.fournisseurId}</span>}
         <span className="tabular-nums">
           {formatNombre(t.tokensEntree)} → {formatNombre(t.tokensSortie)} tokens
         </span>
         <span>créée {formatHeure(t.creeA)}</span>
-        <span>màj {formatDureeRelative(t.majA)}</span>
+        <span>màj {formatDepuis(t.majA)}</span>
       </div>
       {t.erreur && <p className="text-xs text-destructive">{t.erreur}</p>}
       {t.journal.length > 0 && (

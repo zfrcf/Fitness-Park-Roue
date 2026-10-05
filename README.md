@@ -39,7 +39,8 @@ suivant, sans action de votre part.
   recherche web automatique.
 - **Recherche web** : outil que le modèle déclenche lui-même, ou bouton globe pour forcer une
   recherche ; sources citées et cliquables.
-- **Tâches de fond** : des agents qui tournent sur le serveur sans vous (génération → compilation → correction en boucle), plusieurs en parallèle, avec reprise automatique après un quota.
+- **Page d'accueil** : première question, suggestions, tâches de fond en cours, conversations récentes, état des fournisseurs ; `/chat` ouvre une conversation vide.
+- **Tâches de fond** : des agents qui tournent sur le serveur sans vous (génération → compilation → correction en boucle), plusieurs en parallèle, avec reprise automatique après un quota ; nombre de corrections modifiable à tout moment, chat de la tâche mis à jour en direct.
 - **Fichiers générés** téléchargeables un par un ou en .zip ; **compilation des mods Minecraft**
   (projets Gradle) sur GitHub Actions avec téléchargement du .jar et renvoi des erreurs au modèle.
 - **Rotation automatique** des fournisseurs (429, 402, 401, 5xx, délai dépassé, coupure) avec
@@ -338,7 +339,9 @@ le projet à GitHub, lit le journal de compilation, demande la correction au mod
   Avec `QSTASH_TOKEN` (Upstash QStash, 1 000 messages/jour gratuits), les relances passent par
   QStash avec reprises automatiques.
 - **Suivi** : statut, étape, cycle, fournisseur, tokens, journal horodaté, pause / reprise / arrêt,
-  téléchargement du `.jar`, lien vers la conversation (fichiers et projet complet).
+  téléchargement du `.jar`. Le nombre maximal de corrections se modifie en ligne, même en cours.
+  **Voir le chat** ouvre la conversation de la tâche : un bandeau rappelle l'étape et les nouveaux
+  échanges produits par le serveur apparaissent en direct (rechargement toutes les 4 s).
 
 Le workflow de réveil utilise la variable de dépôt `APP_URL` si elle existe (Settings → Secrets and
 variables → Actions → Variables), sinon `https://fitness-park-roue.vercel.app`.

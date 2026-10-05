@@ -18,6 +18,13 @@ export async function lireTache(id: string): Promise<Tache | null> {
   return l ?? null;
 }
 
+/** Dernière tâche attachée à une conversation (active de préférence). */
+export async function tacheDeConversation(conversationId: string): Promise<Tache | null> {
+  const db = await getDB();
+  const liste = await db.select().from(taches).where(eq(taches.conversationId, conversationId)).orderBy(desc(taches.majA)).limit(5);
+  return liste.find((t) => t.statut === "en_cours" || t.statut === "en_attente") ?? liste[0] ?? null;
+}
+
 export async function listerTaches(limite = 100): Promise<Tache[]> {
   const db = await getDB();
   return db.select().from(taches).orderBy(desc(taches.majA)).limit(limite);

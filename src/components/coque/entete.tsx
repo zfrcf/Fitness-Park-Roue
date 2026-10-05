@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ListChecks, LogOut, MessageSquare } from "lucide-react";
+import { Activity, Home, ListChecks, LogOut, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 
 const LIENS = [
-  { href: "/", libelle: "Chat", icone: MessageSquare },
+  { href: "/", libelle: "Accueil", icone: Home },
+  { href: "/chat", libelle: "Chat", icone: MessageSquare },
   { href: "/taches", libelle: "Tâches", icone: ListChecks },
   { href: "/etat", libelle: "État", icone: Activity },
 ] as const;
@@ -30,7 +31,7 @@ export function Entete({ children }: { children?: React.ReactNode }) {
       {children}
       <nav className="flex items-center gap-1">
         {LIENS.map(({ href, libelle, icone: Icone }) => {
-          const actif = href === "/" ? chemin === "/" || chemin.startsWith("/c/") : chemin.startsWith(href);
+          const actif = href === "/" ? chemin === "/" : href === "/chat" ? chemin.startsWith("/chat") || chemin.startsWith("/c/") : chemin.startsWith(href);
           return (
             <Link
               key={href}

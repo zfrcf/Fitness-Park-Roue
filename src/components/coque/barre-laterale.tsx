@@ -142,10 +142,10 @@ export function BarreLaterale({ onNaviguer }: { onNaviguer?: () => void }) {
           variant="outline"
           className="flex-1 justify-start"
           onClick={() => {
-            routeur.push("/");
+            routeur.push("/chat");
             onNaviguer?.();
           }}
-          disabled={chemin === "/"}
+          disabled={chemin === "/chat"}
         >
           <MessageSquarePlus /> Nouvelle conversation
           <kbd className="ml-auto hidden rounded border px-1 font-mono text-[10px] text-muted-foreground sm:inline">⌘⇧O</kbd>

@@ -33,3 +33,15 @@ export function formatTokens(n: number) {
   if (n >= 10_000) return `${Math.round(n / 1000)} k`;
   return fmtNombre.format(n);
 }
+
+/** « il y a 5 min », « il y a 2 h », « hier », « il y a 3 j » (instant passé). */
+export function formatDepuis(msPasse: number, maintenant = Date.now()) {
+  const s = Math.max(0, Math.round((maintenant - msPasse) / 1000));
+  if (s < 45) return "à l'instant";
+  const m = Math.round(s / 60);
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  const j = Math.round(h / 24);
+  return j === 1 ? "hier" : `il y a ${j} j`;
+}

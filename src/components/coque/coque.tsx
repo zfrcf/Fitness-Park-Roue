@@ -58,7 +58,7 @@ export function Coque({ children }: { children: React.ReactNode }) {
         basculer();
       } else if (mod && e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
-        routeur.push("/");
+        routeur.push("/chat");
       }
     };
     window.addEventListener("keydown", h);

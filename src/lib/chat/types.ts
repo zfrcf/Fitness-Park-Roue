@@ -14,7 +14,7 @@ export const REGLAGES_DEFAUT: Reglages = {
   systeme:
     "Tu es un assistant utile, précis et concis. Tu réponds en français sauf si l'on te demande une autre langue. Tu utilises le Markdown quand c'est utile (listes, tableaux, blocs de code).",
   temperature: 0.7,
-  maxTokens: 4096,
+  maxTokens: 16384,
   raisonnement: "aucun",
   rechercheAuto: true,
 };

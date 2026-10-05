@@ -19,6 +19,9 @@ export type Scenario =
   | "contexte" // 400 contexte trop long sauf si le prompt est court
   | "413-itpm" // Groq : requête trop grande pour la fenêtre de tokens par minute, sauf si le prompt est court
   | "cf-3036" // Cloudflare quota journalier
+  | "long" // réponse coupée par max_tokens (finish_reason length), puis la suite en continuation
+  | "vide" // ne produit que du raisonnement : aucun texte, finish_reason length
+  | "otpm" // Groq : refuse si max_tokens > 1000 (OTPM), sinon répond normalement
   | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
   | "outil-refuse"; // 400 si des outils sont envoyés, sinon réponse normale
 
@@ -59,9 +62,9 @@ function chunk(id: string, delta: string, extra: Record<string, unknown> = {}) {
   })}\n\n`;
 }
 
-function finChunk(id: string, promptTokens: number, completionTokens: number) {
+function finChunk(id: string, promptTokens: number, completionTokens: number, finish = "stop") {
   return (
-    `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+    `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n` +
     `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [], usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens, cost: 0.001 } })}\n\n` +
     "data: [DONE]\n\n"
   );
@@ -111,6 +114,36 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
         return json(429, { error: { code: 429, message: "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day", metadata: {} } });
       case "cf-3036":
         return json(429, { success: false, errors: [{ code: 3036, message: "Account limited: You have used up your daily free allocation of 10,000 neurons." }], result: null });
+      case "otpm": {
+        const maxTokens = Number(corps.max_tokens ?? 0);
+        if (maxTokens > 1000) {
+          return json(429, { error: { message: `Request too large for model on output tokens per minute (OTPM): Limit 1000, Requested ${maxTokens}. The request's expected output tokens exceed the enforced limit; reduce max_tokens and try again.`, type: "tokens", code: "rate_limit_exceeded" } });
+        }
+        if (nonStream) return reponseJson("Réponse courte.", 50, 3);
+        sse();
+        res.write(chunk(id, "Réponse plafonnée."));
+        res.end(finChunk(id, 50, 3));
+        return;
+      }
+      case "long": {
+        if (nonStream) return reponseJson("Réponse entière du fournisseur long.", 30, 7);
+        sse();
+        if (continuation) {
+          res.write(chunk(id, "et la fin."));
+          res.end(finChunk(id, 40, 3));
+          return;
+        }
+        res.write(chunk(id, "Début de la réponse longue "));
+        res.end(finChunk(id, 30, 4096, "length"));
+        return;
+      }
+      case "vide": {
+        if (nonStream) return reponseJson("", 30, 4096);
+        sse();
+        res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: { reasoning: "Je réfléchis… " }, finish_reason: null }] })}\n\n`);
+        res.end(finChunk(id, 30, 4096, "length"));
+        return;
+      }
       case "402":
         return json(402, { error: { code: 402, message: "Insufficient credits. Add more using https://openrouter.ai/settings/credits" } });
       case "401":

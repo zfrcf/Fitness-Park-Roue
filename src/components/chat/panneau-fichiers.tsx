@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { estProjetGradle, nomArchive, type FichierGenere } from "@/lib/fichiers/extraire";
+import { cn } from "@/lib/utils";
 import { formatNombre } from "@/lib/format";
 
 function telechargerBlob(blob: Blob, nom: string) {
@@ -29,7 +30,23 @@ export async function fabriquerZip(fichiers: FichierGenere[]): Promise<Blob> {
   return zip.generateAsync({ type: "blob", compression: "DEFLATE" });
 }
 
-export function PanneauFichiers({ fichiers, actions, pied }: { fichiers: FichierGenere[]; actions?: React.ReactNode; pied?: React.ReactNode }) {
+export function PanneauFichiers({
+  fichiers,
+  actions,
+  pied,
+  titre,
+  sousTitre,
+  modifies,
+}: {
+  fichiers: FichierGenere[];
+  actions?: React.ReactNode;
+  pied?: React.ReactNode;
+  /** Titre à la place de « N fichiers ». */
+  titre?: string;
+  sousTitre?: string;
+  /** Chemins modifiés par ce message (mis en évidence dans la liste). */
+  modifies?: Set<string>;
+}) {
   const [zipEnCours, setZipEnCours] = useState(false);
   if (!fichiers.length) return null;
   const nom = nomArchive(fichiers);
@@ -51,8 +68,9 @@ export function PanneauFichiers({ fichiers, actions, pied }: { fichiers: Fichier
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <FileCode2 className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">
-          {fichiers.length} fichier{fichiers.length > 1 ? "s" : ""}
+          {titre ?? `${fichiers.length} fichier${fichiers.length > 1 ? "s" : ""}`}
           {gradle && <span className="ml-1 text-xs text-muted-foreground">· projet Gradle</span>}
+          {sousTitre && <span className="ml-1 text-xs text-muted-foreground">· {sousTitre}</span>}
         </span>
         <div className="ml-auto flex flex-wrap gap-1.5">
           {actions}
@@ -64,8 +82,9 @@ export function PanneauFichiers({ fichiers, actions, pied }: { fichiers: Fichier
       <ul className="max-h-64 divide-y overflow-y-auto">
         {fichiers.map((f) => (
           <li key={f.chemin} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-            <span className="min-w-0 flex-1 truncate font-mono" title={f.chemin}>
+            <span className={cn("min-w-0 flex-1 truncate font-mono", modifies && !modifies.has(f.chemin) && "text-muted-foreground")} title={f.chemin}>
               {f.chemin}
+              {modifies?.has(f.chemin) && <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] font-sans text-primary">modifié</span>}
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">{formatNombre(f.contenu.length)} car.</span>
             <Button size="icon-xs" variant="ghost" aria-label={`Télécharger ${f.chemin}`} onClick={() => telechargerFichier(f)}>

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { fuseauHoraire } from "@/lib/fuseau";
 import { blocContexteMinecraft, detecterDemandeMod, versionsMinecraft } from "@/lib/minecraft/contexte";
+import { blocProjetPourModele, fusionnerProjet, INSTRUCTION_PROJET, masquerFichiersConnus, suppressionsDemandees } from "@/lib/fichiers/projet";
 import { executerChat, genererAvecRotation } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
@@ -17,6 +18,10 @@ import { getKV } from "@/lib/kv";
 // Node.js + Fluid Compute : 300 s est le maximum du plan Hobby (800 s en Pro).
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
+
+function texteDe(m: { parts: Array<{ type: string; text?: string }> }): string {
+  return m.parts.filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text as string).join("");
+}
 
 export async function POST(req: Request) {
   let corps: CorpsRequeteChat;
@@ -84,6 +89,22 @@ export async function POST(req: Request) {
   const texteDernier = dernier?.role === "user" ? dernier.parts.filter((p) => p.type === "text").map((p) => p.text).join("") : "";
   const liensAlire = detecterLiens(texteDernier);
 
+  // État du projet : une seule copie à jour de chaque fichier dans le système, les blocs des
+  // réponses passées remplacés par des renvois. Le modèle ne renvoie que ce qui change.
+  const projet = fusionnerProjet(corps.messages).filter((f) => {
+    const supprimeApres = corps.messages.some((m, i) => m.role === "assistant" && suppressionsDemandees(texteDe(m)).includes(f.chemin) && i > corps.messages.findIndex((x) => x.id === f.messageId));
+    return !supprimeApres;
+  });
+  if (projet.length) {
+    const chemins = new Set(projet.map((f) => f.chemin));
+    for (const m of messagesUI) {
+      if (m.role !== "assistant" || m.parts[0]?.type !== "text") continue;
+      m.parts[0] = { type: "text", text: masquerFichiersConnus(m.parts[0].text, chemins) };
+    }
+    const budget = Math.floor(Math.max(...liste.map((f) => f.contexte)) * 0.4);
+    reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${INSTRUCTION_PROJET}\n\n${blocProjetPourModele(projet, budget)}` };
+  }
+
   // L'historique envoyé par le client fait foi (édition, régénération) : on le persiste tel quel.
   if (conversationId !== "sans-id") {
     try {
@@ -131,7 +152,7 @@ export async function POST(req: Request) {
       }
       // 1 bis. Demande de mod Minecraft : versions à jour et modèle de projet compilable.
       const demandeMod = detecterDemandeMod(texteDernier);
-      if (demandeMod.mod) {
+      if (demandeMod.mod || projet.some((f) => /(^|\/)(fabric\.mod\.json|build\.gradle(\.kts)?)$/.test(f.chemin))) {
         try {
           const v = await versionsMinecraft(demandeMod.version, { kv: deps.kv });
           reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${blocContexteMinecraft(v)}` };

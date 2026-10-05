@@ -208,9 +208,17 @@ CLI Vercel.
   résumé mis en cache) et le résumé est ajouté au prompt système ; les messages récents sont
   conservés intacts. Si un fournisseur renvoie malgré tout « contexte trop long », la fenêtre est
   recalibrée et la requête rejouée.
-- **Requête trop grande pour la fenêtre de débit** (Groq limite à 7 000 tokens d'entrée par
-  minute) : bascule vers un fournisseur capable de prendre la requête entière ; s'il n'y en a
-  pas, résumé puis nouvel essai sur place.
+- **Requête trop grande pour la fenêtre de débit** (Groq limite à 7 000 tokens d'entrée et
+  1 000 tokens de sortie par minute) : bascule vers un fournisseur capable de prendre la requête
+  entière ; s'il n'y en a pas, résumé puis nouvel essai sur place. Les limites lues dans le message
+  d'erreur sont **mémorisées 24 h** : ensuite, un fournisseur dont la limite ne couvre pas la
+  requête est évité d'emblée, ou utilisé avec la sortie plafonnée à sa limite s'il est le seul.
+- **Réponse coupée par « Tokens max »** (`finish_reason: length`) : le même fournisseur est relancé
+  automatiquement jusqu'à 4 fois pour continuer exactement à la suite (notification « suite
+  automatique »).
+- **Réponse vide** alors que des tokens ont été produits (le raisonnement a consommé toute la
+  sortie, fréquent chez Cloudflare) : bascule immédiate vers le suivant, sans marquer le
+  fournisseur indisponible.
 - **Tout épuisé** : message clair avec le prochain fournisseur disponible et son heure de réessai.
 
 Les mêmes réglages (prompt système, température, longueur, raisonnement) sont envoyés à tous.
@@ -245,6 +253,14 @@ Quand une réponse contient des blocs de code nommés (chemin sur la ligne d'ouv
 téléchargement de chaque fichier, ou de tout le projet en **.zip** avec son arborescence (fabriqué
 dans le navigateur). Le prompt système demande au modèle ce format et des projets complets. Cela
 couvre les datapacks et resource packs Minecraft, les scripts, les configurations, les sites statiques.
+
+**État du projet.** Les fichiers de toutes les réponses d'une conversation sont fusionnés (la
+version la plus récente de chaque chemin fait foi). À chaque tour, cet état complet est donné au
+modèle une seule fois dans le prompt système, et les blocs de code des réponses passées sont
+remplacés par des renvois : le modèle ne renvoie que les fichiers nouveaux ou modifiés, en entier,
+sans jamais réécrire le reste (il peut aussi écrire « Supprimer : chemin »). Sous la dernière
+réponse, le panneau montre le **projet complet** (fichiers de cette réponse marqués « modifié ») :
+c'est lui qui est téléchargé en .zip et compilé.
 
 ## Compilation sur GitHub (mods Minecraft, projets Gradle)
 
@@ -326,12 +342,16 @@ npm test
 Pour simuler un 429 sur un fournisseur réel, remplacez temporairement sa clé par une valeur
 invalide (401) ou attendez son quota : la page État et la bascule se comportent de la même façon.
 
+« Tokens max » vaut 16 384 par défaut : chez Cloudflare le raisonnement entre dans ce budget, et
+une réponse de mod complète dépasse facilement 4 096 tokens. Les réponses plus longues sont
+poursuivies automatiquement (voir la rotation).
+
 ## Limites connues des offres gratuites
 
 | Fournisseur | Limite gratuite observée | Conséquence |
 |---|---|---|
-| Groq, `qwen/qwen3.8-27b` | 30 req/min, 1 000 req/jour, 8 000 tokens/min, 7 000 tokens d'entrée par requête et par minute | les conversations longues ou les pages lues passent vite au fournisseur suivant |
-| Cloudflare Workers AI | 10 000 neurons/jour, 300 req/min ; `qwen3.8-27b` coûte environ 0,45 $ d'entrée et 3,20 $ de sortie par million de tokens en neurons | environ 240 000 tokens d'entrée par jour ; pas d'en-tête de quota restant, l'épuisement est détecté au code 3036 |
+| Groq, `qwen/qwen3.8-27b` | 30 req/min, 1 000 req/jour, 7 000 tokens d'entrée et **1 000 tokens de sortie** par minute | inutilisable pour générer du code long : avec « Tokens max » au-dessus de 1 000, Groq est évité dès que sa limite est connue, et ne sert qu'aux réponses courtes |
+| Cloudflare Workers AI | 10 000 neurons/jour, 300 req/min ; `qwen3.8-27b` coûte environ 0,45 $ d'entrée et 3,20 $ de sortie par million de tokens en neurons ; le raisonnement est toujours actif (`reasoning_effort` low au minimum) et compte dans « Tokens max » | 6 à 8 réponses longues par jour ; l'épuisement est détecté aux codes 3036 et 4006 et levé à minuit UTC |
 | OpenRouter, `:free` | 20 req/min, 50 req/jour (1 000 si 10 $ de crédits achetés) | réserve de fin de journée |
 | Jina Reader sans clé | 20 lectures/min | suffisant pour un usage personnel |
 

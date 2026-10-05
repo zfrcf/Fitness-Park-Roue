@@ -41,7 +41,7 @@ interface Sortie {
   texte: string;
   meta: MetaMessage;
   erreur?: string;
-  bascules: Array<{ de: string; vers: string; continuation: boolean }>;
+  bascules: Array<{ de: string; vers: string; raison: string; continuation: boolean }>;
   regenerations: number;
 }
 
@@ -133,6 +133,46 @@ describe("rotation des fournisseurs", () => {
     expect(assistant).not.toHaveProperty("reasoning_content");
     expect(JSON.stringify(envoyes)).not.toContain("réfléchis longuement");
     expect(assistant?.content).toBe("Voici le mod.");
+  });
+
+  it("fait continuer le même fournisseur quand la réponse est coupée par max_tokens", async () => {
+    const r = await executer([fournisseur("A", "long"), fournisseur("B", "ok")]);
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Début de la réponse longue et la fin.");
+    expect(r.meta.fournisseur).toBe("A");
+    expect(r.bascules).toHaveLength(0);
+    expect(serveur.appels).toHaveLength(2);
+    expect(serveur.appels[1].scenario).toBe("long");
+    const infos = r.chunks.filter((c) => c.type === "data-info");
+    expect(infos).toHaveLength(1);
+  });
+
+  it("bascule quand le raisonnement a consommé toute la sortie (réponse vide)", async () => {
+    const r = await executer([fournisseur("A", "vide"), fournisseur("B", "ok")]);
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse entière du fournisseur ok.");
+    expect(r.meta.fournisseur).toBe("B");
+    expect(r.bascules[0].raison).toMatch(/réponse vide/);
+    // A n'est pas marqué indisponible : une requête plus courte peut lui convenir.
+    expect(await kv.get("fournisseur:etat:a")).toBeNull();
+  });
+
+  it("apprend la limite de sortie (OTPM) et évite ensuite le fournisseur, ou plafonne s'il est seul", async () => {
+    const r1 = await executer([fournisseur("A", "otpm"), fournisseur("B", "ok")]);
+    expect(r1.meta.fournisseur).toBe("B");
+    expect(r1.bascules[0].raison).toMatch(/trop grande/);
+    expect(await kv.get("fournisseur:limites:a")).toEqual({ otpm: 1000 });
+    serveur.appels.length = 0;
+    // Deuxième requête : A est évité d'emblée (B reste le fournisseur de la conversation).
+    const r2 = await executer([fournisseur("A", "otpm"), fournisseur("B", "ok")], {}, "Bonjour", "conv-2");
+    expect(r2.meta.fournisseur).toBe("B");
+    expect(serveur.appels.map((a) => a.scenario)).toEqual(["ok"]);
+    serveur.appels.length = 0;
+    // Seul : utilisé avec la sortie plafonnée à sa limite.
+    const r3 = await executer([fournisseur("A", "otpm")], {}, "Bonjour", "conv-3");
+    expect(r3.erreur).toBeUndefined();
+    expect(r3.texte).toBe("Réponse plafonnée.");
+    expect(serveur.appels[0].corps.max_tokens).toBe(1000);
   });
 
   it("bascule sur 429 avant tout texte et mémorise l'heure de réessai", async () => {

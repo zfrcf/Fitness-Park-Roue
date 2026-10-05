@@ -13,6 +13,7 @@ export function Saisie({
   onArreter,
   occupe,
   indice,
+  complement,
   rechercheWeb,
   onRechercheWeb,
 }: {
@@ -22,6 +23,8 @@ export function Saisie({
   onArreter: () => void;
   occupe: boolean;
   indice?: React.ReactNode;
+  /** Information ajoutée en fin de pied (ex. taille du contexte). */
+  complement?: React.ReactNode;
   rechercheWeb: boolean;
   onRechercheWeb: (v: boolean) => void;
 }) {
@@ -114,6 +117,7 @@ export function Saisie({
         </div>
         <p className="px-1 text-center text-[11px] text-muted-foreground">
           {indice ?? (rechercheWeb ? "Recherche web forcée : le message est cherché sur le web avant la réponse" : "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · / pour écrire")}
+          {complement && <> · {complement}</>}
         </p>
       </div>
     </form>

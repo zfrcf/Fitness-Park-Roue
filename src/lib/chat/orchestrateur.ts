@@ -13,6 +13,7 @@ import { fuseauHoraire } from "@/lib/fuseau";
 import type { KV } from "@/lib/kv";
 import { lireQuota } from "@/lib/fournisseurs/entetes";
 import { classerErreur, type ErreurClassee } from "@/lib/fournisseurs/erreurs";
+import { apprendreLimites, lireLimites } from "@/lib/fournisseurs/limites";
 import type { EtatFournisseur, Fournisseur, NiveauRaisonnement } from "@/lib/fournisseurs/types";
 import { ajusterAuContexte, estimerTokens, INSTRUCTION_RESUME, promptResume, sansRaisonnement, texteDe, tokensMessage } from "./contexte";
 import type { Bascule, MessageUI, MetaMessage, Reglages } from "./types";
@@ -229,6 +230,34 @@ interface Tentative {
   resume: boolean;
   /** Taille estimée de la requête envoyée (tokens), pour recalibrer en cas d'erreur de contexte. */
   tokensEstimes: number;
+  /** Raison de fin renvoyée par le fournisseur ("stop", "length", "tool-calls"…). */
+  finishReason?: string;
+}
+
+/** Nombre maximal de suites automatiques quand une réponse est coupée par sa limite de tokens. */
+export const MAX_SUITES = 4;
+
+/**
+ * Choisit le premier fournisseur dont les limites connues (apprises des erreurs Groq) acceptent la
+ * requête ; sinon un fournisseur dont seule la sortie est trop petite, avec la sortie plafonnée ;
+ * sinon le premier de la liste.
+ */
+export async function choisirFournisseur(
+  deps: DepsOrchestrateur,
+  candidats: Fournisseur[],
+  entreeEstimee: number,
+  maxTokens: number,
+): Promise<{ f: Fournisseur; maxTokens: number } | undefined> {
+  if (candidats.length === 0) return undefined;
+  let repli: { f: Fournisseur; maxTokens: number } | undefined;
+  for (const f of candidats) {
+    const l = await lireLimites(deps.kv, f.id);
+    const entreeOk = !l.itpm || l.itpm >= entreeEstimee;
+    const sortieOk = !l.otpm || l.otpm >= maxTokens;
+    if (entreeOk && sortieOk) return { f, maxTokens };
+    if (entreeOk && !repli && l.otpm) repli = { f, maxTokens: Math.max(64, l.otpm) };
+  }
+  return repli ?? { f: candidats[0], maxTokens };
 }
 
 async function tenter(
@@ -283,6 +312,7 @@ async function tenter(
   let neurons: number | undefined;
   let erreur: ErreurClassee | undefined;
   let enTetes: Tentative["enTetes"];
+  let finishReason: string | undefined;
 
   const vider = () => {
     if (!tampon) return;
@@ -348,6 +378,7 @@ async function tenter(
         erreur = classerErreur(part.error, deps.maintenant?.() ?? Date.now());
         break;
       } else if (part.type === "finish") {
+        finishReason = part.finishReason;
         usage = {
           entree: part.totalUsage.inputTokens ?? 0,
           sortie: part.totalUsage.outputTokens ?? 0,
@@ -387,7 +418,7 @@ async function tenter(
     // Annulation par l'utilisateur : on s'arrête là.
   }
   if (erreur) log(`[chat] ${f.nom} : ${erreur.categorie} ${erreur.statut ?? ""} ${erreur.message}`);
-  return { texte: emis, erreur, usage, cout, neurons, enTetes, resume: ajuste.resume, tokensEstimes };
+  return { texte: emis, erreur, usage, cout, neurons, enTetes, resume: ajuste.resume, tokensEstimes, finishReason };
 }
 
 /* ───────────── Exécution complète ───────────── */
@@ -395,6 +426,7 @@ async function tenter(
 export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecution): Promise<ResultatExecution> {
   // Le raisonnement des tours précédents n'est jamais renvoyé aux fournisseurs.
   const p: ParamsExecution = { ...params, messages: sansRaisonnement(params.messages) };
+  const log = deps.log ?? (() => {});
   const debut = deps.maintenant?.() ?? Date.now();
   const { writer } = p;
   const bascules: Bascule[] = [];
@@ -411,6 +443,7 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
   let continuationEnCours = false; // la tentative courante est une reprise
   const tentes = new Set<string>();
   let erreurContexte = 0;
+  const entreeEstimee = p.messages.reduce((s, m) => s + tokensMessage(m), 0) + estimerTokens(p.reglages.systeme);
 
   writer.write({ type: "text-start", id: partId });
 
@@ -418,7 +451,10 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
   for (let tour = 0; tour < deps.fournisseurs.length + 2; tour++) {
     if (p.signal?.aborted) break;
     const { candidats, indisponibles } = await ordonnerFournisseurs(deps, p.conversationId);
-    const f = candidats.find((c) => !tentes.has(c.id));
+    const choix = await choisirFournisseur(deps, candidats.filter((c) => !tentes.has(c.id)), entreeEstimee, p.reglages.maxTokens);
+    const f = choix?.f;
+    // Sortie plafonnée à la limite connue du fournisseur (Groq OTPM) si c'est le seul moyen de l'utiliser.
+    const pf: ParamsExecution = choix && choix.maxTokens < p.reglages.maxTokens ? { ...p, reglages: { ...p.reglages, maxTokens: choix.maxTokens } } : p;
     if (!f) {
       // Plus rien d'essayable.
       const maintenant = deps.maintenant?.() ?? Date.now();
@@ -449,17 +485,46 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
     writer.write({ type: "message-metadata", messageMetadata: { fournisseur: f.nom, fournisseurId: f.id, modele: f.modele } });
 
     const outilsPour = p.outils && !fournisseurSansOutils(f.id) ? p.outils : undefined;
-    const t = await tenter(deps, f, p, partId, texte, continuation, outilsPour);
-    const maintenant = deps.maintenant?.() ?? Date.now();
-    texte += t.texte;
-    aResume ||= t.resume;
-    if (t.usage) {
-      usageTotal = { entree: usageTotal.entree + t.usage.entree, sortie: usageTotal.sortie + t.usage.sortie, total: usageTotal.total + t.usage.total };
+    const cumuler = async (t: Tentative) => {
+      texte += t.texte;
+      aResume ||= t.resume;
+      if (t.usage) {
+        usageTotal = { entree: usageTotal.entree + t.usage.entree, sortie: usageTotal.sortie + t.usage.sortie, total: usageTotal.total + t.usage.total };
+      }
+      if (t.cout) coutTotal += t.cout;
+      if (t.neurons) neuronsTotal += t.neurons;
+      if (f.payant && t.usage && deps.enregistrerDepense) {
+        await deps.enregistrerDepense(f, t.usage, t.cout).catch(() => {});
+      }
+    };
+    let t = await tenter(deps, f, pf, partId, texte, continuation, outilsPour);
+    await cumuler(t);
+    let maintenant = deps.maintenant?.() ?? Date.now();
+
+    // Réponse coupée par la limite de tokens de sortie : on fait continuer le même fournisseur.
+    let suites = 0;
+    while (!t.erreur && t.finishReason === "length" && t.texte.length > 0 && suites < MAX_SUITES && !p.signal?.aborted) {
+      suites++;
+      writer.write({ type: "data-info", data: { texte: `Réponse longue : suite automatique (${suites}/${MAX_SUITES})` }, transient: true });
+      t = await tenter(deps, f, pf, partId, texte, true, undefined);
+      await cumuler(t);
+      maintenant = deps.maintenant?.() ?? Date.now();
+      if (!t.erreur) continuation = true;
     }
-    if (t.cout) coutTotal += t.cout;
-    if (t.neurons) neuronsTotal += t.neurons;
-    if (f.payant && t.usage && deps.enregistrerDepense) {
-      await deps.enregistrerDepense(f, t.usage, t.cout).catch(() => {});
+
+    // Réponse vide alors que des tokens ont été produits : le raisonnement a tout consommé.
+    // On bascule sans marquer le fournisseur indisponible (il reste bon pour d'autres requêtes).
+    if (!t.erreur && t.texte.length === 0 && texte.length === 0 && (t.usage?.sortie ?? 0) > 0) {
+      const autre = candidats.find((c) => !tentes.has(c.id));
+      log(`[chat] ${f.nom} : réponse vide, ${t.usage?.sortie} tokens de sortie consommés par le raisonnement`);
+      if (autre) {
+        precedent = f;
+        const b: Bascule = { de: f.nom, vers: autre.nom, raison: "réponse vide (raisonnement trop long)", continuation: false };
+        bascules.push(b);
+        writer.write({ type: "data-bascule", data: b, transient: true });
+        continue;
+      }
+      t = { ...t, erreur: { categorie: "temporaire", message: "réponse vide : le raisonnement a consommé toute la sortie", reessaiA: maintenant, basculer: true } };
     }
 
     if (!t.erreur) {
@@ -493,6 +558,7 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
     }
 
     if (e.categorie === "trop-grand") {
+      if (await apprendreLimites(deps.kv, f.id, e.message)) log(`[chat] ${f.nom} : limites mémorisées (${e.message.slice(0, 80)}…)`);
       const autre = candidats.find((c) => !tentes.has(c.id));
       if (!autre && erreurContexte < 3) {
         // Personne d'autre : on réduit le contexte et on retente ici (résumé des anciens messages).

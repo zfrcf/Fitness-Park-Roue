@@ -3,12 +3,15 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { ArrowDown, Bot } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
 import { Button } from "@/components/ui/button";
 import type { MessageUI } from "@/lib/chat/types";
 import { Message } from "./message";
+import { fusionnerProjet } from "@/lib/fichiers/projet";
+import { estimerTokens } from "@/lib/chat/contexte";
+import { formatNombre } from "@/lib/format";
 import { useReglages } from "./reglages-contexte";
 import { Saisie } from "./saisie";
 
@@ -46,19 +49,58 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
 
   const occupe = status === "submitted" || status === "streaming";
 
-  // Défilement : on suit le bas tant que l'utilisateur n'a pas remonté.
+  // Défilement : on suit le bas tant que l'utilisateur n'a pas remonté. Tout geste vers le haut
+  // (molette, doigt, barre) décolle immédiatement ; on recolle seulement une fois revenu tout en bas.
+  const dernierScrollTop = useRef(0);
   const defilerEnBas = useCallback((lisse = false) => {
     const el = zoneDefilement.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: lisse ? "smooth" : "auto" });
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: lisse ? "smooth" : "auto" });
+    dernierScrollTop.current = el.scrollHeight;
   }, []);
   useEffect(() => {
     if (collé) defilerEnBas();
   }, [messages, collé, defilerEnBas]);
+  useEffect(() => {
+    const el = zoneDefilement.current;
+    if (!el) return;
+    const decoller = () => setCollé(false);
+    const molette = (e: WheelEvent) => {
+      if (e.deltaY < 0) decoller();
+    };
+    let doigtY = 0;
+    const toucheDebut = (e: TouchEvent) => {
+      doigtY = e.touches[0]?.clientY ?? 0;
+    };
+    const toucheMouvement = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      if (y > doigtY + 4) decoller(); // le doigt descend : le contenu remonte
+    };
+    el.addEventListener("wheel", molette, { passive: true });
+    el.addEventListener("touchstart", toucheDebut, { passive: true });
+    el.addEventListener("touchmove", toucheMouvement, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", molette);
+      el.removeEventListener("touchstart", toucheDebut);
+      el.removeEventListener("touchmove", toucheMouvement);
+    };
+  }, []);
   function surDefilement() {
     const el = zoneDefilement.current;
     if (!el) return;
-    setCollé(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+    const enBas = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+    if (el.scrollTop < dernierScrollTop.current - 2) setCollé(false);
+    else if (enBas) setCollé(true);
+    dernierScrollTop.current = el.scrollTop;
   }
+
+  // État du projet (fusion des fichiers de toutes les réponses) et taille estimée du contexte.
+  const messagesStables = occupe ? messages.slice(0, -1) : messages;
+  const projet = useMemo(() => fusionnerProjet(messagesStables), [messagesStables]);
+  const tokensContexte = useMemo(
+    () => messagesStables.reduce((n, m) => n + estimerTokens(m.parts.filter((p) => p.type === "text").map((p) => p.text).join("")), 0),
+    [messagesStables],
+  );
 
   function premiereFois() {
     if (urlRemplacee.current) return;
@@ -134,6 +176,7 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
               onRegenerer={m.role === "assistant" ? () => regenerer(i === dernierIndex ? undefined : m.id) : undefined}
               onEditer={m.role === "user" ? (t) => editer(i, t) : undefined}
               onEnvoyer={(t) => envoyer(t)}
+              projet={m.role === "assistant" && i === dernierIndex && projet.length > 0 ? projet : undefined}
             />
           ))}
           {status === "submitted" && messages.at(-1)?.role === "user" && (
@@ -169,6 +212,7 @@ export function FenetreChat({ conversationId, messagesInitiaux = [] }: { convers
         </Button>
       )}
       <Saisie
+        complement={messages.length > 0 ? <span className="tabular-nums" title="taille estimée de l'historique envoyé au modèle">contexte ≈ {formatNombre(tokensContexte)} tokens</span> : undefined}
         valeur={saisie}
         onChange={setSaisie}
         onEnvoyer={() => envoyer()}

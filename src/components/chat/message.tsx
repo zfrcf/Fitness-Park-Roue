@@ -18,19 +18,30 @@ import { cn } from "@/lib/utils";
 import { BoutonCopier } from "./bloc-code";
 import { Markdown } from "./markdown";
 import { estProjetGradle, extraireFichiers } from "@/lib/fichiers/extraire";
+import type { FichierProjet } from "@/lib/fichiers/projet";
+import { estimerTokens } from "@/lib/chat/contexte";
 import { BoutonCompiler, ListeCompilations, useCompilations } from "./carte-compilation";
 import { PanneauFichiers } from "./panneau-fichiers";
 import { partiesVisibles } from "./utils";
 
-function MetaReponse({ meta }: { meta?: MetaMessage }) {
+function MetaReponse({ meta, enCours, texte }: { meta?: MetaMessage; enCours?: boolean; texte?: string }) {
   if (!meta?.fournisseur) return null;
   const u = meta.usage;
   const sep = <span aria-hidden className="text-border">·</span>;
+  const enDirect = enCours && !(u && u.total > 0) && texte;
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
       <span className="font-medium">{meta.fournisseur}</span>
       {sep}
       <span className="font-mono">{meta.modele}</span>
+      {enDirect && (
+        <>
+          {sep}
+          <span className="tabular-nums" title="estimation pendant la génération (≈ 3,2 caractères par token)" aria-live="polite">
+            ≈ {formatNombre(estimerTokens(texte))} tokens
+          </span>
+        </>
+      )}
       {u && u.total > 0 && (
         <>
           {sep}
@@ -215,24 +226,37 @@ function Raisonnement({ texte, enCours }: { texte: string; enCours: boolean }) {
 
 function PanneauFichiersAvecCompilation({
   fichiers,
+  projet,
   conversationId,
   messageId,
   occupe,
   onEnvoyer,
 }: {
+  /** Fichiers produits par ce message. */
   fichiers: ReturnType<typeof extraireFichiers>;
+  /** État complet du projet de la conversation (dernier message seulement). */
+  projet?: FichierProjet[];
   conversationId?: string;
   messageId: string;
   occupe: boolean;
   onEnvoyer?: (texte: string) => void;
 }) {
-  const gradle = estProjetGradle(fichiers) && !!conversationId;
-  const liste = useMemo(() => fichiers.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [fichiers]);
+  // Sur le dernier message, on montre, télécharge et compile le projet complet ; les fichiers de ce message sont marqués.
+  const complet = projet && projet.length > fichiers.length ? projet : undefined;
+  const affiches = complet ?? fichiers;
+  const modifies = useMemo(() => (complet ? new Set(fichiers.map((f) => f.chemin)) : undefined), [complet, fichiers]);
+  const gradle = estProjetGradle(affiches) && !!conversationId && !!projet;
+  const liste = useMemo(() => affiches.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [affiches]);
   const { liste: compilations, compiler, lancement, enCours } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
-  if (!gradle) return <PanneauFichiers fichiers={fichiers} />;
+  const titre = complet ? `Projet complet : ${complet.length} fichiers` : undefined;
+  const sousTitre = complet ? `${fichiers.length} modifié${fichiers.length > 1 ? "s" : ""} dans cette réponse` : undefined;
+  if (!gradle) return <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} />;
   return (
     <PanneauFichiers
-      fichiers={fichiers}
+      fichiers={affiches}
+      titre={titre}
+      sousTitre={sousTitre}
+      modifies={modifies}
       actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
       pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} />}
     />
@@ -249,9 +273,11 @@ export interface PropsMessage {
   onEditer?: (texte: string) => void;
   /** Envoie un nouveau message utilisateur (demande de correction après compilation). */
   onEnvoyer?: (texte: string) => void;
+  /** État complet du projet de la conversation (fourni au dernier message de l'assistant). */
+  projet?: FichierProjet[];
 }
 
-export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer }: PropsMessage) {
+export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer, projet }: PropsMessage) {
   const [edition, setEdition] = useState(false);
   const fichiers = useMemo(() => (m.role === "assistant" && !enCours ? extraireFichiers(texteDe(m)) : []), [m, enCours]);
   const [brouillon, setBrouillon] = useState("");
@@ -336,10 +362,10 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
           </div>
         ) : null}
         {fichiers.length > 0 && (
-          <PanneauFichiersAvecCompilation fichiers={fichiers} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
+          <PanneauFichiersAvecCompilation fichiers={fichiers} projet={projet} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <MetaReponse meta={m.metadata} />
+          <MetaReponse meta={m.metadata} enCours={enCours} texte={texte} />
           {!enCours && (
             <div className={cn("flex gap-0.5 transition-opacity", dernier ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
               <BoutonCopier texte={texte} />

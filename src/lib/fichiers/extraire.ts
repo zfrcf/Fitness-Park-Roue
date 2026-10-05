@@ -53,9 +53,15 @@ function cheminDepuisLigne(ligne: string): string | null {
   return nettoyerChemin(m[1]);
 }
 
-export function extraireFichiers(markdown: string): FichierGenere[] {
-  const lignes = markdown.split("\n");
-  const fichiers = new Map<string, FichierGenere>();
+interface BlocFichier extends FichierGenere {
+  /** Indices de ligne du bloc (ouverture et clôture incluses). */
+  debut: number;
+  fin: number;
+}
+
+/** Parcourt les blocs de code et renvoie ceux qui désignent un fichier. */
+function analyserBlocs(lignes: string[]): BlocFichier[] {
+  const blocs: BlocFichier[] = [];
   let i = 0;
   while (i < lignes.length) {
     const ouverture = /^\s*(`{3,}|~{3,})(.*)$/.exec(lignes[i]);
@@ -90,11 +96,39 @@ export function extraireFichiers(markdown: string): FichierGenere[] {
       }
     }
     if (chemin && corps.length > 0) {
-      fichiers.set(chemin, { chemin, langue, contenu: corps.join("\n").replace(/\s+$/, "") + "\n" });
+      blocs.push({ chemin, langue, contenu: corps.join("\n").replace(/\s+$/, "") + "\n", debut: i, fin: Math.min(j, lignes.length - 1) });
     }
     i = j + 1;
   }
+  return blocs;
+}
+
+export function extraireFichiers(markdown: string): FichierGenere[] {
+  const fichiers = new Map<string, FichierGenere>();
+  for (const b of analyserBlocs(markdown.split("\n"))) {
+    fichiers.set(b.chemin, { chemin: b.chemin, langue: b.langue, contenu: b.contenu });
+  }
   return [...fichiers.values()];
+}
+
+/**
+ * Remplace les blocs de code des fichiers désignés par un texte court (fourni par `remplacant`,
+ * null pour conserver le bloc). Sert à ne pas renvoyer deux fois le même fichier au modèle.
+ */
+export function remplacerBlocsFichiers(markdown: string, remplacant: (chemin: string) => string | null): string {
+  const lignes = markdown.split("\n");
+  const blocs = analyserBlocs(lignes);
+  if (!blocs.length) return markdown;
+  const sortie: string[] = [];
+  let i = 0;
+  for (const b of blocs) {
+    const r = remplacant(b.chemin);
+    if (r === null) continue;
+    sortie.push(...lignes.slice(i, b.debut), r);
+    i = b.fin + 1;
+  }
+  sortie.push(...lignes.slice(i));
+  return sortie.join("\n");
 }
 
 /** Un projet Gradle (mod Minecraft, application Java/Kotlin) est reconnaissable à ses fichiers de build. */

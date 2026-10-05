@@ -91,7 +91,8 @@ Versions actuelles (vérifiées automatiquement) : Minecraft ${v.jeu} · Fabric 
 Depuis la 26.x, Minecraft n'utilise plus la numérotation 1.21.x ; la dernière version 1.x est la 1.21.11 (Java 21), les suivantes sont 26.1, 26.2, 26.3… (Java 25).
 
 Chaîne de compilation disponible : l'utilisateur peut cliquer « Compiler sur GitHub » sous tes fichiers. Le projet est compilé par GitHub Actions avec JDK 25 et Gradle 9.7.1 (commande : gradle build). Règles impératives pour que ça compile :
-- Projet Fabric avec Loom, un seul source set (src/main/java et src/main/resources), mappings officielles Mojang (aucune ligne « mappings » dans build.gradle ; noms de classes Mojang, ex. net.minecraft.resources.Identifier, net.minecraft.world.item.Item).
+- Projet Fabric avec Loom, un seul source set (src/main/java et src/main/resources), mappings officielles Mojang via loom.officialMojangMappings() (JAMAIS yarn, dont tu ne connais pas la version ; noms de classes Mojang, ex. net.minecraft.resources.Identifier, net.minecraft.world.item.Item).
+- Version de Loom : exactement ${v.loom} (celle ci-dessus) ; n'invente aucun numéro de version de Loom, Loader ou Fabric API.
 - Ne fournis NI gradlew, NI gradle-wrapper.jar, NI icône : la chaîne les ignore ou les refuse.
 - Chaque fichier dans son propre bloc de code avec son chemin complet. Projet complet : build.gradle, settings.gradle, gradle.properties, fabric.mod.json, <modid>.mixins.json (même sans mixin), classe principale, et le reste.
 - Le mod id : minuscules, chiffres, tirets bas ; identique dans fabric.mod.json, settings.gradle (rootProject.name) et le nom du fichier mixins.

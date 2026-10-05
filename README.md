@@ -309,9 +309,20 @@ compilation est donc confiée à **GitHub Actions**, gratuit pour un dépôt pub
 
 Pour que le modèle produise un projet compilable, toute demande de mod Minecraft injecte un
 **contexte à jour** : versions actuelles (Minecraft, Fabric Loader, Fabric API, Loom, NeoForge,
-récupérées des API Fabric meta, Modrinth et Maven, cache 6 h) et un modèle de projet Fabric minimal
-avec mappings Mojang, un seul source set, sans wrapper Gradle. Le wrapper (`gradlew`) est refusé à
-l'envoi : la chaîne fournit Gradle.
+récupérées des API Fabric meta, Modrinth et Maven, cache 6 h) et un modèle de projet Fabric minimal,
+un seul source set, sans wrapper Gradle. Le wrapper (`gradlew`) est refusé à l'envoi : la chaîne
+fournit Gradle.
+
+Le modèle distingue les **deux générations de Minecraft**, car Mojang a cessé d'obfusquer le jeu à
+partir de la 26.1 (règles vérifiées par compilation réelle sur GitHub Actions, 26.3 et 1.21.11) :
+
+- **26.x (non obfusqué)** : plugin `net.fabricmc.fabric-loom`, **aucune** ligne `mappings`
+  (`loom.officialMojangMappings()` est refusé : « Cannot use Mojang mappings in a non-obfuscated
+  environment »), dépendances en `implementation`, tâche `jar`, Java 25, noms de classes Mojang
+  (`net.minecraft.resources.Identifier`).
+- **1.21.x et antérieur (obfusqué)** : plugin `net.fabricmc.fabric-loom-remap`, ligne
+  `mappings loom.officialMojangMappings()`, dépendances en `modImplementation`, Java 21, noms
+  obfusqués résolus par les mappings (`net.minecraft.resources.ResourceLocation`).
 
 Variables : `GITHUB_REPO` (par défaut `zfrcf/Fitness-Park-Roue`) et `GITHUB_TOKEN`, un jeton
 d'accès fin créé sur github.com → Settings → Developer settings → Fine-grained tokens, limité à ce
@@ -327,8 +338,10 @@ allers-retours de correction. Les artefacts sont conservés 14 jours. Seuls les 
 L'onglet **Tâches** lance un travail que le serveur mène à son terme même si vous fermez le site :
 décrivez l'objectif comme dans le chat, la tâche crée une conversation, obtient une réponse, envoie
 le projet à GitHub, lit le journal de compilation, demande la correction au modèle, recompile… jusqu'au
-`.jar` ou jusqu'au nombre maximal de corrections (8 par défaut, réglable). Sous une compilation
-échouée dans le chat, **Corriger en tâche de fond** fait la même chose sur la conversation courante.
+`.jar` ou jusqu'au nombre maximal de corrections (8 par défaut, **modifiable à tout moment**, même en
+cours). Sous une compilation échouée dans le chat, **Corriger en tâche de fond** fait la même chose
+sur la conversation courante. Dans le chat, écrire « travaille jusqu'à… », « en boucle » ou « ne
+t'arrête pas » fait apparaître un bandeau proposant de basculer la demande en tâche de fond.
 
 - **Parallélisme** : chaque tâche prend le premier fournisseur libre (les fournisseurs occupés par
   une autre tâche passent en fin de liste), donc deux tâches tournent par exemple sur Groq et
@@ -348,7 +361,9 @@ le projet à GitHub, lit le journal de compilation, demande la correction au mod
   échanges produits par le serveur apparaissent en direct (rechargement toutes les 4 s).
 
 Le workflow de réveil utilise la variable de dépôt `APP_URL` si elle existe (Settings → Secrets and
-variables → Actions → Variables), sinon `https://fitness-park-roue.vercel.app`.
+variables → Actions → Variables), sinon `https://fitness-park-roue.vercel.app`. Le réveil déclenche
+aussi, au plus une fois toutes les 30 minutes, un **ménage des branches `compilation/*`** restées sur
+le dépôt (branches de plus de 2 h, c'est-à-dire builds terminés ou abandonnés).
 
 ## Lecture des liens
 

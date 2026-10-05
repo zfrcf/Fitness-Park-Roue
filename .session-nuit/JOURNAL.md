@@ -14,3 +14,4 @@
 - 08:20 — DEMANDE utilisateur : mode automatique des tâches (corriger jusqu'au jar sans limite, borné par 2 M tokens). DB+API+moteur+UI+chat. commit 874eb0c. 134 tests. Migration PGlite OK.
 - 10:45 — Audit traité : #20 (déploiements Vercel compilation/*), #1/#2/#3 sécurité (redirection ouverte, premier message hors URL, réveil protégé). commits poussés. 140 tests.
 - 10:50 — Audit hautes/moyennes : #20, #1/#2/#3 (sécu), #12/#13/#40, #14 (budget contexte). 145 tests. Poussée.
+- 10:57 — Audit : #6/#8 (persistance NUL + réponse vide), vérifié en local (un NUL ne vide plus la conversation). 150 tests. 10 items faits (#20,#1,#2,#3,#12,#13,#14,#40,#6,#8).

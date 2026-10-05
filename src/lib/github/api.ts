@@ -44,6 +44,10 @@ export async function github<T = unknown>(
     } catch {
       /* corps non JSON */
     }
+    // Limite de débit (403/429 « rate limit », limite secondaire, « abuse ») : pas un problème de jeton. (#21)
+    if ((r.status === 403 || r.status === 429) && /rate limit|secondary|abuse|too many requests/i.test(detail)) {
+      throw new ErreurGitHub(r.status, `GitHub limite temporairement le débit (${r.status}) : ${detail || "réessayez dans un instant"}`.trim());
+    }
     if (r.status === 401 || r.status === 403) {
       throw new ErreurGitHub(r.status, `GitHub refuse l'accès (${r.status}) : vérifiez GITHUB_TOKEN (permissions Contents et Actions sur le dépôt). ${detail}`.trim());
     }

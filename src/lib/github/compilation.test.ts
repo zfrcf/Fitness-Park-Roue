@@ -86,5 +86,8 @@ describe("creerBranche (API Git Data simulée)", () => {
     await expect(github("/repos/a/b/inconnu", {}, {}, faux)).rejects.toThrow(/HTTP 404/);
     const refuse = (async () => new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 })) as unknown as typeof fetch;
     await expect(github("/x", {}, { GITHUB_TOKEN: "t" }, refuse)).rejects.toThrow(/GITHUB_TOKEN/);
+    // #21 : un 403 de limite secondaire n'est PAS présenté comme un problème de jeton.
+    const debit = (async () => new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit" }), { status: 403 })) as unknown as typeof fetch;
+    await expect(github("/x", {}, { GITHUB_TOKEN: "t" }, debit)).rejects.toThrow(/limite temporairement le débit/);
   });
 });

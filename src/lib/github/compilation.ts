@@ -53,9 +53,6 @@ export function nomBranche(id: string) {
   return `compilation/${id}`;
 }
 
-interface Blob {
-  sha: string;
-}
 interface Tree {
   sha: string;
 }
@@ -74,17 +71,9 @@ export async function creerBranche(id: string, fichiers: FichierGenere[], nom: s
     { chemin: "vercel.json", contenu: JSON.stringify({ git: { deploymentEnabled: false } }) + "\n" },
     { chemin: ".github/workflows/compiler.yml", contenu: contenuWorkflow() },
   ];
-  // Blobs par lots pour limiter la concurrence.
-  const arbre: Array<{ path: string; mode: "100644"; type: "blob"; sha: string }> = [];
-  for (let i = 0; i < tous.length; i += 10) {
-    const lot = tous.slice(i, i + 10);
-    const shas = await Promise.all(
-      lot.map((f) =>
-        github<Blob>(`${base}/git/blobs`, { method: "POST", body: JSON.stringify({ content: Buffer.from(f.contenu, "utf8").toString("base64"), encoding: "base64" }) }),
-      ),
-    );
-    lot.forEach((f, k) => arbre.push({ path: f.chemin, mode: "100644", type: "blob", sha: shas[k].sha }));
-  }
+  // Contenu en ligne dans l'arbre : un seul appel, au lieu d'un POST /git/blobs par fichier (sinon
+  // la limite secondaire de GitHub — ~80 requêtes créatrices/min — bloque les gros projets). (#21)
+  const arbre = tous.map((fi) => ({ path: fi.chemin, mode: "100644" as const, type: "blob" as const, content: fi.contenu }));
   const tree = await github<Tree>(`${base}/git/trees`, { method: "POST", body: JSON.stringify({ tree: arbre }) });
   const commit = await github<Commit>(`${base}/git/commits`, {
     method: "POST",

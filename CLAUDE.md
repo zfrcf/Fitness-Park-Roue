@@ -54,7 +54,8 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
 - `src/lib/auth/` + `src/proxy.ts` — accès privé : cookie signé HMAC, limite de tentatives.
 - `desktop/` — **version locale pour Ubuntu** (« atelier », Python : `httpx` + `rich`) : chat en terminal, fichiers écrits
   directement dans le dossier du projet (blocs ```modif inclus), `gradle build` local avec JDK 25 + Gradle 9.7.1 installés
-  par `install.sh` / `atelier installer` dans `~/.local/share/atelier`, correction en boucle jusqu'au jar. Clés dans
+  sans sudo par `install.sh` → `installer.py` (venv, ou venv sans ensurepip + get-pip, ou pip.pyz --target) puis `atelier installer`
+  dans `~/.local/share/atelier`, correction en boucle jusqu'au jar. Clés dans
   `~/.config/atelier/config.env` (600). Tests : `pytest` dans `desktop/` (indépendants de vitest).
 - `src/app/` — pages (`/` accueil, `/chat` nouvelle conversation, `/c/[id]`, `/taches`, `/etat`)
   et routes API. `src/components/` — UI.

@@ -8,26 +8,34 @@ le journal est renvoyé au modèle qui corrige, en boucle, jusqu'au `.jar`.
 Aucun navigateur, aucun serveur, aucun GitHub Actions : seul l'appel au modèle IA passe par
 internet (NVIDIA, Groq, OpenRouter, Cloudflare… avec bascule automatique de l'un à l'autre).
 
-## Installation (une commande)
+## Installation (sans sudo, sans pilote)
+
+Aucun droit administrateur n'est nécessaire, et aucun pilote graphique : les modèles (NVIDIA,
+Groq…) tournent sur les serveurs des fournisseurs, votre ordinateur ne fait qu'envoyer du texte
+et compiler avec Gradle.
 
 ```bash
-cd desktop            # ce dossier, après « git clone » du dépôt ou extraction de l'archive
-./install.sh          # demande sudo uniquement pour les paquets apt manquants
+cd atelier-ia-local      # dossier de l'archive (ou desktop/ du dépôt)
+./install.sh             # ou, de façon équivalente : python3 installer.py
 ```
 
-Ce que fait `install.sh` :
+Seul prérequis : `python3` 3.10 ou plus récent, présent d'office sur Ubuntu 22.04 et plus récent
+(`python3 --version` pour vérifier). Tout est installé dans votre dossier personnel :
 
-| Étape | Où | Détail |
+| Élément | Où | Détail |
 |---|---|---|
-| Paquets apt manquants | système | `python3 python3-venv python3-pip curl unzip git ca-certificates` |
 | Environnement Python | `~/.local/share/atelier/venv` | dépendances `httpx` et `rich` uniquement |
 | JDK Temurin 25 | `~/.local/share/atelier/jdk` | téléchargé depuis Adoptium, somme SHA-256 vérifiée |
 | Gradle 9.7.1 | `~/.local/share/atelier/gradle` | téléchargé depuis services.gradle.org, somme SHA-256 vérifiée |
 | Commande | `~/.local/bin/atelier` | ajoutée au `PATH` via `~/.bashrc` si besoin |
 
-Sans sudo (Python 3.10+, `python3-venv` et `curl` déjà présents) : `./install.sh --sans-apt`.
-Le JDK et Gradle peuvent aussi être (ré)installés seuls, depuis Python : `atelier installer`
-(`--forcer` pour retélécharger). Désinstallation : `./desinstaller.sh` (vos projets sont conservés).
+L'environnement Python est créé par la première méthode qui fonctionne sur votre machine :
+`python3 -m venv` ; sinon (Ubuntu sans le paquet `python3-venv`, cas courant sans sudo) un venv
+sans `ensurepip` complété par `get-pip.py` ; sinon un dossier de bibliothèques installé par
+`pip.pyz`. Les trois méthodes ont été testées, et `sudo` n'est jamais appelé.
+
+Le JDK et Gradle peuvent être (ré)installés seuls : `atelier installer` (`--forcer` pour
+retélécharger). Désinstallation : `./desinstaller.sh` (vos projets sont conservés).
 
 ## Configurer les clés API
 

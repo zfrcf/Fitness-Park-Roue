@@ -13,7 +13,7 @@ BIN="${ATELIER_BIN:-$HOME/.local/bin}"
 if [[ -x "$DONNEES/gradle/bin/gradle" ]]; then
   JAVA_HOME="$DONNEES/jdk" "$DONNEES/gradle/bin/gradle" --stop >/dev/null 2>&1 || true
 fi
-[[ -L "$BIN/atelier" ]] && rm -f "$BIN/atelier"
+if [[ -L "$BIN/atelier" ]] || grep -qs "atelier" "$BIN/atelier"; then rm -f "$BIN/atelier"; fi
 rm -rf "$DONNEES"
 echo "Atelier retiré ($DONNEES)."
 if [[ "${1:-}" == "--tout" ]]; then

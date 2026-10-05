@@ -83,7 +83,7 @@ export async function listerConversations(recherche?: string, limite = 200): Pro
         .select({ conversationId: messages.conversationId, contenu: messages.contenu })
         .from(messages)
         .where(and(inArray(messages.conversationId, lignes.map((l) => l.id)), ilike(messages.contenu, motif)))
-        .orderBy(messages.ordre)
+        .orderBy(messages.ordre, messages.creeA, messages.id)
     : [];
   const parConv = new Map<string, string>();
   for (const e of extraits) {
@@ -99,7 +99,7 @@ export async function lireConversation(id: string): Promise<{ conversation: Resu
   const db = await getDB();
   const [c] = await db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
   if (!c) return null;
-  const lignes = await db.select().from(messages).where(eq(messages.conversationId, id)).orderBy(messages.ordre);
+  const lignes = await db.select().from(messages).where(eq(messages.conversationId, id)).orderBy(messages.ordre, messages.creeA, messages.id);
   return {
     conversation: { id: c.id, titre: c.titre, fournisseurId: c.fournisseurId, creeA: c.creeA.toISOString(), majA: c.majA.toISOString(), nbMessages: lignes.length },
     messages: lignes.map((l) => ({
@@ -161,16 +161,15 @@ export async function enregistrerMessages(id: string, liste: MessageUI[], fourni
 /** Ajoute (ou remplace) un message en fin de conversation. */
 export async function ajouterMessage(conversationId: string, m: MessageUI, fournisseurId?: string): Promise<void> {
   const db = await getDB();
-  const [{ max }] = await db
-    .select({ max: sql<number>`coalesce(max(${messages.ordre}), -1)`.mapWith(Number) })
-    .from(messages)
-    .where(eq(messages.conversationId, conversationId));
   const parts = assainirJson(partiesVisibles(m.parts));
   const contenu = sansNul(texteDesParties(parts));
   const meta = assainirJson((m.metadata as MetaMessage | undefined) ?? null);
+  // Ordre calculé dans l'INSERT (sous-requête) plutôt qu'en deux temps : réduit la fenêtre de course
+  // où deux ajouts concurrents liraient le même max. Le tri de lecture départage par creeA+id. (#43)
+  const ordre = sql<number>`(SELECT COALESCE(MAX(${messages.ordre}), -1) + 1 FROM ${messages} WHERE ${messages.conversationId} = ${conversationId})`;
   await db
     .insert(messages)
-    .values({ id: m.id, conversationId, ordre: max + 1, role: m.role, contenu, parts: parts as unknown[], meta })
+    .values({ id: m.id, conversationId, ordre, role: m.role, contenu, parts: parts as unknown[], meta })
     .onConflictDoUpdate({
       target: [messages.conversationId, messages.id],
       set: { contenu, parts: parts as unknown[], meta },

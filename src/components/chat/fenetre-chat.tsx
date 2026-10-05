@@ -175,10 +175,22 @@ export function FenetreChat({
   // État du projet (fusion des fichiers de toutes les réponses) et taille estimée du contexte.
   const messagesStables = occupe ? messages.slice(0, -1) : messages;
   const projet = useMemo(() => fusionnerProjet(messagesStables), [messagesStables]);
-  const tokensContexte = useMemo(
-    () => messagesStables.reduce((n, m) => n + estimerTokens(m.parts.filter((p) => p.type === "text").map((p) => p.text).join("")), 0),
-    [messagesStables],
-  );
+  // Estimation du contexte réellement envoyé : texte des messages + contenu des pages lues
+  // (réinjecté au modèle) + état du projet (renvoyé à chaque tour). (#41)
+  const tokensContexte = useMemo(() => {
+    let n = 0;
+    for (const m of messagesStables) {
+      for (const p of m.parts) {
+        if (p.type === "text") n += estimerTokens(p.text);
+        else if (p.type === "data-page-lue") {
+          const contenu = (p.data as { contenu?: string } | undefined)?.contenu;
+          if (contenu) n += estimerTokens(contenu);
+        }
+      }
+    }
+    n += projet.reduce((s, f) => s + estimerTokens(f.contenu), 0);
+    return n;
+  }, [messagesStables, projet]);
 
   function premiereFois() {
     if (urlRemplacee.current) return;

@@ -55,6 +55,24 @@ describe("conversations (PGlite en mémoire)", () => {
     expect(lu?.messages[1].parts).toEqual([{ type: "text", text: "final" }]);
   });
 
+  it("#23 : garde les pastilles pages/recherches émises avant un marqueur de régénération", async () => {
+    const m: MessageUI = {
+      id: "r2",
+      role: "assistant",
+      parts: [
+        { type: "data-page-lue", id: "p1", data: { url: "https://x.test", titre: "X", source: "direct", caracteres: 10, ok: true, contenu: "txt" } },
+        { type: "text", text: "tentative dégénérée" },
+        { type: "data-regeneration", data: { raison: "x" } },
+        { type: "text", text: "réponse finale" },
+      ],
+    } as unknown as MessageUI;
+    await enregistrerMessages("c4", [u("q", "?"), m]);
+    const lu = await lireConversation("c4");
+    const parts = lu?.messages[1].parts ?? [];
+    expect(parts.some((p) => p.type === "data-page-lue")).toBe(true); // pastille conservée
+    expect(parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text)).toEqual(["réponse finale"]); // texte dégénéré jeté
+  });
+
   it("réglages persistants et bornés", async () => {
     const d = await lireReglages();
     expect(d.temperature).toBe(0.7);

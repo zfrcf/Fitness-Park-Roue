@@ -19,7 +19,10 @@ interface MessageMinimal {
 }
 
 export function texteDuMessage(m: MessageMinimal): string {
-  return m.parts
+  // Après une régénération, le texte dégénéré d'avant le marqueur ne compte pas dans le projet. (#23)
+  const idx = m.parts.map((p) => p.type).lastIndexOf("data-regeneration");
+  const parts = idx >= 0 ? m.parts.slice(idx + 1) : m.parts;
+  return parts
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text as string)
     .join("");

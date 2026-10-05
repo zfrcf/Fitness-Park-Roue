@@ -41,10 +41,16 @@ function texteDesParties(parts: unknown[]): string {
     .join("");
 }
 
-/** Parties visibles d'un message (après le dernier marqueur de régénération). */
+/**
+ * Parties visibles d'un message : après le dernier marqueur de régénération, on jette le TEXTE
+ * dégénéré qui précède, mais on garde les pastilles (pages lues, recherches) émises avant lui —
+ * sinon elles seraient perdues à la persistance. (#23)
+ */
 function partiesVisibles(parts: MessageUI["parts"]): MessageUI["parts"] {
   const idx = parts.map((p) => p.type).lastIndexOf("data-regeneration");
-  return idx >= 0 ? parts.slice(idx + 1) : parts;
+  if (idx < 0) return parts;
+  const avant = parts.slice(0, idx).filter((p) => p.type !== "text" && p.type !== "data-regeneration");
+  return [...avant, ...parts.slice(idx + 1)];
 }
 
 export async function listerConversations(recherche?: string, limite = 200): Promise<ResumeConversation[]> {

@@ -43,7 +43,10 @@ export interface OptionsTour {
 export type ResultatTour = { ok: true; stream: ReadableStream<UIMessageChunk> } | { ok: false; statut: number; erreur: string };
 
 function texteDe(m: { parts: Array<{ type: string; text?: string }> }): string {
-  return m.parts.filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text as string).join("");
+  // On ignore le texte d'avant le dernier marqueur de régénération : il ne doit pas repartir au modèle. (#23)
+  const idx = m.parts.map((p) => p.type).lastIndexOf("data-regeneration");
+  const parts = idx >= 0 ? m.parts.slice(idx + 1) : m.parts;
+  return parts.filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text as string).join("");
 }
 
 export async function executerTour(o: OptionsTour): Promise<ResultatTour> {

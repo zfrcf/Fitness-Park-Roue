@@ -1,9 +1,14 @@
 import type { MessageUI } from "@/lib/chat/types";
 
-/** Parties à afficher : après un marqueur de régénération, tout ce qui précède est ignoré. */
+/**
+ * Parties à afficher : après le dernier marqueur de régénération, on ignore le TEXTE qui précède
+ * (tentative dégénérée) mais on garde les pastilles pages lues / recherches émises avant lui. (#23)
+ */
 export function partiesVisibles(m: MessageUI): MessageUI["parts"] {
   const idx = m.parts.map((p) => p.type).lastIndexOf("data-regeneration");
-  return idx >= 0 ? m.parts.slice(idx + 1) : m.parts;
+  if (idx < 0) return m.parts;
+  const avant = m.parts.slice(0, idx).filter((p) => p.type !== "text" && p.type !== "data-regeneration");
+  return [...avant, ...m.parts.slice(idx + 1)];
 }
 
 export function texteDuMessage(m: MessageUI): string {

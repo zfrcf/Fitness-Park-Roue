@@ -1,5 +1,5 @@
 /** Famille d'API : permet d'adapter quelques paramètres (raisonnement, en-têtes). */
-export type FamilleAPI = "groq" | "openrouter" | "cloudflare" | "generique";
+export type FamilleAPI = "groq" | "openrouter" | "cloudflare" | "nvidia" | "generique";
 
 export interface Fournisseur {
   /** Identifiant stable (slug du nom + rang). */

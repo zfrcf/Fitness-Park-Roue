@@ -48,3 +48,10 @@ describe("chargerFournisseurs", () => {
     expect(detecterFamille("pas une url")).toBe("generique");
   });
 });
+
+describe("famille NVIDIA", () => {
+  it("reconnaît integrate.api.nvidia.com", async () => {
+    const { detecterFamille } = await import("./registre");
+    expect(detecterFamille("https://integrate.api.nvidia.com/v1")).toBe("nvidia");
+  });
+});

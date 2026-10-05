@@ -45,6 +45,18 @@ export function adapterCorps(
       // « Aucun » devient donc « low », le minimum ; le raisonnement arrive dans delta.reasoning.
       c.reasoning_effort = raisonnement === "eleve" ? "xhigh" : raisonnement === "moyen" ? "medium" : "low";
       break;
+    case "nvidia": {
+      // NVIDIA NIM (Kimi K3) : la réflexion se pilote par chat_template_kwargs.thinking. Sans
+      // réflexion, les appels d'outils échouent : on la garde dès que des outils sont envoyés.
+      // reasoning_effort « low » donne parfois une réponse vide : on ne l'utilise pas.
+      const outils = Array.isArray(c.tools) && c.tools.length > 0;
+      const reflechir = raisonnement !== "aucun" || outils;
+      c.chat_template_kwargs = { ...((c.chat_template_kwargs as Record<string, unknown>) ?? {}), thinking: reflechir };
+      if (raisonnement === "moyen") c.reasoning_effort = "high";
+      else if (raisonnement === "eleve") c.reasoning_effort = "max";
+      else delete c.reasoning_effort;
+      break;
+    }
     default:
       break;
   }

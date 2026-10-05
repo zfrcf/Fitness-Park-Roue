@@ -19,6 +19,7 @@ export function detecterFamille(baseUrl: string): FamilleAPI {
   if (hote.endsWith("groq.com")) return "groq";
   if (hote.endsWith("openrouter.ai")) return "openrouter";
   if (hote.endsWith("cloudflare.com")) return "cloudflare";
+  if (hote.endsWith("nvidia.com")) return "nvidia";
   return "generique";
 }
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, notInArray, or, sql } from "drizzle-orm";
 import type { MessageUI, MetaMessage } from "@/lib/chat/types";
 import { getDB } from "./index";
 import { conversations, messages } from "./schema";
@@ -15,9 +15,23 @@ export interface ResumeConversation {
 }
 
 export function titreDepuisTexte(texte: string): string {
-  const t = texte.replace(/\s+/g, " ").trim();
+  const t = texte.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
   if (!t) return "Nouvelle conversation";
   return t.length > 60 ? t.slice(0, 57).trimEnd() + "…" : t;
+}
+
+/** Postgres rejette le caractère NUL (\u0000) ; on le retire des textes venus de PDF/pages lues. */
+export function sansNul(v: string): string {
+  return v.includes("\u0000") ? v.replace(/\u0000/g, "") : v;
+}
+export function assainirJson<T>(valeur: T): T {
+  try {
+    const s = JSON.stringify(valeur);
+    // JSON.stringify échappe le NUL en « \u0000 » (6 caractères) : on retire cette séquence.
+    return s.includes("\\u0000") ? (JSON.parse(s.replace(/\\u0000/g, "")) as T) : valeur;
+  } catch {
+    return valeur;
+  }
 }
 
 function texteDesParties(parts: unknown[]): string {
@@ -95,7 +109,7 @@ export async function lireConversation(id: string): Promise<{ conversation: Resu
 export async function enregistrerMessages(id: string, liste: MessageUI[], fournisseurId?: string): Promise<void> {
   const db = await getDB();
   const premierUtilisateur = liste.find((m) => m.role === "user");
-  const titre = titreDepuisTexte(premierUtilisateur ? texteDesParties(premierUtilisateur.parts) : "");
+  const titre = sansNul(titreDepuisTexte(premierUtilisateur ? texteDesParties(premierUtilisateur.parts) : ""));
   await db
     .insert(conversations)
     .values({ id, titre, fournisseurId: fournisseurId ?? null })
@@ -103,22 +117,39 @@ export async function enregistrerMessages(id: string, liste: MessageUI[], fourni
       target: conversations.id,
       set: { majA: new Date(), ...(fournisseurId ? { fournisseurId } : {}) },
     });
-  await db.delete(messages).where(eq(messages.conversationId, id));
-  if (liste.length === 0) return;
-  await db.insert(messages).values(
-    liste.map((m, i) => {
-      const parts = partiesVisibles(m.parts);
-      return {
-        id: m.id || `${id}-${i}`,
+  // Dédoublonnage par id (le dernier gagne), assainissement du caractère NUL.
+  const parId = new Map<string, { ordre: number; row: typeof messages.$inferInsert }>();
+  liste.forEach((m, i) => {
+    const mid = m.id || `${id}-${i}`;
+    const parts = assainirJson(partiesVisibles(m.parts));
+    parId.set(mid, {
+      ordre: i,
+      row: {
+        id: mid,
         conversationId: id,
         ordre: i,
         role: m.role,
-        contenu: texteDesParties(parts),
+        contenu: sansNul(texteDesParties(parts)),
         parts: parts as unknown[],
-        meta: (m.metadata as MetaMessage | undefined) ?? null,
-      };
-    }),
-  );
+        meta: assainirJson((m.metadata as MetaMessage | undefined) ?? null),
+      },
+    });
+  });
+  const lignes = [...parId.values()].sort((a, b) => a.ordre - b.ordre).map((x) => x.row);
+  const ids = lignes.map((l) => l.id!);
+  // Upsert puis suppression des messages absents de la nouvelle liste : jamais de fenêtre « conversation vide ».
+  if (lignes.length) {
+    await db
+      .insert(messages)
+      .values(lignes)
+      .onConflictDoUpdate({
+        target: [messages.conversationId, messages.id],
+        set: { ordre: sql`excluded.ordre`, role: sql`excluded.role`, contenu: sql`excluded.contenu`, parts: sql`excluded.parts`, meta: sql`excluded.meta` },
+      });
+    await db.delete(messages).where(and(eq(messages.conversationId, id), notInArray(messages.id, ids)));
+  } else {
+    await db.delete(messages).where(eq(messages.conversationId, id));
+  }
 }
 
 /** Ajoute (ou remplace) un message en fin de conversation. */
@@ -128,21 +159,15 @@ export async function ajouterMessage(conversationId: string, m: MessageUI, fourn
     .select({ max: sql<number>`coalesce(max(${messages.ordre}), -1)`.mapWith(Number) })
     .from(messages)
     .where(eq(messages.conversationId, conversationId));
-  const parts = partiesVisibles(m.parts);
+  const parts = assainirJson(partiesVisibles(m.parts));
+  const contenu = sansNul(texteDesParties(parts));
+  const meta = assainirJson((m.metadata as MetaMessage | undefined) ?? null);
   await db
     .insert(messages)
-    .values({
-      id: m.id,
-      conversationId,
-      ordre: max + 1,
-      role: m.role,
-      contenu: texteDesParties(parts),
-      parts: parts as unknown[],
-      meta: (m.metadata as MetaMessage | undefined) ?? null,
-    })
+    .values({ id: m.id, conversationId, ordre: max + 1, role: m.role, contenu, parts: parts as unknown[], meta })
     .onConflictDoUpdate({
       target: [messages.conversationId, messages.id],
-      set: { contenu: texteDesParties(parts), parts: parts as unknown[], meta: (m.metadata as MetaMessage | undefined) ?? null },
+      set: { contenu, parts: parts as unknown[], meta },
     });
   await db
     .update(conversations)

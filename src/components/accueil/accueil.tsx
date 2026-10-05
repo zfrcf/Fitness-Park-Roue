@@ -55,7 +55,6 @@ export function Accueil() {
   const [conversations, setConversations] = useState<ResumeConversation[] | null>(null);
   const [fournisseurs, setFournisseurs] = useState<Array<FournisseurPublic & { etat: EtatFournisseur }> | null>(null);
   const [maintenant, setMaintenant] = useState(0);
-  const [salut] = useState(() => salutation());
 
   const charger = useCallback(async (signal?: AbortSignal) => {
     const [t, c, e] = await Promise.allSettled([
@@ -86,7 +85,11 @@ export function Accueil() {
           <Bot className="size-6" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{salut}. Que faisons-nous aujourd&apos;hui ?</h1>
+          {/* Salutation selon l'heure LOCALE du client : calcul en rendu + suppressHydrationWarning pour
+              éviter un décalage d'hydratation avec l'heure serveur (UTC). (#45) */}
+          <h1 className="text-2xl font-semibold tracking-tight">
+            <span suppressHydrationWarning>{salutation()}</span>. Que faisons-nous aujourd&apos;hui ?
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">Une question, un mod à produire et compiler, une page à lire : écrivez, le reste suit.</p>
         </div>
         <form

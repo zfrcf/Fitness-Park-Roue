@@ -265,7 +265,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         const refus = validerFichiers(fichiersProjet);
         if (refus.length) {
           const cycles = t.cycles + 1;
-          if (t.auto !== 1 && cycles >= t.maxCycles) {
+          if (t.auto !== 1 && cycles > t.maxCycles) {
             await terminer("echouee", `projet refusé après ${cycles} tentatives`, { cycles, erreur: `Projet refusé : ${refus.join(" ; ")}` });
             return;
           }
@@ -282,7 +282,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         const empreinte = empreinteProjet(fichiersProjet);
         if (t.empreinteCompilee && empreinte === t.empreinteCompilee) {
           const cycles = t.cycles + 1;
-          if (t.auto !== 1 && cycles >= t.maxCycles) {
+          if (t.auto !== 1 && cycles > t.maxCycles) {
             await terminer("echouee", `aucune correction livrée après ${cycles} cycles`, { cycles, erreur: "Le modèle n'a renvoyé aucun fichier modifié." });
             return;
           }
@@ -333,7 +333,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         return;
       }
       // Mode automatique : on continue à corriger jusqu'au jar (seul le plafond de tokens arrête).
-      if (t.auto !== 1 && cycles >= t.maxCycles) {
+      if (t.auto !== 1 && cycles > t.maxCycles) {
         await terminer("echouee", `échec après ${cycles} compilations`, { cycles, compilationId: null, erreur: "Nombre maximal de corrections atteint." });
         return;
       }

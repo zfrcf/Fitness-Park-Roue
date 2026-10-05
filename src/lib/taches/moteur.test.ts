@@ -159,6 +159,21 @@ describe("moteur des tâches", () => {
     expect(t.erreur).toMatch(/maximal/);
   });
 
+  it("#42 : maxCycles=1 tente bien UNE correction avant d'abandonner", async () => {
+    const m = monde();
+    tache(m, { maxCycles: 1 });
+    m.reponses = [0, 1].map((i) => ({ texte: PROJET.replace("class A {}", `class A { int v = ${i}; }`), fournisseurId: "a" }));
+    m.issues = ["echouee", "echouee"];
+    const d = deps(m);
+    for (let i = 0; i < 4 && m.taches.get("t1")!.statut !== "echouee"; i++) {
+      m.horloge.t += 1000;
+      await executerTranche(d, "t1");
+    }
+    expect(m.taches.get("t1")!.statut).toBe("echouee");
+    const corrections = m.conversations.get("c1")!.filter((x) => x.role === "user" && (x.parts[0] as { text?: string }).text?.includes("compilation sur GitHub a échoué"));
+    expect(corrections.length).toBe(1); // exactement une correction tentée (pas zéro)
+  });
+
   it("se met en attente de quota quand tous les fournisseurs sont épuisés, puis reprend", async () => {
     const m = monde();
     tache(m);

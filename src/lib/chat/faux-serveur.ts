@@ -21,6 +21,7 @@ export type Scenario =
   | "cf-3036" // Cloudflare quota journalier
   | "long" // réponse coupée par max_tokens (finish_reason length), puis la suite en continuation
   | "vide" // ne produit que du raisonnement : aucun texte, finish_reason length
+  | "degenere" // première réponse « !!!!!!!! », les suivantes normales
   | "otpm" // Groq : refuse si max_tokens > 1000 (OTPM), sinon répond normalement
   | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
   | "outil-refuse"; // 400 si des outils sont envoyés, sinon réponse normale
@@ -135,6 +136,19 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
         }
         res.write(chunk(id, "Début de la réponse longue "));
         res.end(finChunk(id, 30, 4096, "length"));
+        return;
+      }
+      case "degenere": {
+        const n = appels.filter((a) => a.scenario === "degenere").length;
+        if (nonStream) return reponseJson(n <= 1 ? "!".repeat(40) : "Réponse entière du fournisseur degenere.", 30, 7);
+        sse();
+        if (n <= 1) {
+          res.write(chunk(id, "!".repeat(40)));
+          res.end(finChunk(id, 30, 40));
+          return;
+        }
+        res.write(chunk(id, "Réponse entière du fournisseur degenere."));
+        res.end(finChunk(id, 30, 7));
         return;
       }
       case "vide": {

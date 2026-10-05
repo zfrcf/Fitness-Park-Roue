@@ -147,11 +147,22 @@ describe("rotation des fournisseurs", () => {
     expect(infos).toHaveLength(1);
   });
 
-  it("bascule quand le raisonnement a consommé toute la sortie (réponse vide)", async () => {
+  it("réponse dégénérée (!!!!) : nouvel essai sur place, texte régénéré", async () => {
+    const r = await executer([fournisseur("A", "degenere"), fournisseur("B", "ok")]);
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse entière du fournisseur degenere.");
+    expect(r.meta.fournisseur).toBe("A");
+    expect(r.regenerations).toBe(1);
+    expect(r.bascules).toHaveLength(0);
+    expect(serveur.appels.filter((a) => a.scenario === "degenere")).toHaveLength(2);
+  });
+
+  it("bascule quand le raisonnement a consommé toute la sortie (réponse vide), après un essai sur place", async () => {
     const r = await executer([fournisseur("A", "vide"), fournisseur("B", "ok")]);
     expect(r.erreur).toBeUndefined();
     expect(r.texte).toBe("Réponse entière du fournisseur ok.");
     expect(r.meta.fournisseur).toBe("B");
+    expect(serveur.appels.filter((a) => a.scenario === "vide")).toHaveLength(2);
     expect(r.bascules[0].raison).toMatch(/réponse vide/);
     // A n'est pas marqué indisponible : une requête plus courte peut lui convenir.
     expect(await kv.get("fournisseur:etat:a")).toBeNull();

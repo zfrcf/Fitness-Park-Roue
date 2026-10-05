@@ -236,6 +236,11 @@ interface Tentative {
   finishReason?: string;
 }
 
+/** Texte dégénéré : une longue suite du même caractère (ex. « !!!!!!!! »), défaut d'inférence passager. */
+export function estDegenere(texte: string): boolean {
+  return /(.)\1{19,}/u.test(texte.replace(/\s+/g, " ")) && !/[`#=\-_*]/.test(texte.match(/(.)\1{19,}/u)?.[1] ?? "");
+}
+
 /** Nombre maximal de suites automatiques quand une réponse est coupée par sa limite de tokens. */
 export const MAX_SUITES = 4;
 
@@ -444,6 +449,7 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
   let continuation = false;
   let continuationEnCours = false; // la tentative courante est une reprise
   const tentes = new Set<string>();
+  const reessaisMemeFournisseur = new Set<string>(); // un seul nouvel essai sur place par fournisseur
   let erreurContexte = 0;
   const entreeEstimee = p.messages.reduce((s, m) => s + tokensMessage(m), 0) + estimerTokens(p.reglages.systeme);
 
@@ -514,19 +520,40 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
       if (!t.erreur) continuation = true;
     }
 
-    // Réponse vide alors que des tokens ont été produits : le raisonnement a tout consommé.
-    // On bascule sans marquer le fournisseur indisponible (il reste bon pour d'autres requêtes).
-    if (!t.erreur && t.texte.length === 0 && texte.length === 0 && (t.usage?.sortie ?? 0) > 0) {
+    // Réponse vide (le raisonnement a tout consommé) ou dégénérée (suite de caractères répétés,
+    // défaut passager de certaines infrastructures) : un nouvel essai sur le même fournisseur,
+    // puis bascule, sans marquer le fournisseur indisponible.
+    const vide = !t.erreur && t.texte.length === 0 && texte.length === 0 && (t.usage?.sortie ?? 0) > 0;
+    const degenere = !t.erreur && estDegenere(t.texte);
+    if (vide || degenere) {
+      const raison = degenere ? "réponse dégénérée (caractères répétés)" : "réponse vide (raisonnement trop long)";
+      log(`[chat] ${f.nom} : ${raison}, ${t.usage?.sortie ?? 0} tokens de sortie`);
+      if (degenere) {
+        // Le texte dégénéré ne doit pas rester affiché : on régénère.
+        regenerations++;
+        texte = "";
+        continuation = false;
+        continuationEnCours = false;
+        writer.write({ type: "text-end", id: partId });
+        writer.write({ type: "data-regeneration", data: { raison: `${raison} chez ${f.nom}` } });
+        partId = `txt-${debut.toString(36)}-${regenerations}`;
+        writer.write({ type: "text-start", id: partId });
+      }
+      if (!reessaisMemeFournisseur.has(f.id)) {
+        reessaisMemeFournisseur.add(f.id);
+        tentes.delete(f.id);
+        writer.write({ type: "data-info", data: { texte: `${raison} : nouvel essai chez ${f.nom}` }, transient: true });
+        continue;
+      }
       const autre = candidats.find((c) => !tentes.has(c.id));
-      log(`[chat] ${f.nom} : réponse vide, ${t.usage?.sortie} tokens de sortie consommés par le raisonnement`);
       if (autre) {
         precedent = f;
-        const b: Bascule = { de: f.nom, vers: autre.nom, raison: "réponse vide (raisonnement trop long)", continuation: false };
+        const b: Bascule = { de: f.nom, vers: autre.nom, raison, continuation: false };
         bascules.push(b);
         writer.write({ type: "data-bascule", data: b, transient: true });
         continue;
       }
-      t = { ...t, erreur: { categorie: "temporaire", message: "réponse vide : le raisonnement a consommé toute la sortie", reessaiA: maintenant, basculer: true } };
+      t = { ...t, erreur: { categorie: "temporaire", message: raison, reessaiA: maintenant, basculer: true } };
     }
 
     if (!t.erreur) {

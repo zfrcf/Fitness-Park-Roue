@@ -1,4 +1,5 @@
 import { generateText } from "ai";
+import { estDegenere } from "@/lib/chat/orchestrateur";
 import { creerModele } from "./client";
 import { lireQuota } from "./entetes";
 import { classerErreur } from "./erreurs";
@@ -23,11 +24,14 @@ export async function testerFournisseur(f: Fournisseur): Promise<ResultatTest> {
     const latenceMs = Date.now() - debut;
     const quota = lireQuota(r.response.headers);
     await marquerReussite(f.id, quota);
+    const degenere = estDegenere(r.text);
     const res: ResultatTest = {
       a: Date.now(),
       ok: true,
       latenceMs,
-      message: `Réponse : « ${r.text.trim().slice(0, 40) || "(vide)"} »`,
+      message: degenere
+        ? `Le fournisseur répond, mais avec un texte dégénéré (« ${r.text.trim().slice(0, 12)}… ») : défaut passager, retenté automatiquement en conversation`
+        : `Réponse : « ${r.text.trim().slice(0, 40) || "(vide)"} »`,
       tokens: { entree: r.usage.inputTokens ?? 0, sortie: r.usage.outputTokens ?? 0 },
     };
     await enregistrerTest(f.id, res);

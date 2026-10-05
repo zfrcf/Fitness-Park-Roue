@@ -134,6 +134,11 @@ très bon en code, appels d'outils). Particularités gérées par la famille `nv
 - « Moyen » et « Élevé » envoient `reasoning_effort` `high` et `max` (`low` donne parfois une
   réponse vide, il n'est pas utilisé).
 
+Défaut observé sur l'infrastructure NIM : environ une réponse sur six de Kimi K3 est « dégénérée »
+(suite de `!!!!`, puis rien). L'application la détecte, retente une fois sur place puis bascule ;
+le texte dégénéré n'est jamais conservé. Alternative sans ce défaut lors des tests, un peu plus
+bavarde : `nvidia/nemotron-3-ultra-550b-a55b` (changer `PROVIDER_1_MODEL`).
+
 ## Ajouter un fournisseur
 
 1. Prenez le prochain numéro libre, par exemple `4`.
@@ -235,9 +240,10 @@ CLI Vercel.
 - **Réponse coupée par « Tokens max »** (`finish_reason: length`) : le même fournisseur est relancé
   automatiquement jusqu'à 4 fois pour continuer exactement à la suite (notification « suite
   automatique »).
-- **Réponse vide** alors que des tokens ont été produits (le raisonnement a consommé toute la
-  sortie, fréquent chez Cloudflare) : bascule immédiate vers le suivant, sans marquer le
-  fournisseur indisponible.
+- **Réponse vide** (le raisonnement a consommé toute la sortie, fréquent chez Cloudflare) ou
+  **dégénérée** (longue suite du même caractère, défaut passager chez NVIDIA) : un nouvel essai
+  sur place, puis bascule vers le suivant, sans marquer le fournisseur indisponible ; le texte
+  dégénéré est effacé et régénéré.
 - **Tout épuisé** : message clair avec le prochain fournisseur disponible et son heure de réessai.
 
 Les mêmes réglages (prompt système, température, longueur, raisonnement) sont envoyés à tous.

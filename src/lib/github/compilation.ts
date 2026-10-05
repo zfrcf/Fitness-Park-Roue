@@ -34,7 +34,10 @@ export function validerFichiers(fichiersBruts: FichierGenere[]): string[] {
   const vus = new Set<string>();
   for (const f of fichiers) {
     total += Buffer.byteLength(f.contenu, "utf8");
-    if (!RE_CHEMIN_SUR.test(f.chemin) || f.chemin.includes("\\") || f.chemin.length > 240) erreurs.push(`chemin refusé : ${f.chemin}`);
+    // Segments vides (//), « . », « .. » et dossier .git sont refusés en plus du filtre général. (#44)
+    const segments = f.chemin.split("/");
+    const segmentInvalide = segments.some((s) => s === "" || s === "." || s === "..") || /(^|\/)\.git(\/|$)/i.test(f.chemin);
+    if (!RE_CHEMIN_SUR.test(f.chemin) || f.chemin.includes("\\") || f.chemin.length > 240 || segmentInvalide) erreurs.push(`chemin refusé : ${f.chemin}`);
     if (vus.has(f.chemin)) erreurs.push(`chemin en double : ${f.chemin}`);
     vus.add(f.chemin);
   }

@@ -1,5 +1,6 @@
 import { lireCompilation } from "@/lib/db/compilations";
 import { extraireArtefact } from "@/lib/github/compilation";
+import { ErreurGitHub } from "@/lib/github/api";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -21,6 +22,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       },
     });
   } catch (e) {
+    // Artefact expiré (14 jours) ou supprimé : GitHub répond 404/410 → message clair plutôt qu'un 502 brut. (#44)
+    if (e instanceof ErreurGitHub && (e.statut === 404 || e.statut === 410)) {
+      return Response.json({ erreur: "Artefact expiré ou supprimé (les artefacts GitHub durent 14 jours). Relancez la compilation." }, { status: 410 });
+    }
     return Response.json({ erreur: e instanceof Error ? e.message : "téléchargement impossible" }, { status: 502 });
   }
 }

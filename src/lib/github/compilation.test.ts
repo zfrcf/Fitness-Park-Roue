@@ -23,6 +23,12 @@ describe("validerFichiers", () => {
     expect(e.join("\n")).toMatch(/build\.gradle/);
     expect(validerFichiers([])).toContain("aucun fichier à compiler");
   });
+  it("#44 : refuse .git/, les segments vides et « . »", () => {
+    const e = validerFichiers([f("build.gradle"), f(".git/config"), f("a//b.txt"), f("a/./b.java"), f("src/x.java")]);
+    expect(e.join("\n")).toMatch(/\.git\/config/);
+    expect(e.join("\n")).toMatch(/a\/\/b\.txt/);
+    expect(e.join("\n")).toMatch(/a\/\.\/b\.java/);
+  });
   it("borne la taille", () => {
     expect(validerFichiers([f("build.gradle", "x".repeat(4 * 1024 * 1024))]).join()).toMatch(/volumineux/);
   });

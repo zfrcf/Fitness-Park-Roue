@@ -85,11 +85,16 @@ export function CarteCompilation({
           </a>
         )}
         <div className="ml-auto flex gap-1.5">
-          {c.statut === "reussie" && (
-            <Button size="sm" nativeButton={false} render={<a href={`/api/compilations/${c.id}/jar`} download />}>
-              <Download /> Télécharger {c.jarNom ?? "le .jar"}
-            </Button>
-          )}
+          {/* Les artefacts GitHub expirent après 14 jours : au-delà, on n'affiche plus un bouton
+              actif qui renverrait un 502, mais un libellé « expiré ». (#44) */}
+          {c.statut === "reussie" &&
+            (new Date().getTime() - new Date(c.creeA).getTime() > 14 * 24 * 3600_000 ? (
+              <span className="text-xs text-muted-foreground">Artefact expiré (plus de 14 jours) : relancez la compilation.</span>
+            ) : (
+              <Button size="sm" nativeButton={false} render={<a href={`/api/compilations/${c.id}/jar`} download />}>
+                <Download /> Télécharger {c.jarNom ?? "le .jar"}
+              </Button>
+            ))}
           {c.statut === "echouee" && onDemanderCorrection && c.journal && (
             <>
               <Button

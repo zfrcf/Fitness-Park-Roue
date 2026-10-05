@@ -8,7 +8,7 @@ import { convertToModelMessages, createUIMessageStream, tool, type UIMessageChun
 import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { fuseauHoraire } from "@/lib/fuseau";
-import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, extraireVersion, versionDepuisProjet, versionsMinecraft } from "@/lib/minecraft/contexte";
+import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, detecterLoader, extraireVersion, versionDepuisProjet, versionsMinecraft } from "@/lib/minecraft/contexte";
 import { blocProjetPourModele, fusionnerProjet, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { executerChat, genererAvecRotation, type DepsOrchestrateur } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
@@ -177,8 +177,10 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
               .reverse()
               .find(Boolean);
           const version = projetMinecraft ? versionDepuisProjet(projet) : versionAvantProjet;
+          // Loader demandé (NeoForge/Forge) détecté sur l'ensemble des messages récents, pas seulement le dernier.
+          const loader = textesRecents.map(detecterLoader).reverse().find(Boolean) ?? "fabric";
           const v = await versionsMinecraft(version, { kv: deps.kv });
-          reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${blocContexteMinecraft(v)}` };
+          reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${blocContexteMinecraft(v, loader)}` };
         } catch (e) {
           console.warn("[chat] contexte Minecraft indisponible :", e instanceof Error ? e.message : e);
         }

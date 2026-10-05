@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getKV } from "@/lib/kv";
-import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, extraireVersion, jeuNonObfusque, versionDepuisProjet, versionsMinecraft, type VersionsMinecraft } from "./contexte";
+import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, extraireVersion, javaPour, jeuNonObfusque, versionDepuisProjet, versionsMinecraft, type VersionsMinecraft } from "./contexte";
 
 /** Extrait le contenu d'un bloc de code « ```lang chemin » du contexte. */
 function fichier(bloc: string, chemin: string): string {
@@ -10,15 +10,40 @@ function fichier(bloc: string, chemin: string): string {
 }
 
 // Jeux de versions figés : ceux qui ont réellement compilé sur GitHub Actions (JDK 25, Gradle 9.7.1).
-const V26: VersionsMinecraft = { jeu: "26.3", loader: "0.19.5", fabricApi: "0.161.0+26.3", loom: "1.18.2", neoforge: "21.11.45", java: 25, recupereA: Date.UTC(2026, 9, 5) };
-const V121: VersionsMinecraft = { jeu: "1.21.11", loader: "0.19.5", fabricApi: "0.141.6+1.21.11", loom: "1.18.2", java: 21, recupereA: Date.UTC(2026, 9, 5) };
+const V26: VersionsMinecraft = { jeu: "26.3", loader: "0.19.5", fabricApi: "0.161.0+26.3", loom: "1.18.2", neoforge: "21.11.45", java: 25, recupereA: Date.UTC(2026, 9, 5), verifie: true };
+const V121: VersionsMinecraft = { jeu: "1.21.11", loader: "0.19.5", fabricApi: "0.141.6+1.21.11", loom: "1.18.2", java: 21, recupereA: Date.UTC(2026, 9, 5), verifie: true };
 
 describe("detecterDemandeMod", () => {
   it("détecte une demande de mod et la version", () => {
-    expect(detecterDemandeMod("Fais-moi un mod Minecraft 1.21.11 qui ajoute une épée")).toEqual({ mod: true, version: "1.21.11" });
-    expect(detecterDemandeMod("un mod fabric pour la 26.3")).toEqual({ mod: true, version: "26.3" });
-    expect(detecterDemandeMod("Explique la version 1.21 de Minecraft")).toEqual({ mod: false, version: "1.21" });
-    expect(detecterDemandeMod("Rédige un email")).toEqual({ mod: false, version: undefined });
+    expect(detecterDemandeMod("Fais-moi un mod Minecraft 1.21.11 qui ajoute une épée")).toEqual({ mod: true, version: "1.21.11", loader: undefined });
+    expect(detecterDemandeMod("un mod fabric pour la 26.3")).toEqual({ mod: true, version: "26.3", loader: "fabric" });
+    expect(detecterDemandeMod("un mod NeoForge pour la 1.21.1")).toEqual({ mod: true, version: "1.21.1", loader: "neoforge" });
+    expect(detecterDemandeMod("Explique la version 1.21 de Minecraft")).toEqual({ mod: false, version: "1.21", loader: undefined });
+    expect(detecterDemandeMod("Rédige un email")).toEqual({ mod: false, version: undefined, loader: undefined });
+  });
+});
+
+describe("javaPour (#26 : version de Java par version du jeu)", () => {
+  it("mappe chaque génération", () => {
+    expect(javaPour("26.3")).toBe(25);
+    expect(javaPour("1.21.11")).toBe(21);
+    expect(javaPour("1.20.6")).toBe(21);
+    expect(javaPour("1.20.4")).toBe(17);
+    expect(javaPour("1.20")).toBe(17);
+    expect(javaPour("1.19.2")).toBe(17);
+    expect(javaPour("1.18")).toBe(17);
+    expect(javaPour("1.17.1")).toBe(16);
+    expect(javaPour("1.16.5")).toBe(8);
+  });
+});
+
+describe("blocContexteMinecraft NeoForge (#26)", () => {
+  it("n'impose pas le modèle Fabric pour une demande NeoForge", () => {
+    const bloc = blocContexteMinecraft(V121, "neoforge");
+    expect(bloc).toContain('loader="neoforge"');
+    expect(bloc).toContain("je ne t'impose pas de modèle Fabric");
+    expect(bloc).not.toContain("officialMojangMappings");
+    expect(bloc).not.toContain("fabric.mod.json");
   });
 });
 
@@ -160,9 +185,13 @@ describe("versionsMinecraft", () => {
     expect(v.loom).not.toContain("SNAPSHOT");
   });
 
-  it("replie sur des valeurs sûres si tout échoue", async () => {
+  it("replie sur des valeurs sûres si tout échoue (#25 : pas de « * », marqué non vérifié)", async () => {
     const v = await versionsMinecraft("1.21.4", { fetch: (() => Promise.reject(new Error("réseau"))) as unknown as typeof fetch });
-    expect(v).toMatchObject({ jeu: "1.21.4", loader: "0.19.5", fabricApi: "*", java: 21 });
-    expect(blocContexteMinecraft(v)).toContain("mappings loom.officialMojangMappings()");
+    expect(v).toMatchObject({ jeu: "1.21.4", loader: "0.19.5", fabricApi: "", java: 21, verifie: false });
+    const bloc = blocContexteMinecraft(v);
+    expect(bloc).toContain("mappings loom.officialMojangMappings()");
+    // La propriété ne vaut jamais « * » (invalide) : un repli met un marqueur explicite à remplacer.
+    expect(bloc).toContain("fabric_api_version=REMPLACER_PAR_LA_VERSION_FABRIC_API");
+    expect(bloc).toContain("valeurs de repli"); // ne se présente pas comme « vérifié »
   });
 });

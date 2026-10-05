@@ -4,7 +4,7 @@ import { ajouterMessage, lireConversation } from "@/lib/db/conversations";
 import { creerCompilation, lireCompilation, majCompilation } from "@/lib/db/compilations";
 import { journaliser, lireTache, majTache, tachesAReveiller } from "@/lib/db/taches";
 import { nomArchive } from "@/lib/fichiers/extraire";
-import { creerBranche, validerFichiers } from "@/lib/github/compilation";
+import { creerBranche, retirerReserves, validerFichiers } from "@/lib/github/compilation";
 import { rafraichirCompilation } from "@/lib/github/suivi";
 import { fournisseurs } from "@/lib/fournisseurs/registre";
 import { getKV } from "@/lib/kv";
@@ -34,13 +34,14 @@ export function depsReelles(): DepsMoteur {
       return { texte: c.texte, fournisseurId: c.meta.fournisseurId, usage: c.meta.usage, erreur: c.erreur, reessaiA: c.reessaiA };
     },
     lancerCompilation: async ({ conversationId, messageId, fichiers }) => {
-      const erreurs = validerFichiers(fichiers);
+      const fichiersPropres = retirerReserves(fichiers);
+      const erreurs = validerFichiers(fichiersPropres);
       if (erreurs.length) throw new Error(`Projet refusé : ${erreurs.join(" ; ")}`);
       const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const nom = nomArchive(fichiers, "projet");
-      let c = await creerCompilation({ id, conversationId, messageId, nom, branche: `compilation/${id}`, nbFichiers: fichiers.length });
+      const nom = nomArchive(fichiersPropres, "projet");
+      let c = await creerCompilation({ id, conversationId, messageId, nom, branche: `compilation/${id}`, nbFichiers: fichiersPropres.length });
       try {
-        const b = await creerBranche(id, fichiers, nom);
+        const b = await creerBranche(id, fichiersPropres, nom);
         c = (await majCompilation(id, { brancheUrl: b.url })) ?? c;
       } catch (e) {
         await majCompilation(id, { statut: "erreur", erreur: e instanceof Error ? e.message : "échec de l'envoi sur GitHub" });

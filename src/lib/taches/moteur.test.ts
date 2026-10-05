@@ -205,6 +205,17 @@ describe("moteur des tâches", () => {
     expect(m.taches.get("t1")!.statut).toBe("echouee");
   });
 
+  it("arrête une tâche qui dépasse le plafond de tokens (anti-emballement)", async () => {
+    const m = monde();
+    tache(m, { tokensEntree: 1_900_000, tokensSortie: 200_000 }); // 2,1 M > plafond de test 2 M
+    const d = deps(m);
+    await executerTranche(d, "t1");
+    const t = m.taches.get("t1")!;
+    expect(t.statut).toBe("echouee");
+    expect(t.erreur).toMatch(/plafond|budget de tokens/i);
+    expect(m.conversations.get("c1")!.length).toBe(1); // rien généré
+  });
+
   it("met les fournisseurs occupés par une autre tâche en fin de liste", async () => {
     const m = monde();
     const d = deps(m);

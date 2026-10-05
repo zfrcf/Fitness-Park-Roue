@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { depotCompilation } from "./api";
-import { contenuWorkflow, mapperRun, nomBranche, resumerJournal, validerFichiers } from "./compilation";
+import { contenuWorkflow, mapperRun, nomBranche, resumerJournal, retirerReserves, validerFichiers } from "./compilation";
 
 const f = (chemin: string, contenu = "x") => ({ chemin, contenu });
 
@@ -8,18 +8,30 @@ describe("validerFichiers", () => {
   it("accepte un projet Gradle sain", () => {
     expect(validerFichiers([f("build.gradle"), f("settings.gradle"), f("src/main/java/com/ex/Mod.java")])).toEqual([]);
   });
-  it("refuse les chemins dangereux, réservés, le wrapper et l'absence de build.gradle", () => {
-    const e = validerFichiers([f("../x"), f("/etc/passwd"), f(".github/workflows/evil.yml"), f("gradlew"), f("a.txt"), f("a.txt")]);
+  it("ignore silencieusement les fichiers réservés (.github/, wrapper) au lieu de refuser le projet", () => {
+    // Un workflow ou un wrapper produit par le modèle ne doit JAMAIS faire échouer la compilation.
+    expect(validerFichiers([f("build.gradle"), f(".github/workflows/build.yml"), f("gradlew"), f("gradle/wrapper/gradle-wrapper.jar"), f("src/A.java")])).toEqual([]);
+    // Mais un projet qui N'A QUE des fichiers réservés n'a rien à compiler.
+    const e = validerFichiers([f(".github/workflows/build.yml"), f("gradlew")]);
+    expect(e).toContain("aucun fichier à compiler");
+  });
+  it("refuse les chemins dangereux, les doublons et l'absence de build.gradle", () => {
+    const e = validerFichiers([f("../x"), f("/etc/passwd"), f("a.txt"), f("a.txt")]);
     expect(e.join("\n")).toMatch(/chemin refusé : \.\.\/x/);
     expect(e.join("\n")).toMatch(/chemin refusé : \/etc\/passwd/);
-    expect(e.join("\n")).toMatch(/réservé/);
-    expect(e.join("\n")).toMatch(/wrapper/);
     expect(e.join("\n")).toMatch(/en double/);
     expect(e.join("\n")).toMatch(/build\.gradle/);
-    expect(validerFichiers([])).toContain("aucun fichier");
+    expect(validerFichiers([])).toContain("aucun fichier à compiler");
   });
   it("borne la taille", () => {
     expect(validerFichiers([f("build.gradle", "x".repeat(4 * 1024 * 1024))]).join()).toMatch(/volumineux/);
+  });
+});
+
+describe("retirerReserves", () => {
+  it("retire .github/, gradlew et gradle-wrapper, garde le reste", () => {
+    const r = retirerReserves([f("build.gradle"), f(".github/workflows/x.yml"), f("gradlew"), f("gradlew.bat"), f("gradle/wrapper/gradle-wrapper.properties"), f("src/Main.java")]);
+    expect(r.map((x) => x.chemin)).toEqual(["build.gradle", "src/Main.java"]);
   });
 });
 

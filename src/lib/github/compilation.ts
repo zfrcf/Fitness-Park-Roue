@@ -12,18 +12,29 @@ import { depotCompilation, github } from "./api";
 export const MAX_FICHIERS = 400;
 export const MAX_OCTETS = 3 * 1024 * 1024;
 const RE_CHEMIN_SUR = /^(?!\.{1,2}(\/|$))(?!\/)(?!.*\/\.\.(\/|$))[\w@.+ -][\w@.+\/ -]*$/;
+/** Chemins que la chaîne fournit elle-même : jamais envoyés, retirés sans refuser le projet. */
+export const RE_CHEMIN_RESERVE = /^\.github\/|(^|\/)gradlew(\.bat)?$|(^|\/)gradle-wrapper\.(jar|properties)$/;
 
-export function validerFichiers(fichiers: FichierGenere[]): string[] {
+/** Retire les fichiers réservés (workflow, wrapper Gradle) d'une liste. */
+export function retirerReserves(fichiers: FichierGenere[]): FichierGenere[] {
+  return fichiers.filter((f) => !RE_CHEMIN_RESERVE.test(f.chemin));
+}
+
+/**
+ * Valide le projet APRÈS retrait des fichiers réservés : ceux-ci (`.github/…`, gradlew,
+ * gradle-wrapper) sont fournis par la chaîne, donc ignorés silencieusement plutôt que de
+ * refuser tout le projet. On ne valide que les fichiers réellement envoyés.
+ */
+export function validerFichiers(fichiersBruts: FichierGenere[]): string[] {
+  const fichiers = retirerReserves(fichiersBruts);
   const erreurs: string[] = [];
-  if (!fichiers.length) erreurs.push("aucun fichier");
+  if (!fichiers.length) erreurs.push("aucun fichier à compiler");
   if (fichiers.length > MAX_FICHIERS) erreurs.push(`trop de fichiers (${fichiers.length} > ${MAX_FICHIERS})`);
   let total = 0;
   const vus = new Set<string>();
   for (const f of fichiers) {
     total += Buffer.byteLength(f.contenu, "utf8");
     if (!RE_CHEMIN_SUR.test(f.chemin) || f.chemin.includes("\\") || f.chemin.length > 240) erreurs.push(`chemin refusé : ${f.chemin}`);
-    if (f.chemin.startsWith(".github/")) erreurs.push(`chemin réservé : ${f.chemin}`);
-    if (/gradlew(\.bat)?$|gradle-wrapper\.jar$/.test(f.chemin)) erreurs.push(`le wrapper Gradle est fourni par la chaîne de compilation : retirez ${f.chemin}`);
     if (vus.has(f.chemin)) erreurs.push(`chemin en double : ${f.chemin}`);
     vus.add(f.chemin);
   }
@@ -56,7 +67,8 @@ interface Commit {
 export async function creerBranche(id: string, fichiers: FichierGenere[], nom: string): Promise<{ branche: string; sha: string; url: string }> {
   const { proprietaire, nom: depot } = depotCompilation();
   const base = `/repos/${proprietaire}/${depot}`;
-  const tous = [...fichiers, { chemin: ".github/workflows/compiler.yml", contenu: contenuWorkflow() }];
+  // On retire les fichiers réservés produits par le modèle (sinon collision avec le workflow ajouté ci-dessous).
+  const tous = [...retirerReserves(fichiers), { chemin: ".github/workflows/compiler.yml", contenu: contenuWorkflow() }];
   // Blobs par lots pour limiter la concurrence.
   const arbre: Array<{ path: string; mode: "100644"; type: "blob"; sha: string }> = [];
   for (let i = 0; i < tous.length; i += 10) {

@@ -12,6 +12,8 @@ import type { KV } from "@/lib/kv";
 import type { Tache } from "@/lib/db/taches";
 
 export const BUDGET_TRANCHE_MS = 270_000;
+/** Plafond de tokens (entrée + sortie) par tâche avant arrêt anti-emballement. */
+export const PLAFOND_TOKENS_TACHE = 2_000_000;
 /** Une génération commence seulement si la tranche est encore « fraîche » (budget complet). */
 const MARGE_GENERATION_MS = 25_000;
 const INTERVALLE_SONDAGE_MS = 15_000;
@@ -50,6 +52,8 @@ export interface DepsMoteur {
   lancerCompilation: (p: { conversationId: string; messageId: string; fichiers: FichierGenere[] }) => Promise<EtatCompilation>;
   etatCompilation: (id: string) => Promise<EtatCompilation | null>;
   programmer: (tacheId: string, delaiMs: number) => Promise<void>;
+  /** Plafond de tokens par tâche (défaut PLAFOND_TOKENS_TACHE). */
+  plafondTokens?: number;
   log?: (m: string) => void;
 }
 
@@ -107,6 +111,12 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
     for (;;) {
       const t = await deps.lireTache(tacheId);
       if (!t || (t.statut !== "en_cours" && t.statut !== "en_attente")) return; // pause ou arrêt demandé entre-temps
+      // Garde-fou anti-emballement : plafond de tokens par tâche, quelle que soit la cause.
+      const tokensTotal = t.tokensEntree + t.tokensSortie;
+      if (tokensTotal > (deps.plafondTokens ?? PLAFOND_TOKENS_TACHE)) {
+        await terminer("echouee", "budget de tokens atteint", { erreur: `Tâche arrêtée après ${tokensTotal.toLocaleString("fr-FR")} tokens (plafond anti-emballement). Relancez-la en repartant d'une conversation plus courte.` });
+        return;
+      }
       const messages = await deps.lireMessages(t.conversationId);
       const dernier = messages.at(-1);
 

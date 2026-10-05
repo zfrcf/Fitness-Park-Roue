@@ -17,7 +17,13 @@ interface Depense {
   tokensSortie: number;
   requetes: number;
 }
-type Ligne = FournisseurPublic & { etat: EtatFournisseur; depense: Depense | null };
+type Ligne = FournisseurPublic & {
+  etat: EtatFournisseur;
+  depense: Depense | null;
+  limites?: { itpm?: number; otpm?: number };
+  debit?: { utilise: number; limite?: number };
+  occupe?: boolean;
+};
 interface Reponse {
   fournisseurs: Ligne[];
   stockage: { kv: "redis" | "memoire" };
@@ -183,11 +189,27 @@ export function TableauEtat() {
                     </CardTitle>
                     <CardDescription className="mt-1 font-mono text-xs break-all">{f.modele}</CardDescription>
                   </div>
-                  <BadgeStatut etat={e} />
+                  <div className="flex flex-col items-end gap-1">
+                    <BadgeStatut etat={e} />
+                    {f.occupe && (
+                      <Badge variant="outline" className="gap-1 text-[10px]">
+                        <Zap className="size-3" /> tâche en cours
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="flex flex-1 flex-col gap-1.5">
                 <LigneInfo libelle="Contexte" valeur={`${formatTokens(f.contexte)} tokens`} />
+                {f.debit?.limite !== undefined && (
+                  <LigneInfo libelle="Requêtes / min (fenêtre)" valeur={`${formatNombre(f.debit.utilise)} / ${formatNombre(f.debit.limite)}`} />
+                )}
+                {(f.limites?.itpm || f.limites?.otpm) && (
+                  <LigneInfo
+                    libelle="Limites apprises / min"
+                    valeur={[f.limites?.itpm && `${formatTokens(f.limites.itpm)} entrée`, f.limites?.otpm && `${formatTokens(f.limites.otpm)} sortie`].filter(Boolean).join(" · ")}
+                  />
+                )}
                 {e.reessaiA && e.reessaiA > maintenant && (
                   <LigneInfo
                     libelle="Réessai"

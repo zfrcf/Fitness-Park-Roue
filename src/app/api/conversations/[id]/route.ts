@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { lireConversation, renommerConversation, supprimerConversation } from "@/lib/db/conversations";
+import { supprimerTachesDeConversation } from "@/lib/db/taches";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,9 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
 export async function DELETE(_req: Request, { params }: Ctx) {
   const { id } = await params;
+  // On retire d'abord les tâches de fond liées : sinon une tâche active ressuscite la conversation
+  // et consomme du quota en boucle (#27).
+  await supprimerTachesDeConversation(id).catch(() => 0);
   const ok = await supprimerConversation(id);
   return ok ? NextResponse.json({ ok: true }) : NextResponse.json({ erreur: "Conversation introuvable." }, { status: 404 });
 }

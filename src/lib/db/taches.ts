@@ -54,6 +54,13 @@ export async function supprimerTache(id: string): Promise<boolean> {
   return r.length > 0;
 }
 
+/** Supprime toutes les tâches d'une conversation (appelé quand la conversation est supprimée). */
+export async function supprimerTachesDeConversation(conversationId: string): Promise<number> {
+  const db = await getDB();
+  const r = await db.delete(taches).where(eq(taches.conversationId, conversationId)).returning({ id: taches.id });
+  return r.length;
+}
+
 /** Tâches à (re)lancer : en attente et dues, ou en cours sans signe de vie depuis `orphelineMs`. */
 export async function tachesAReveiller(maintenant = Date.now(), orphelineMs = 6 * 60_000): Promise<Tache[]> {
   const db = await getDB();

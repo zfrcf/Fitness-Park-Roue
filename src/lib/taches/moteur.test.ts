@@ -232,6 +232,16 @@ describe("moteur des tâches", () => {
     expect(m.conversations.get("c1")!.some((x) => (x.parts[0] as { text?: string }).text?.includes("coupée par une limite"))).toBe(false);
   });
 
+  it("#27 : une tâche dont la conversation a été supprimée s'arrête sans la ressusciter", async () => {
+    const m = monde();
+    tache(m);
+    m.conversations.set("c1", []); // conversation supprimée entre-temps
+    await executerTranche(deps(m), "t1");
+    const t = m.taches.get("t1")!;
+    expect(t.statut).toBe("echouee");
+    expect(m.conversations.get("c1")!.length).toBe(0); // aucun message recréé
+  });
+
   it("#7 : un délai court qui tient dans le budget est attendu dans la fonction courante (pas de relance immédiate)", async () => {
     const m = monde();
     tache(m);

@@ -157,6 +157,12 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         return;
       }
       const messages = await deps.lireMessages(t.conversationId);
+      // Conversation supprimée entre-temps : aucun message. On arrête au lieu de la ressusciter en
+      // boucle (le premier message recréerait la conversation et consommerait du quota) (#27).
+      if (messages.length === 0) {
+        await terminer("echouee", "conversation introuvable", { erreur: "La conversation de cette tâche a été supprimée." });
+        return;
+      }
       const dernier = messages.at(-1);
 
       // 1. Un message utilisateur attend une réponse : génération.

@@ -219,8 +219,13 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           return;
         }
         if (controleur.signal.aborted) {
-          await deps.journaliser(tacheId, "réponse coupée par la limite de temps, demande de suite");
-          await deps.ajouterMessageUtilisateur(t.conversationId, "Ta réponse a été coupée par une limite de temps. Reprends exactement là où tu t'es arrêté, sans répéter ce qui est déjà écrit.");
+          await deps.journaliser(tacheId, "réponse coupée par la limite de temps, demande des fichiers complets");
+          // Ne PAS demander « reprends là où tu t'es arrêté » : cela produit une suite non extractible et
+          // laisse un fichier tronqué dans l'état du projet. On redemande les fichiers en entier. (#11)
+          await deps.ajouterMessageUtilisateur(
+            t.conversationId,
+            "Ta réponse a été coupée par une limite de temps au milieu d'un fichier. Ne continue pas au milieu d'un bloc : renvoie EN ENTIER, chacun dans son propre bloc de code avec son chemin, le ou les fichiers que tu étais en train d'écrire, puis les fichiers restants. Tu peux omettre les fichiers déjà complets et corrects des réponses précédentes.",
+          );
           await suspendre(0, "suite de la réponse");
           return;
         }

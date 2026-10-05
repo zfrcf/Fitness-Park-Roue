@@ -42,7 +42,8 @@ export async function POST(req: Request) {
       const conv = await lireConversation(conversationId);
       if (!conv) return NextResponse.json({ erreur: "Conversation introuvable." }, { status: 404 });
       titre = conv.conversation.titre;
-      const message = (corps.messageInitial ?? objectif).trim();
+      // Seul messageInitial ajoute un message ; objectif ne sert qu'au titre de la tâche.
+      const message = typeof corps.messageInitial === "string" ? corps.messageInitial.trim() : "";
       if (message) {
         await ajouterMessage(conversationId, { id: `tache-${id}`, role: "user", parts: [{ type: "text", text: message }] });
       }

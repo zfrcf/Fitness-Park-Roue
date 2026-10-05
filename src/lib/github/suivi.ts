@@ -1,6 +1,7 @@
 /** Rafraîchit l'état d'une compilation depuis GitHub et persiste le résultat. */
 import { lireCompilation, majCompilation, type Compilation } from "@/lib/db/compilations";
 import { artefacts, extraireArtefact, resumerJournal, supprimerBranche, trouverRun } from "./compilation";
+import { ErreurGitHub } from "./api";
 
 const TERMINAUX = new Set(["reussie", "echouee", "erreur"]);
 
@@ -47,19 +48,25 @@ export async function rafraichirCompilation(id: string): Promise<Compilation | n
         jarNom = null;
       }
     }
-    const statut = run.statut === "reussie" ? (jar ? "reussie" : "erreur") : "echouee";
-    const maj = await majCompilation(id, {
-      statut,
-      runId: run.id,
-      runUrl: run.url,
-      journal,
-      jarNom,
-      jarArtefactId: jar?.id ?? null,
-      erreur: statut === "erreur" ? "Compilation réussie mais aucun .jar publié (vérifiez build/libs)." : null,
-    });
+    const sansJournal = run.statut === "echouee" && !journalArt;
+    const statut = run.statut === "reussie" ? (jar ? "reussie" : "erreur") : sansJournal ? "erreur" : "echouee";
+    const erreur =
+      statut !== "erreur"
+        ? null
+        : !jar && run.statut === "reussie"
+          ? "Compilation réussie mais aucun .jar publié (vérifiez build/libs)."
+          : `Le run GitHub s'est terminé (${run.conclusion ?? "sans conclusion"}) avant l'étape de compilation : aucun journal publié. Consultez le lien du run puis relancez.`;
+    const maj = await majCompilation(id, { statut, runId: run.id, runUrl: run.url, journal, jarNom, jarArtefactId: jar?.id ?? null, erreur });
     void supprimerBranche(id);
     return maj ?? c;
   } catch (e) {
-    return (await majCompilation(id, { statut: "erreur", erreur: e instanceof Error ? e.message : "erreur GitHub" })) ?? c;
+    // Une erreur passagère (5xx, timeout, 403 rate-limit) ne doit pas figer la compilation en « erreur ».
+    const definitif = e instanceof ErreurGitHub && (e.statut === 401 || e.statut === 404 || (e.statut === 403 && !/rate limit|secondary|abuse/i.test(e.message)));
+    if (!definitif && age <= 40 * 60_000) {
+      console.warn("[compilation] sondage GitHub échoué, nouvel essai :", e instanceof Error ? e.message : e);
+      return c;
+    }
+    const message = definitif ? (e instanceof Error ? e.message : "erreur GitHub") : `Suivi GitHub impossible depuis plus de 40 min : ${e instanceof Error ? e.message : "erreur"}`;
+    return (await majCompilation(id, { statut: "erreur", erreur: message })) ?? c;
   }
 }

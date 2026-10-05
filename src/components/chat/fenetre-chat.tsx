@@ -92,21 +92,25 @@ export function FenetreChat({
   }, [sendMessage, conversationId, messagesInitiaux.length]);
 
   // Conversation pilotée par une tâche de fond : on suit la tâche et on recharge les messages ajoutés par le serveur.
+  const tacheId = tache?.id;
   useEffect(() => {
-    if (!tache) return;
+    if (!tacheId) return;
     let actif = true;
     const tic = async () => {
       try {
-        const rt = await fetch(`/api/taches/${tache.id}`, { cache: "no-store" });
+        const rt = await fetch(`/api/taches/${tacheId}`, { cache: "no-store" });
         if (rt.ok && actif) {
           const { tache: t } = (await rt.json()) as { tache: TachePublique };
-          setTache(t);
+          // Conserver l'objet précédent si identique (évite de recréer l'effet à chaque tic).
+          setTache((prev) => (prev && JSON.stringify(prev) === JSON.stringify(t) ? prev : t));
         }
-        if (occupe) return;
+        if (occupe || !actif) return;
         const rc = await fetch(`/api/conversations/${conversationId}`, { cache: "no-store" });
         if (!rc.ok || !actif) return;
         const { messages: serveur } = (await rc.json()) as { messages: MessageUI[] };
         setMessages((prev) => {
+          // Course persistance (onEnd) / premier sondage : ne pas remplacer par une liste plus courte.
+          if (serveur.length < prev.length && prev.at(-1)?.role === "assistant") return prev;
           const memeFin = prev.length === serveur.length && prev.at(-1)?.id === serveur.at(-1)?.id && texteDe(prev.at(-1)) === texteDe(serveur.at(-1));
           return memeFin ? prev : serveur;
         });
@@ -119,7 +123,7 @@ export function FenetreChat({
       actif = false;
       clearInterval(id);
     };
-  }, [tache?.id, tacheActive, occupe, conversationId, setMessages, tache]);
+  }, [tacheId, tacheActive, occupe, conversationId, setMessages]);
 
   // Défilement : on suit le bas tant que l'utilisateur n'a pas remonté. Tout geste vers le haut
   // (molette, doigt, barre) décolle immédiatement ; on recolle seulement une fois revenu tout en bas.
@@ -225,7 +229,7 @@ export function FenetreChat({
       const r = await fetch("/api/taches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, objectif: dernierUser ? dernierUser.parts.filter((p) => p.type === "text").map((p) => p.text).join("").slice(0, 500) : "Poursuivre le travail en cours", compiler: true, auto: true }),
+        body: JSON.stringify({ conversationId, objectif: dernierUser ? dernierUser.parts.filter((p) => p.type === "text").map((p) => p.text).join("").slice(0, 120) : "Poursuivre le travail en cours", compiler: true, auto: true }),
       });
       const j = (await r.json()) as { tache?: TachePublique; erreur?: string };
       if (!r.ok || !j.tache) throw new Error(j.erreur ?? "échec");

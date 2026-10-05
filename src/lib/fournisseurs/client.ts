@@ -19,9 +19,10 @@ export function adapterCorps(
   { raisonnement }: OptionsModele,
 ): Record<string, unknown> {
   const c = { ...corps };
-  // Filet de sécurité : jamais de `reasoning_content` dans l'historique envoyé
-  // (Groq le refuse : « property 'reasoning_content' is unsupported »).
-  if (Array.isArray(c.messages)) {
+  // Filet de sécurité : jamais de `reasoning_content` dans l'historique envoyé (Groq le refuse :
+  // « property 'reasoning_content' is unsupported »). On le CONSERVE pour NVIDIA/Kimi K3, dont la
+  // boucle d'appels d'outils (thinking forcé) a besoin du raisonnement intermédiaire. (#31)
+  if (f.famille !== "nvidia" && Array.isArray(c.messages)) {
     c.messages = (c.messages as unknown[]).map((m) => {
       if (!m || typeof m !== "object" || !("reasoning_content" in m)) return m;
       const { reasoning_content: _ignore, ...reste } = m as Record<string, unknown>;

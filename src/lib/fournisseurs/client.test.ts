@@ -19,8 +19,12 @@ describe("adapterCorps", () => {
     expect(adapterCorps(f("cloudflare"), {}, { raisonnement: "aucun" })).toMatchObject({ reasoning_effort: "low", max_tokens: 4096 });
     expect(adapterCorps(f("openrouter"), {}, { raisonnement: "aucun" })).toMatchObject({ reasoning: { enabled: false } });
   });
-  it("retire reasoning_content de l'historique pour tous", () => {
-    const r = adapterCorps(f("generique"), { messages: [{ role: "assistant", content: "x", reasoning_content: "y" }] }, { raisonnement: "aucun" });
-    expect((r.messages as Array<Record<string, unknown>>)[0]).toEqual({ role: "assistant", content: "x" });
+  it("retire reasoning_content de l'historique sauf chez NVIDIA (#31)", () => {
+    const msg = [{ role: "assistant", content: "x", reasoning_content: "y" }];
+    const generique = adapterCorps(f("generique"), { messages: [...msg] }, { raisonnement: "aucun" });
+    expect((generique.messages as Array<Record<string, unknown>>)[0]).toEqual({ role: "assistant", content: "x" });
+    // NVIDIA/Kimi K3 : le raisonnement intermédiaire est conservé pour la boucle d'outils.
+    const nvidia = adapterCorps(f("nvidia"), { messages: [...msg] }, { raisonnement: "aucun" });
+    expect((nvidia.messages as Array<Record<string, unknown>>)[0]).toHaveProperty("reasoning_content", "y");
   });
 });

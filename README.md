@@ -100,6 +100,7 @@ Le fichier `.env.example` est commenté ligne par ligne. Résumé :
 | `BRAVE_API_KEY` / `TAVILY_API_KEY` | non | moteurs de recherche de secours si DuckDuckGo est bloqué |
 | `GITHUB_REPO` / `GITHUB_TOKEN` | pour compiler | dépôt et jeton fin utilisés par la compilation GitHub Actions |
 | `PROVIDER_n_RPM` | non | requêtes par minute autorisées pour ce fournisseur (limiteur partagé entre chat et tâches ; défauts : NVIDIA 40, Groq 30, OpenRouter 20, Cloudflare 300) |
+| `REVEIL_TOKEN` | non | jeton protégeant `/api/taches/reveiller` (sinon la route reste ouverte mais verrouillée et idempotente) ; à répéter dans le secret GitHub Actions `REVEIL_TOKEN` |
 | `QSTASH_TOKEN` | non | jeton Upstash QStash pour relancer les tâches de fond (sinon relance interne et cron GitHub) |
 | `APP_URL` | non | URL publique, envoyée à OpenRouter dans `HTTP-Referer` |
 

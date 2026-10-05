@@ -12,6 +12,7 @@ import type { TachePublique } from "@/lib/db/taches";
 import type { EtatFournisseur, FournisseurPublic } from "@/lib/fournisseurs/types";
 import { formatDepuis, formatDureeRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ecrirePremierMessage } from "@/components/chat/utils";
 
 const SUGGESTIONS = [
   "Crée un mod Fabric pour Minecraft 26.3 qui ajoute une commande /heal, puis compile-le.",
@@ -78,7 +79,8 @@ export function Accueil() {
 
   function demarrer(t = texte) {
     const q = t.trim();
-    routeur.push(q ? `/chat?q=${encodeURIComponent(q)}` : "/chat");
+    if (q) ecrirePremierMessage(q);
+    routeur.push("/chat");
   }
 
   const actives = (taches ?? []).filter((t) => t.statut === "en_cours" || t.statut === "en_attente");

@@ -18,6 +18,7 @@ import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useReglages } from "./reglages-contexte";
 import { Saisie } from "./saisie";
+import { lirePremierMessage } from "./utils";
 
 const SUGGESTIONS = [
   "Résume cet article : https://fr.wikipedia.org/wiki/Fitness",
@@ -33,13 +34,10 @@ function texteDe(m: MessageUI | undefined): string {
 export function FenetreChat({
   conversationId,
   messagesInitiaux = [],
-  messageInitial,
   tacheInitiale,
 }: {
   conversationId: string;
   messagesInitiaux?: MessageUI[];
-  /** Premier message envoyé automatiquement à l'arrivée (depuis l'accueil). */
-  messageInitial?: string;
   /** Tâche de fond attachée à cette conversation : bandeau et mise à jour en direct. */
   tacheInitiale?: TachePublique;
 }) {
@@ -77,10 +75,13 @@ export function FenetreChat({
   // Premier message automatique (arrivée depuis l'accueil avec ?q=). Différé d'un tic : en
   // développement, React monte/démonte le composant deux fois et le premier envoi serait perdu.
   useEffect(() => {
-    if (!messageInitial || messageInitialEnvoye.current) return;
+    if (messagesInitiaux.length > 0 || messageInitialEnvoye.current) return;
     const t = setTimeout(() => {
+      if (messageInitialEnvoye.current) return;
+      const premier = lirePremierMessage(sessionStorage, Date.now());
       messageInitialEnvoye.current = true;
-      void sendMessage({ text: messageInitial }, { body: { rechercheWeb: false } });
+      if (!premier) return;
+      void sendMessage({ text: premier }, { body: { rechercheWeb: false } });
       if (!urlRemplacee.current) {
         urlRemplacee.current = true;
         window.history.replaceState(null, "", `/c/${conversationId}`);
@@ -88,7 +89,7 @@ export function FenetreChat({
       }
     }, 0);
     return () => clearTimeout(t);
-  }, [messageInitial, sendMessage, conversationId]);
+  }, [sendMessage, conversationId, messagesInitiaux.length]);
 
   // Conversation pilotée par une tâche de fond : on suit la tâche et on recharge les messages ajoutés par le serveur.
   useEffect(() => {

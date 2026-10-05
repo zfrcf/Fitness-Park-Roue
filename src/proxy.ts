@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { NOM_COOKIE, verifierJeton } from "@/lib/auth/session";
 
 /** Chemins accessibles sans session. */
-// /api/taches/executer vérifie lui-même son jeton interne ; /api/taches/reveiller est idempotent et sans donnée.
+// /api/taches/executer vérifie son jeton interne ; /api/taches/reveiller est idempotent, verrouillé, et exige REVEIL_TOKEN si défini.
 const PUBLICS = new Set(["/connexion", "/api/connexion", "/api/taches/executer", "/api/taches/reveiller"]);
 
 export async function proxy(request: NextRequest) {
@@ -28,8 +28,10 @@ export async function proxy(request: NextRequest) {
   }
 
   const url = new URL("/connexion", request.url);
-  const suivant = pathname + request.nextUrl.search;
-  if (suivant !== "/") url.searchParams.set("suivant", suivant);
+  // Uniquement un chemin interne simple (pas //evil ni /\evil) pour éviter une redirection ouverte.
+  if (/^\/(?![/\\])/.test(pathname) && pathname !== "/") {
+    url.searchParams.set("suivant", pathname + request.nextUrl.search);
+  }
   return NextResponse.redirect(url);
 }
 

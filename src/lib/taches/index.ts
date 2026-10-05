@@ -63,6 +63,8 @@ export async function executerTacheMaintenant(id: string): Promise<void> {
 
 /** Relance les tâches dues ou orphelines ; renvoie leurs identifiants. */
 export async function reveillerTaches(): Promise<string[]> {
+  // Verrou atomique : évite l'amplification (réveil appelé par le cron ET le sondage GET /api/taches).
+  if ((await getKV().incr("reveil:verrou", 20)) !== 1) return [];
   const liste = await tachesAReveiller();
   for (const t of liste) {
     if (t.statut === "en_cours") await majTache(t.id, { statut: "en_attente", battementA: null });
@@ -78,8 +80,7 @@ const CLE_MENAGE = "menage:branches:dernier";
 async function menageThrottle(): Promise<void> {
   try {
     const kv = getKV();
-    if (await kv.get<number>(CLE_MENAGE)) return; // un ménage récent tient encore
-    await kv.set(CLE_MENAGE, Date.now(), 30 * 60); // verrou 30 min
+    if ((await kv.incr(CLE_MENAGE, 30 * 60)) !== 1) return; // verrou atomique 30 min
     const r = await nettoyerBranchesCompilation();
     if (r.supprimees.length) console.warn(`[menage] branches supprimées : ${r.supprimees.join(", ")}`);
   } catch (e) {

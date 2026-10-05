@@ -15,7 +15,8 @@ jobs:
       - name: Appeler /api/taches/reveiller
         env:
           APP_URL: ${{ vars.APP_URL || 'https://fitness-park-roue.vercel.app' }}
+          REVEIL_TOKEN: ${{ secrets.REVEIL_TOKEN }}
         run: |
-          code=$(curl -sS -o /tmp/rep.json -w '%{http_code}' --max-time 50 "$APP_URL/api/taches/reveiller")
+          code=$(curl -sS -o /tmp/rep.json -w '%{http_code}' --max-time 50 -X POST ${REVEIL_TOKEN:+-H "Authorization: Bearer $REVEIL_TOKEN"} "$APP_URL/api/taches/reveiller")
           echo "HTTP $code : $(cat /tmp/rep.json)"
           test "$code" = "200"

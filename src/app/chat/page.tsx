@@ -7,14 +7,12 @@ function nouvelId() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 }
 
-/** Nouvelle conversation ; `?q=` envoie un premier message dès l'arrivée (depuis l'accueil). */
-export default async function PageNouvelleConversation({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
-  const { q } = await searchParams;
-  const messageInitial = typeof q === "string" ? q.slice(0, 20_000) : undefined;
+/** Nouvelle conversation ; le premier message éventuel est lu depuis sessionStorage (posé par l'accueil). */
+export default function PageNouvelleConversation() {
   const id = nouvelId();
   return (
     <Coque>
-      <FenetreChat key={id} conversationId={id} messageInitial={messageInitial} />
+      <FenetreChat key={id} conversationId={id} />
     </Coque>
   );
 }

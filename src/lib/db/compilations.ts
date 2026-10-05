@@ -45,6 +45,8 @@ export function versPublic(c: Compilation) {
     statut: c.statut as StatutCompilation,
     runUrl: c.runUrl,
     jarNom: c.jarNom,
+    /** Compilée sur cette machine (atelier local) : pas de lien GitHub, pas d'expiration du jar. */
+    locale: c.branche.startsWith("local/"),
     journal: c.journal,
     erreur: c.erreur,
     creeA: c.creeA.toISOString(),

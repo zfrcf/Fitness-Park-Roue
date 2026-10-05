@@ -6,7 +6,9 @@
 import { createHash } from "node:crypto";
 import { creerCompilation, majCompilation, type Compilation } from "@/lib/db/compilations";
 import { nomArchive } from "@/lib/fichiers/extraire";
-import { creerBranche, retirerReserves, validerFichiers } from "./compilation";
+import { creerBranche, resumerJournal, retirerReserves, validerFichiers } from "./compilation";
+import { brancheLocale, lancerCompilationLocale } from "@/lib/compilation/locale";
+import { modeLocal } from "@/lib/mode";
 
 export interface FichierSimple {
   chemin: string;
@@ -43,9 +45,14 @@ export async function lancerCompilationProjet(p: { conversationId: string; messa
     conversationId: p.conversationId.slice(0, 64),
     messageId: p.messageId.slice(0, 64),
     nom,
-    branche: `compilation/${id}`,
+    branche: modeLocal() ? brancheLocale(id) : `compilation/${id}`,
     nbFichiers: fichiers.length,
   });
+  if (modeLocal()) {
+    // Atelier local : gradle build sur cette machine, en arrière-plan (l'état évolue en base).
+    void lancerCompilationLocale(c, fichiers, { resumer: (j) => resumerJournal(j) });
+    return c;
+  }
   try {
     const b = await creerBranche(id, fichiers, nom);
     c = (await majCompilation(id, { brancheUrl: b.url })) ?? c;

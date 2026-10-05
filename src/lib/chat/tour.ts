@@ -25,6 +25,7 @@ import { creerModele } from "@/lib/fournisseurs/client";
 import { fournisseurs } from "@/lib/fournisseurs/registre";
 import type { Fournisseur } from "@/lib/fournisseurs/types";
 import { getKV } from "@/lib/kv";
+import { modeLocal } from "@/lib/mode";
 
 export interface OptionsTour {
   conversationId: string;
@@ -81,7 +82,9 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       "avec son chemin complet sur la ligne d'ouverture, par exemple ```java src/main/java/com/exemple/MonMod.java ou ```json fabric.mod.json. " +
       "Livre des projets complets et cohérents (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») : " +
       "l'utilisateur peut les télécharger un par un ou en archive .zip directement depuis la conversation, " +
-      "et compiler un projet Gradle (mod Minecraft) sur GitHub en un clic ; si la compilation automatique est activée, chaque réponse " +
+      (modeLocal()
+        ? "et compiler un projet Gradle (mod Minecraft) sur son ordinateur (gradle build) en un clic ; si la compilation automatique est activée, chaque réponse "
+        : "et compiler un projet Gradle (mod Minecraft) sur GitHub en un clic ; si la compilation automatique est activée, chaque réponse ") +
       "qui change un projet Gradle est compilée aussitôt et le résultat (journal d'erreurs) te revient dans la conversation. " +
       "Si l'utilisateur te renvoie un journal d'erreurs de compilation, corrige la cause en ne touchant qu'aux fichiers concernés. " +
       INSTRUCTION_MODIFICATIONS +

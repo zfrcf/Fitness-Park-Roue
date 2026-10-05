@@ -6,10 +6,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { CompilationPublique } from "@/lib/db/compilations";
 import { formatHeure } from "@/lib/format";
+import { LOCAL } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
 const LIBELLES: Record<CompilationPublique["statut"], string> = {
-  en_attente: "En file d'attente sur GitHub Actions…",
+  en_attente: LOCAL ? "En file d'attente (gradle build)…" : "En file d'attente sur GitHub Actions…",
   en_cours: "Compilation en cours…",
   reussie: "Compilation réussie",
   echouee: "Compilation échouée",
@@ -33,7 +34,7 @@ export function CarteCompilation({
         body: JSON.stringify({
           conversationId: initiale.conversationId,
           objectif: "Corriger le projet jusqu'à une compilation réussie",
-          messageInitial: `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${initiale.journal ?? ""}\n\`\`\``,
+          messageInitial: `La compilation a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${initiale.journal ?? ""}\n\`\`\``,
           compiler: true,
         }),
       });
@@ -88,7 +89,7 @@ export function CarteCompilation({
           {/* Les artefacts GitHub expirent après 14 jours : au-delà, on n'affiche plus un bouton
               actif qui renverrait un 502, mais un libellé « expiré ». (#44) */}
           {c.statut === "reussie" &&
-            (new Date().getTime() - new Date(c.creeA).getTime() > 14 * 24 * 3600_000 ? (
+            (!c.locale && new Date().getTime() - new Date(c.creeA).getTime() > 14 * 24 * 3600_000 ? (
               <span className="text-xs text-muted-foreground">Artefact expiré (plus de 14 jours) : relancez la compilation.</span>
             ) : (
               <Button size="sm" nativeButton={false} render={<a href={`/api/compilations/${c.id}/jar`} download />}>
@@ -102,7 +103,7 @@ export function CarteCompilation({
                 variant="outline"
                 onClick={() =>
                   onDemanderCorrection(
-                    `La compilation sur GitHub a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
+                    `La compilation a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
                   )
                 }
               >
@@ -174,7 +175,7 @@ export function useCompilations(conversationId: string | undefined, messageId: s
         const c = j.compilation;
         setListe((l) => [c, ...l]);
         if (c.statut === "erreur") toast.error(c.erreur ?? "Envoi impossible.");
-        else toast.message("Projet envoyé sur GitHub, compilation lancée.");
+        else toast.message(LOCAL ? "Compilation lancée sur cet ordinateur (gradle build)." : "Projet envoyé sur GitHub, compilation lancée.");
       } else toast.error(j.erreur ?? "Compilation impossible.");
     } catch {
       toast.error("Le serveur ne répond pas.");
@@ -190,7 +191,7 @@ export function useCompilations(conversationId: string | undefined, messageId: s
 export function BoutonCompiler({ onClick, occupe }: { onClick: () => void; occupe: boolean }) {
   return (
     <Button size="sm" onClick={onClick} disabled={occupe}>
-      {occupe ? <Loader2 className="animate-spin" /> : <Hammer />} Compiler sur GitHub
+      {occupe ? <Loader2 className="animate-spin" /> : <Hammer />} {LOCAL ? "Compiler (gradle build)" : "Compiler sur GitHub"}
     </Button>
   );
 }

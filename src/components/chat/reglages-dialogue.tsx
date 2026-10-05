@@ -164,7 +164,7 @@ export function ReglagesDialogue() {
               <div className="flex flex-col gap-1">
                 <Label htmlFor="compilation-auto">Compilation automatique</Label>
                 <p className="text-xs text-muted-foreground">
-                  Dès qu&apos;une réponse crée ou modifie un projet Gradle (mod Minecraft), la compilation GitHub est lancée sans cliquer. Le résultat s&apos;affiche sous la réponse.
+                  Dès qu&apos;une réponse crée ou modifie un projet Gradle (mod Minecraft), la compilation est lancée sans cliquer. Le résultat s&apos;affiche sous la réponse.
                 </p>
               </div>
               <Switch id="compilation-auto" checked={brouillon.compilationAuto} onCheckedChange={(v) => setBrouillon({ ...brouillon, compilationAuto: v })} />

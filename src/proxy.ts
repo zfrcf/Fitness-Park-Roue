@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { NOM_COOKIE, verifierJeton } from "@/lib/auth/session";
+import { modeLocal } from "@/lib/mode";
+import { requeteLocaleSure } from "@/lib/auth/local";
 
 /** Chemins accessibles sans session. */
 // /api/taches/executer vérifie son jeton interne ; /api/taches/reveiller est idempotent, verrouillé, et exige REVEIL_TOKEN si défini.
@@ -7,6 +9,16 @@ const PUBLICS = new Set(["/connexion", "/api/connexion", "/api/taches/executer",
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Atelier local : application personnelle lancée par « atelier ui », serveur lié à 127.0.0.1
+  // uniquement. Pas de mot de passe (la page de connexion renvoie à l'accueil).
+  // Sans mot de passe, il faut empêcher un site ouvert dans le navigateur de piloter l'application
+  // (une compilation exécute du code) : hôte local exigé (anti-rebinding DNS) et requêtes
+  // intersites refusées (anti-CSRF).
+  if (modeLocal()) {
+    if (!requeteLocaleSure(request)) return new NextResponse("Requête refusée (atelier local).", { status: 403 });
+    return pathname === "/connexion" ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
+  }
 
   const connecte = await verifierJeton(request.cookies.get(NOM_COOKIE)?.value);
 

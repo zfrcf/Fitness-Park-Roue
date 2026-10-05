@@ -170,7 +170,7 @@ describe("moteur des tâches", () => {
       await executerTranche(d, "t1");
     }
     expect(m.taches.get("t1")!.statut).toBe("echouee");
-    const corrections = m.conversations.get("c1")!.filter((x) => x.role === "user" && (x.parts[0] as { text?: string }).text?.includes("compilation sur GitHub a échoué"));
+    const corrections = m.conversations.get("c1")!.filter((x) => x.role === "user" && (x.parts[0] as { text?: string }).text?.includes("La compilation a échoué"));
     expect(corrections.length).toBe(1); // exactement une correction tentée (pas zéro)
   });
 

@@ -10,6 +10,7 @@ import { getKV } from "@/lib/kv";
 import { nettoyerBranchesCompilation } from "@/lib/github/menage";
 import { executerTranche, type DepsMoteur, type EtatCompilation } from "./moteur";
 import { planificateurHTTP } from "./planificateur";
+import { modeLocal } from "@/lib/mode";
 
 function versEtat(c: { id: string; statut: string; journal: string | null; jarNom: string | null; erreur: string | null; runUrl: string | null }): EtatCompilation {
   return { id: c.id, statut: c.statut as EtatCompilation["statut"], journal: c.journal, jarNom: c.jarNom, erreur: c.erreur, runUrl: c.runUrl };
@@ -65,8 +66,8 @@ export async function reveillerTaches(): Promise<string[]> {
     if (t.statut === "en_cours") await majTache(t.id, { statut: "en_attente", battementA: null });
     await planificateurHTTP.programmer(t.id, 0);
   }
-  // Ménage des branches de compilation orphelines, au plus une fois toutes les 30 min.
-  void menageThrottle();
+  // Ménage des branches de compilation orphelines, au plus une fois toutes les 30 min (inutile en local).
+  if (!modeLocal()) void menageThrottle();
   return liste.map((t) => t.id);
 }
 

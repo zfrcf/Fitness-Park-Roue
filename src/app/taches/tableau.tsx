@@ -80,7 +80,7 @@ function Formulaire({ onCreee }: { onCreee: () => void }) {
           <Plus className="size-4" /> Nouvelle tâche
         </CardTitle>
         <CardDescription>
-          Décrivez l&apos;objectif comme dans le chat. La tâche enchaîne génération, compilation sur GitHub et corrections sans vous,
+          Décrivez l&apos;objectif comme dans le chat. La tâche enchaîne génération, compilation et corrections sans vous,
           chaque tâche prend le premier fournisseur libre : plusieurs tâches tournent en parallèle.
         </CardDescription>
       </CardHeader>

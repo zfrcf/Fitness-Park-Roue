@@ -4,6 +4,7 @@
  * par la chaîne GitHub Actions de l'application.
  */
 import type { KV } from "@/lib/kv";
+import { modeLocal } from "@/lib/mode";
 
 export interface VersionsMinecraft {
   jeu: string;
@@ -158,7 +159,7 @@ function blocNeoForge(v: VersionsMinecraft, loader: Loader): string {
   const nom = loader === "neoforge" ? "NeoForge" : "Forge";
   return `<contexte_minecraft date="${date}" loader="${loader}">
 Demande ${nom} (pas Fabric) : je ne t'impose pas de modèle Fabric. Versions${v.verifie ? " (vérifiées automatiquement)" : " (valeurs de repli, à vérifier : le réseau n'a pas répondu)"} : Minecraft ${v.jeu} · Java ${v.java}${v.neoforge ? ` · NeoForge ${v.neoforge}` : ""}.
-Chaîne de compilation : l'utilisateur peut cliquer « Compiler sur GitHub » ; GitHub Actions lance « gradle build » avec JDK 25. Un projet ${nom} est basé sur Gradle, donc compilable, à condition de fournir un projet Gradle complet (build.gradle, settings.gradle, gradle.properties, sources) à la racine, un seul source set src/main, chaque fichier dans son bloc de code avec son chemin.
+${modeLocal() ? "Chaîne de compilation : l'application compile le projet sur l'ordinateur de l'utilisateur avec « gradle build » (JDK 25)." : "Chaîne de compilation : l'utilisateur peut cliquer « Compiler sur GitHub » ; GitHub Actions lance « gradle build » avec JDK 25."} Un projet ${nom} est basé sur Gradle, donc compilable, à condition de fournir un projet Gradle complet (build.gradle, settings.gradle, gradle.properties, sources) à la racine, un seul source set src/main, chaque fichier dans son bloc de code avec son chemin.
 - Ne fournis NI gradlew, NI gradle-wrapper, NI fichier sous .github/ (déjà présents), NI icône.
 - Vérifie toi-même la version exacte de ${nom} pour Minecraft ${v.jeu} (${nom === "NeoForge" ? "maven.neoforged.net" : "files.minecraftforge.net"}) ; n'invente pas de numéro de version.
 - Cible Java ${v.java} (release ${v.java}). Si tu n'es pas sûr d'un nom de classe ou d'une API pour cette version, dis-le plutôt que d'inventer.
@@ -191,7 +192,7 @@ export function blocContexteMinecraft(v: VersionsMinecraft, loader: Loader = "fa
 Versions actuelles${v.verifie ? " (vérifiées automatiquement)" : " (valeurs de repli, à vérifier : le réseau n'a pas répondu)"} : Minecraft ${v.jeu} · Fabric Loader ${v.loader} · Fabric API ${apiAffichee} · Loom ${v.loom} · Java ${v.java}${v.neoforge ? ` · NeoForge ${v.neoforge}` : ""}.
 Depuis la 26.x, Minecraft n'utilise plus la numérotation 1.21.x ; la dernière version 1.x est la 1.21.11 (Java 21), les suivantes sont 26.1, 26.2, 26.3… (Java 25).
 
-Chaîne de compilation disponible : l'utilisateur peut cliquer « Compiler sur GitHub » sous tes fichiers. Le projet est compilé par GitHub Actions avec JDK 25 et Gradle 9.7.1 (commande : gradle build). Règles impératives pour que ça compile :
+${modeLocal() ? "Chaîne de compilation disponible : le projet est compilé sur l'ordinateur de l'utilisateur avec JDK 25 et Gradle 9.7.1 (commande : gradle build), automatiquement après ta réponse ou par le bouton « Compiler » ; le journal d'erreurs te revient." : "Chaîne de compilation disponible : l'utilisateur peut cliquer « Compiler sur GitHub » sous tes fichiers. Le projet est compilé par GitHub Actions avec JDK 25 et Gradle 9.7.1 (commande : gradle build)."} Règles impératives pour que ça compile :
 - Projet Fabric avec Loom, un seul source set (src/main/java et src/main/resources). Reprends le modèle ci-dessous tel quel pour build.gradle, settings.gradle et gradle.properties : il a été vérifié par compilation réelle.
 ${regleMappings}
 ${regleApi}

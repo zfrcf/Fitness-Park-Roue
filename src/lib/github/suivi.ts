@@ -2,6 +2,7 @@
 import { lireCompilation, majCompilation, type Compilation } from "@/lib/db/compilations";
 import { artefacts, extraireArtefact, resumerJournal, supprimerBranche, trouverRun } from "./compilation";
 import { ErreurGitHub } from "./api";
+import { estLocale, rafraichirLocale } from "@/lib/compilation/locale";
 
 const TERMINAUX = new Set(["reussie", "echouee", "erreur"]);
 
@@ -9,6 +10,7 @@ export async function rafraichirCompilation(id: string): Promise<Compilation | n
   const c = await lireCompilation(id);
   if (!c) return null;
   if (TERMINAUX.has(c.statut)) return c;
+  if (estLocale(c)) return rafraichirLocale(c);
   // Un run qui n'apparaît pas au bout de 10 minutes : GitHub n'a pas déclenché le workflow.
   const age = Date.now() - c.creeA.getTime();
   try {

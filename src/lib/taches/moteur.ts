@@ -81,7 +81,7 @@ export async function ordonnerPourTache(deps: DepsMoteur, tacheId: string): Prom
 export { empreinteProjet };
 
 export function texteCorrection(journal: string): string {
-  return `La compilation sur GitHub a échoué. Corrige le projet. ${INSTRUCTION_MODIFICATIONS} Personne ne répondra à une question : si tu hésites sur une API, choisis la plus probable et livre les corrections. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
+  return `La compilation a échoué. Corrige le projet. ${INSTRUCTION_MODIFICATIONS} Personne ne répondra à une question : si tu hésites sur une API, choisis la plus probable et livre les corrections. Journal :\n\n\`\`\`text\n${journal}\n\`\`\``;
 }
 
 type Fin = "continuer" | "arreter";

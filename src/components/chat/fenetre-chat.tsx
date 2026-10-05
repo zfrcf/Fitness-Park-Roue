@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { ArrowDown, Bot, ListChecks, Loader2 } from "lucide-react";
 import Link from "next/link";
 import type { TachePublique } from "@/lib/db/taches";
+import { detecterTacheLongue } from "@/lib/taches/detecter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
@@ -44,6 +45,8 @@ export function FenetreChat({
 }) {
   const [saisie, setSaisie] = useState("");
   const [tache, setTache] = useState<TachePublique | undefined>(tacheInitiale);
+  const [lancementTache, setLancementTache] = useState(false);
+  const [suggestionRejetee, setSuggestionRejetee] = useState<string>("");
   const messageInitialEnvoye = useRef(false);
   const { reglages } = useReglages();
   const urlRemplacee = useRef(messagesInitiaux.length > 0);
@@ -204,6 +207,37 @@ export function FenetreChat({
 
   const dernierIndex = messages.length - 1;
 
+  // Proposition de tâche de fond : dernier message utilisateur « travaille jusqu'à… », au repos, sans tâche active.
+  const dernierUser = [...messages].reverse().find((m) => m.role === "user");
+  const dernierUserId = dernierUser?.id ?? "";
+  const suggestionTache =
+    !occupe &&
+    !tacheActive &&
+    conversationId !== "sans-id" &&
+    !!dernierUser &&
+    suggestionRejetee !== dernierUserId &&
+    detecterTacheLongue(dernierUser.parts.filter((p) => p.type === "text").map((p) => p.text).join(""));
+
+  async function lancerEnTache() {
+    setLancementTache(true);
+    try {
+      const r = await fetch("/api/taches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, objectif: dernierUser ? dernierUser.parts.filter((p) => p.type === "text").map((p) => p.text).join("").slice(0, 500) : "Poursuivre le travail en cours", compiler: true }),
+      });
+      const j = (await r.json()) as { tache?: TachePublique; erreur?: string };
+      if (!r.ok || !j.tache) throw new Error(j.erreur ?? "échec");
+      setTache(j.tache);
+      setSuggestionRejetee(dernierUserId);
+      toast.success("Tâche de fond lancée : elle continue même si vous fermez la page.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Impossible de lancer la tâche.");
+    } finally {
+      setLancementTache(false);
+    }
+  }
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {tache && (
@@ -289,6 +323,22 @@ export function FenetreChat({
         >
           <ArrowDown className="size-4" />
         </Button>
+      )}
+      {suggestionTache && (
+        <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 px-4 pb-1 text-xs">
+          <div className="flex flex-1 flex-wrap items-center gap-2 rounded-lg border bg-primary/5 px-3 py-2">
+            <ListChecks className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              Cette demande peut tourner en <strong>tâche de fond</strong> : elle continue même si vous fermez la page, et compile en boucle jusqu&apos;au résultat.
+            </span>
+            <Button size="xs" disabled={lancementTache} onClick={() => void lancerEnTache()}>
+              {lancementTache ? <Loader2 className="animate-spin" /> : <ListChecks />} Lancer en tâche de fond
+            </Button>
+            <Button size="xs" variant="ghost" aria-label="Ignorer" onClick={() => setSuggestionRejetee(dernierUserId)}>
+              Ignorer
+            </Button>
+          </div>
+        </div>
       )}
       <Saisie
         complement={messages.length > 0 ? <span className="tabular-nums" title="taille estimée de l'historique envoyé au modèle">contexte ≈ {formatNombre(tokensContexte)} tokens</span> : undefined}

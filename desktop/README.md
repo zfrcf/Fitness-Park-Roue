@@ -1,12 +1,42 @@
 # Atelier IA local (Ubuntu)
 
-Version **sur ordinateur** du chat IA : tout se passe dans le terminal, les fichiers produits par
-le modèle sont **écrits directement dans le dossier de votre projet**, et la compilation se fait
-**en local avec `gradle build`** (JDK 25 et Gradle 9.7.1 installés par l'atelier). En cas d'échec,
-le journal est renvoyé au modèle qui corrige, en boucle, jusqu'au `.jar`.
+Version **sur ordinateur** du chat IA, avec deux façons de travailler :
 
-Aucun navigateur, aucun serveur, aucun GitHub Actions : seul l'appel au modèle IA passe par
-internet (NVIDIA, Groq, OpenRouter, Cloudflare… avec bascule automatique de l'un à l'autre).
+- **`atelier ui`** : la **même interface que la version web** (conversations, fichiers, réglages,
+  tâches de fond, état des fournisseurs), dans une fenêtre d'application. Les compilations se
+  font **sur votre ordinateur avec `gradle build`**, le `.jar` se télécharge d'un clic.
+- **`atelier` en console** : les fichiers produits par le modèle sont **écrits directement dans
+  le dossier de votre projet**, compilés en local, corrigés en boucle jusqu'au `.jar`.
+
+Dans les deux cas, JDK 25 et Gradle 9.7.1 sont installés par l'atelier, sans sudo. Seul l'appel au
+modèle IA passe par internet (NVIDIA, Groq, OpenRouter, Cloudflare… avec bascule automatique).
+
+## Interface graphique (`atelier ui`)
+
+```bash
+atelier ui               # démarre le serveur local si besoin et ouvre la fenêtre
+```
+
+Ou « **Atelier IA** » dans le menu des applications. La fenêtre s'ouvre en mode application de
+Chrome/Chromium/Brave/Edge s'il est installé, sinon dans le navigateur par défaut.
+
+- Le serveur écoute **uniquement sur 127.0.0.1** (port 3210, ou le suivant s'il est pris) : pas de
+  mot de passe, rien n'est exposé au réseau. Les requêtes venant d'autres sites sont refusées.
+- Il utilise les clés de `atelier config` ; après un changement, `atelier ui` redémarre le serveur
+  tout seul.
+- Conversations et réglages : `~/.local/share/atelier/ui` (base locale). Projets compilés :
+  `~/.local/share/atelier/compilations`.
+- Node (LTS) est téléchargé dans `~/.local/share/atelier/node` si votre système n'en a pas de
+  récent (somme SHA-256 vérifiée, sans sudo).
+
+| Commande | Effet |
+|---|---|
+| `atelier ui --arreter` | arrêter le serveur |
+| `atelier ui --redemarrer` | redémarrer le serveur |
+| `atelier ui --sans-fenetre` | démarrer sans ouvrir de fenêtre (adresse affichée) |
+| `atelier ui --port 4000` | autre port |
+
+Journal du serveur : `~/.local/share/atelier/ui/ui.log`.
 
 ## Installation (sans sudo, sans pilote)
 
@@ -28,6 +58,9 @@ Seul prérequis : `python3` 3.10 ou plus récent, présent d'office sur Ubuntu 2
 | JDK Temurin 25 | `~/.local/share/atelier/jdk` | téléchargé depuis Adoptium, somme SHA-256 vérifiée |
 | Gradle 9.7.1 | `~/.local/share/atelier/gradle` | téléchargé depuis services.gradle.org, somme SHA-256 vérifiée |
 | Commande | `~/.local/bin/atelier` | ajoutée au `PATH` via `~/.bashrc` si besoin |
+| Interface graphique | `~/.local/share/atelier/web` | application livrée dans l'archive (dossier `web/`) |
+| Node LTS | `~/.local/share/atelier/node` | seulement si le système n'a pas Node 20.9+ ; nodejs.org, SHA-256 vérifié |
+| Entrée de menu | `~/.local/share/applications/atelier-ia.desktop` | « Atelier IA » |
 
 L'environnement Python est créé par la première méthode qui fonctionne sur votre machine :
 `python3 -m venv` ; sinon (Ubuntu sans le paquet `python3-venv`, cas courant sans sudo) un venv
@@ -35,7 +68,8 @@ sans `ensurepip` complété par `get-pip.py` ; sinon un dossier de bibliothèque
 `pip.pyz`. Les trois méthodes ont été testées, et `sudo` n'est jamais appelé.
 
 Le JDK et Gradle peuvent être (ré)installés seuls : `atelier installer` (`--forcer` pour
-retélécharger). Désinstallation : `./desinstaller.sh` (vos projets sont conservés).
+retélécharger). Désinstallation : `./desinstaller.sh` (vos projets, votre configuration et vos
+conversations sont conservés ; `--tout` retire aussi configuration et conversations).
 
 ## Configurer les clés API
 
@@ -138,3 +172,13 @@ mon-mod/
 ~/.local/share/atelier/venv/bin/pip install -e ".[dev]"
 ~/.local/share/atelier/venv/bin/python -m pytest
 ```
+
+L'interface est l'application Next.js du dépôt, construite en mode atelier local
+(`NEXT_PUBLIC_ATELIER_LOCAL=1` : serveur autonome, compilation par `gradle build`, accès limité à
+127.0.0.1). Pour la reconstruire dans `desktop/web/` (après `npm ci` à la racine du dépôt) :
+
+```bash
+python3 desktop/outils/construire_web.py
+```
+
+La construction est refusée si une valeur secrète de `.env.local` s'y retrouve.

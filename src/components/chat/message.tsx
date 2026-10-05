@@ -254,7 +254,7 @@ function PanneauFichiersAvecCompilation({
   );
   const gradle = estProjetGradle(affiches) && !!conversationId && !!projet;
   const liste = useMemo(() => affiches.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [affiches]);
-  const { liste: compilations, compiler, lancement, enCours } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
+  const { liste: compilations, compiler, lancement, enCours, majCompilation } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
   const titre = complet ? `Projet complet : ${complet.length} fichiers` : undefined;
   const nbModifies = modifies?.size ?? fichiers.length;
   const sousTitre = complet && nbModifies > 0 ? `${nbModifies} modifié${nbModifies > 1 ? "s" : ""} dans cette réponse` : complet ? "aucun fichier modifié dans cette réponse" : undefined;
@@ -290,7 +290,7 @@ function PanneauFichiersAvecCompilation({
         sousTitre={sousTitre}
         modifies={modifies}
         actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
-        pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} />}
+        pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} onMaj={majCompilation} />}
       />
     </>
   );

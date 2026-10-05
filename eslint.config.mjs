@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Interface de l'atelier construite (python3 desktop/outils/construire_web.py).
+    "desktop/web/**",
   ]),
 ]);
 

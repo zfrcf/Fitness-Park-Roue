@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ReglagesDialogue } from "@/components/chat/reglages-dialogue";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { LOCAL } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
 const LIENS = [
@@ -50,14 +51,17 @@ export function Entete({ children }: { children?: React.ReactNode }) {
       <div className="ml-auto flex items-center gap-1">
         <ReglagesDialogue />
         <ThemeToggle />
-        <Tooltip>
-          <TooltipTrigger
-            render={<Button variant="ghost" size="icon" aria-label="Se déconnecter" onClick={deconnecter} />}
-          >
-            <LogOut className="size-4" />
-          </TooltipTrigger>
-          <TooltipContent>Se déconnecter</TooltipContent>
-        </Tooltip>
+        {/* Atelier local : pas de mot de passe, donc pas de déconnexion. */}
+        {!LOCAL && (
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button variant="ghost" size="icon" aria-label="Se déconnecter" onClick={deconnecter} />}
+            >
+              <LogOut className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>Se déconnecter</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </header>
   );

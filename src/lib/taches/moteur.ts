@@ -12,6 +12,7 @@ import { validerFichiers } from "@/lib/github/compilation";
 import type { Fournisseur } from "@/lib/fournisseurs/types";
 import type { KV } from "@/lib/kv";
 import type { Tache } from "@/lib/db/taches";
+import { modeLocal } from "@/lib/mode";
 
 export const BUDGET_TRANCHE_MS = 270_000;
 /** Plafond de tokens (entrée + sortie) par tâche avant arrêt anti-emballement. */
@@ -308,7 +309,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await suspendre(0, "aucune modification : correction");
           return;
         }
-        await deps.majTache(tacheId, { etape: `envoi de ${projet.length} fichiers à GitHub` });
+        await deps.majTache(tacheId, { etape: modeLocal() ? `compilation de ${projet.length} fichiers (gradle build)` : `envoi de ${projet.length} fichiers à GitHub` });
         try {
           compilation = await deps.lancerCompilation({ conversationId: t.conversationId, messageId: dernier.id, fichiers: fichiersProjet });
         } catch (e) {
@@ -317,14 +318,14 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await terminer("echouee", "compilation impossible", { erreur: msg });
           return;
         }
-        await deps.majTache(tacheId, { compilationId: compilation.id, empreinteCompilee: empreinte, etape: "compilation sur GitHub" });
+        await deps.majTache(tacheId, { compilationId: compilation.id, empreinteCompilee: empreinte, etape: modeLocal() ? "compilation (gradle build)" : "compilation sur GitHub" });
         await deps.journaliser(tacheId, `compilation lancée (${projet.length} fichiers)`);
       }
 
       // 3. Suivi de la compilation jusqu'à son terme (ou jusqu'à la fin de la tranche).
       while (compilation && (compilation.statut === "en_attente" || compilation.statut === "en_cours")) {
         if (restant() < INTERVALLE_SONDAGE_MS + 5_000) {
-          await suspendre(20_000, "compilation sur GitHub (suivi)");
+          await suspendre(modeLocal() ? 5_000 : 20_000, modeLocal() ? "compilation (suivi)" : "compilation sur GitHub (suivi)");
           return;
         }
         await attendre(INTERVALLE_SONDAGE_MS);

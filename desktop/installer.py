@@ -156,10 +156,31 @@ def ajouter_au_path(binaire: Path) -> None:
     print(f'Ouvrez un nouveau terminal (ou lancez : export PATH="{binaire}:$PATH") pour utiliser « atelier ».')
 
 
+def installer_interface(donnees: Path, lanceur: Path) -> bool:
+    """Interface graphique : copie l'application (web/) et installe Node + l'entrée de menu."""
+    source = ICI / "web"
+    if not (source / "server.js").is_file():
+        jaune("Interface graphique absente de cette archive : seule la console est installée.")
+        return False
+    bleu("Interface graphique (application locale + Node LTS, sans sudo)")
+    lancer([str(lanceur), "ui", "--arreter"], check=False, capture_output=True)
+    cible = donnees / "web"
+    tmp = donnees / "web.nouveau"
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(source, tmp, symlinks=True)
+    shutil.rmtree(cible, ignore_errors=True)
+    tmp.rename(cible)
+    if lancer([str(lanceur), "ui", "--preparer"]).returncode != 0:
+        rouge("Préparation de l'interface incomplète (voir ci-dessus). Relancez : atelier ui")
+        return False
+    return True
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Installe l'atelier IA local sans droits administrateur.")
     p.add_argument("--importer", metavar="FICHIER_ENV", help="importer les PROVIDER_n_* d'un .env (ex. .env.local de la version web)")
     p.add_argument("--sans-jdk", action="store_true", help="ne pas télécharger JDK et Gradle maintenant (« atelier installer » plus tard)")
+    p.add_argument("--sans-ui", action="store_true", help="ne pas installer l'interface graphique (Node + application)")
     # Option de test : force une méthode de repli (sans-ensurepip, cible).
     p.add_argument("--mode", choices=["sans-ensurepip", "cible"], help=argparse.SUPPRESS)
     a = p.parse_args()
@@ -194,12 +215,20 @@ def main() -> int:
     if a.importer:
         lancer([str(lanceur), "config", "--importer", a.importer], check=False)
 
+    ui_ok = False
+    if not a.sans_ui:
+        ui_ok = installer_interface(donnees, lanceur)
+
     ajouter_au_path(binaire)
     print()
     vert("Installation terminée.")
     print("  1. Configurer une clé API :   atelier config")
     print("  2. Vérifier :                 atelier doctor   puis   atelier tester")
-    print("  3. Créer un projet :          atelier nouveau mon-mod")
+    if ui_ok:
+        print("  3. Ouvrir l'interface :       atelier ui   (ou « Atelier IA » dans le menu des applications)")
+        print("     En console :               atelier nouveau mon-mod")
+    else:
+        print("  3. Créer un projet :          atelier nouveau mon-mod")
     return 0
 
 

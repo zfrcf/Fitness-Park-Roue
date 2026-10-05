@@ -10,6 +10,7 @@
   atelier doctor               vérifier l'installation
   atelier tester               tester chaque fournisseur
   atelier projets              lister les projets
+  atelier ui                   ouvrir l'interface graphique (la même que la version web)
 """
 
 from __future__ import annotations
@@ -523,6 +524,62 @@ def cmd_installer(a: argparse.Namespace) -> int:
     return 0
 
 
+def _barre_progression():
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
+
+    prog = Progress(TextColumn("{task.description}"), BarColumn(), DownloadColumn(), TransferSpeedColumn(), console=console)
+    taches: dict[str, int] = {}
+
+    def progression(libelle: str, recu: int, total: int) -> None:
+        if libelle not in taches:
+            taches[libelle] = prog.add_task(libelle, total=total or None)
+        prog.update(taches[libelle], completed=recu)
+
+    return prog, progression
+
+
+def cmd_ui(a: argparse.Namespace) -> int:
+    from . import ui
+    from .installation import ErreurInstallation
+
+    try:
+        if a.arreter:
+            console.print("[green]✔ Serveur arrêté.[/green]" if ui.arreter() else "Le serveur ne tournait pas.")
+            return 0
+        if ui.trouver_node() is None:
+            prog, progression = _barre_progression()
+            with prog:
+                ui.installer_node(progression)
+        if a.reconstruire:
+            depot = Path(a.reconstruire).expanduser().resolve() if isinstance(a.reconstruire, str) else ui.ICI.parent.parent
+            ui.arreter()
+            console.print(f"Construction de l'application depuis {depot} (plusieurs minutes)…")
+            ui.construire_depuis_sources(depot, ui.trouver_node())  # type: ignore[arg-type]
+            console.print("[green]✔ Application reconstruite.[/green]")
+        if ui.trouver_app() is None:
+            console.print("[red]Application graphique absente.[/red] Relancez l'installation depuis l'archive : python3 installer.py")
+            return 1
+        raccourci = ui.creer_raccourci()
+        if a.preparer:
+            console.print(f"[green]✔ Node[/green] : {ui.trouver_node()}")
+            console.print(f"[green]✔ Entrée de menu[/green] : {raccourci} (« Atelier IA » dans vos applications)")
+            return 0
+        if a.redemarrer:
+            ui.arreter()
+        with console.status("[bold]Démarrage de l'interface…[/bold]"):
+            etat, comment = ui.assurer_serveur(a.port)
+    except (ErreurInstallation, OSError, subprocess.CalledProcessError) as e:
+        console.print(f"[red]Interface impossible à lancer : {e}[/red]")
+        return 1
+    message = {"deja": "déjà démarrée", "demarre": "démarrée", "redemarre": "redémarrée (configuration ou version changée)"}[comment]
+    console.print(f"[green]✔ Interface {message}[/green] : [bold]{etat.url}[/bold]")
+    if not a.sans_fenetre:
+        ouvert = ui.ouvrir_fenetre(etat.url)
+        console.print(f"  Fenêtre : {ouvert}. Si rien ne s'ouvre, collez l'adresse dans votre navigateur.")
+    console.print("  Arrêter : [bold]atelier ui --arreter[/bold]   ·   Journal : " + str(ui.fichier_journal()))
+    return 0
+
+
 def cmd_doctor(_a: argparse.Namespace) -> int:
     from .installation import diagnostic
 
@@ -654,6 +711,14 @@ def construire_parseur() -> argparse.ArgumentParser:
     sp.add_parser("doctor", help="vérifier l'installation").set_defaults(func=cmd_doctor)
     sp.add_parser("tester", help="tester chaque fournisseur").set_defaults(func=cmd_tester)
     sp.add_parser("projets", help="lister les projets").set_defaults(func=cmd_projets)
+    s = sp.add_parser("ui", help="interface graphique (fenêtre, comme la version web)")
+    s.add_argument("--port", type=int, default=3210)
+    s.add_argument("--arreter", action="store_true", help="arrêter le serveur de l'interface")
+    s.add_argument("--redemarrer", action="store_true", help="redémarrer le serveur")
+    s.add_argument("--preparer", action="store_true", help="installer Node et l'entrée de menu, sans ouvrir")
+    s.add_argument("--sans-fenetre", action="store_true", help="démarrer le serveur sans ouvrir de fenêtre")
+    s.add_argument("--reconstruire", nargs="?", const=True, metavar="DEPOT", help=argparse.SUPPRESS)
+    s.set_defaults(func=cmd_ui)
     return p
 
 

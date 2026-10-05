@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, Bot, CheckCircle2, ChevronDown, Download, ExternalLink, Hammer, Loader2, Wrench } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { CompilationPublique } from "@/lib/db/compilations";
@@ -20,9 +20,12 @@ const LIBELLES: Record<CompilationPublique["statut"], string> = {
 export function CarteCompilation({
   compilation: initiale,
   onDemanderCorrection,
+  onMaj,
 }: {
   compilation: CompilationPublique;
   onDemanderCorrection?: (texte: string) => void;
+  /** Prévient la liste d'un nouvel état (sinon le bouton « Compiler » resterait occupé). */
+  onMaj?: (c: CompilationPublique) => void;
 }) {
   const [tacheEnCours, setTacheEnCours] = useState(false);
   async function lancerTache() {
@@ -34,7 +37,7 @@ export function CarteCompilation({
         body: JSON.stringify({
           conversationId: initiale.conversationId,
           objectif: "Corriger le projet jusqu'à une compilation réussie",
-          messageInitial: `La compilation a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${initiale.journal ?? ""}\n\`\`\``,
+          messageInitial: `La compilation a échoué. Corrige le projet : blocs modif pour les fichiers existants, fichier entier seulement pour un nouveau fichier. Journal :\n\n\`\`\`text\n${initiale.journal ?? ""}\n\`\`\``,
           compiler: true,
         }),
       });
@@ -59,16 +62,19 @@ export function CarteCompilation({
         const r = await fetch(`/api/compilations/${c.id}`, { cache: "no-store" });
         if (!r.ok) return;
         const j = (await r.json()) as { compilation: CompilationPublique };
-        if (actif) setC(j.compilation);
+        if (actif) {
+          setC(j.compilation);
+          onMaj?.(j.compilation);
+        }
       } catch {
         /* nouvel essai au prochain tour */
       }
-    }, 10_000);
+    }, LOCAL ? 3_000 : 10_000); // en local, gradle build ne dure souvent que quelques secondes
     return () => {
       actif = false;
       clearInterval(t);
     };
-  }, [c.id, terminal]);
+  }, [c.id, terminal, onMaj]);
 
   const Icone = c.statut === "reussie" ? CheckCircle2 : c.statut === "echouee" || c.statut === "erreur" ? AlertCircle : Loader2;
 
@@ -103,7 +109,7 @@ export function CarteCompilation({
                 variant="outline"
                 onClick={() =>
                   onDemanderCorrection(
-                    `La compilation a échoué. Corrige le projet et renvoie chaque fichier modifié en entier, avec son chemin. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
+                    `La compilation a échoué. Corrige le projet : blocs modif pour les fichiers existants, fichier entier seulement pour un nouveau fichier. Journal :\n\n\`\`\`text\n${c.journal}\n\`\`\``,
                   )
                 }
               >
@@ -184,8 +190,9 @@ export function useCompilations(conversationId: string | undefined, messageId: s
     }
   }
 
+  const majCompilation = useCallback((c: CompilationPublique) => setListe((l) => l.map((x) => (x.id === c.id ? c : x))), []);
   const enCours = liste.some((c) => c.statut === "en_attente" || c.statut === "en_cours");
-  return { liste, compiler, lancement, enCours };
+  return { liste, compiler, lancement, enCours, majCompilation };
 }
 
 export function BoutonCompiler({ onClick, occupe }: { onClick: () => void; occupe: boolean }) {
@@ -196,12 +203,20 @@ export function BoutonCompiler({ onClick, occupe }: { onClick: () => void; occup
   );
 }
 
-export function ListeCompilations({ liste, onDemanderCorrection }: { liste: CompilationPublique[]; onDemanderCorrection?: (texte: string) => void }) {
+export function ListeCompilations({
+  liste,
+  onDemanderCorrection,
+  onMaj,
+}: {
+  liste: CompilationPublique[];
+  onDemanderCorrection?: (texte: string) => void;
+  onMaj?: (c: CompilationPublique) => void;
+}) {
   if (!liste.length) return null;
   return (
     <div className="flex flex-col gap-2 border-t p-2">
       {liste.map((c) => (
-        <CarteCompilation key={c.id} compilation={c} onDemanderCorrection={onDemanderCorrection} />
+        <CarteCompilation key={c.id} compilation={c} onDemanderCorrection={onDemanderCorrection} onMaj={onMaj} />
       ))}
     </div>
   );

@@ -57,6 +57,11 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   sans sudo par `install.sh` → `installer.py` (venv, ou venv sans ensurepip + get-pip, ou pip.pyz --target) puis `atelier installer`
   dans `~/.local/share/atelier`, correction en boucle jusqu'au jar. Clés dans
   `~/.config/atelier/config.env` (600). Tests : `pytest` dans `desktop/` (indépendants de vitest).
+  **`atelier ui`** (`desktop/atelier/ui.py`) : cette application web en mode local (`src/lib/mode.ts`,
+  `NEXT_PUBLIC_ATELIER_LOCAL=1` → `output: "standalone"`), construite par `desktop/outils/construire_web.py`
+  dans `desktop/web/` (ignoré par git), lancée avec Node sur 127.0.0.1 sans mot de passe (`src/lib/auth/local.ts` :
+  anti-rebinding DNS + anti-CSRF ; jamais actif si `VERCEL`). Compilation locale : `src/lib/compilation/locale.ts`
+  (`gradle build`, espace par conversation, branche `local/<id>`). Réveil des tâches : `src/instrumentation.ts`.
 - `src/app/` — pages (`/` accueil, `/chat` nouvelle conversation, `/c/[id]`, `/taches`, `/etat`)
   et routes API. `src/components/` — UI.
 

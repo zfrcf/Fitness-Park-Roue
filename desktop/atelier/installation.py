@@ -205,6 +205,12 @@ def diagnostic() -> list[Diagnostic]:
     )
     for p in problemes:
         out.append(Diagnostic("Fournisseur ignoré", False, p))
+    from . import ui
+
+    node = ui.trouver_node()
+    out.append(Diagnostic("Node (interface)", node is not None, str(node) if node else "absent : lancez « atelier ui »"))
+    app = ui.trouver_app()
+    out.append(Diagnostic("Interface graphique", app is not None, f"{app} (version {ui.version_app(app)})" if app else "absente : réinstallez depuis l'archive"))
     return out
 
 

@@ -39,27 +39,35 @@ export async function lireLiensDuMessage(
   if (liens.length === 0) return [];
   const resultats = await Promise.all(
     liens.map(async (url): Promise<PageLuePart> => {
-      const cle = `lien:${url}`;
-      const cache = await params.kv.get<ResultatLecture>(cle);
-      const r = cache ?? (await lirePage(url, params.options));
-      if (!cache && r.ok) await params.kv.set(cle, r, TTL_CACHE);
-      if (!r.ok) {
-        const p: PageLuePart = { url, titre: url, source: "direct", caracteres: 0, ok: false, erreur: r.erreur };
+      try {
+        const cle = `lien:${url}`;
+        // Une panne du cache KV ne doit pas faire échouer la lecture : on relit la page sans cache. (#28)
+        const cache = await params.kv.get<ResultatLecture>(cle).catch(() => null);
+        const r = cache ?? (await lirePage(url, params.options));
+        if (!cache && r.ok) await params.kv.set(cle, r, TTL_CACHE).catch(() => {});
+        if (!r.ok) {
+          const p: PageLuePart = { url, titre: url, source: "direct", caracteres: 0, ok: false, erreur: r.erreur };
+          params.onPage?.(p);
+          return p;
+        }
+        const c = await condenserPage(r.contenu, params.budgetParPage, params.resumer);
+        const p: PageLuePart = {
+          url,
+          titre: r.titre,
+          source: r.source,
+          caracteres: r.caracteres,
+          ok: true,
+          contenu: c.contenu,
+          condense: c.condense || c.tronque,
+        };
+        params.onPage?.(p);
+        return p;
+      } catch (e) {
+        // Un lien qui échoue de façon inattendue est signalé seul, sans couler toute la réponse.
+        const p: PageLuePart = { url, titre: url, source: "direct", caracteres: 0, ok: false, erreur: e instanceof Error ? e.message : "lecture impossible" };
         params.onPage?.(p);
         return p;
       }
-      const c = await condenserPage(r.contenu, params.budgetParPage, params.resumer);
-      const p: PageLuePart = {
-        url,
-        titre: r.titre,
-        source: r.source,
-        caracteres: r.caracteres,
-        ok: true,
-        contenu: c.contenu,
-        condense: c.condense || c.tronque,
-      };
-      params.onPage?.(p);
-      return p;
     }),
   );
   return resultats;

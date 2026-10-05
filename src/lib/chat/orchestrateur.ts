@@ -63,6 +63,8 @@ const PREFIXE_CONV = "conv:fournisseur:";
 const TTL_CONV = 30 * 24 * 3600;
 const PREFIXE_RESUME = "conv:resume:";
 const TTL_RESUME = 30 * 24 * 3600;
+/** Délai maximal d'un résumé/condensation de contexte : sans lui, un fournisseur lent bloquait tout. (#17) */
+const TIMEOUT_RESUME_MS = 90_000;
 /** Fournisseurs ayant refusé les outils (400) : on n'insiste pas pendant une heure. */
 const sansOutils = new Map<string, number>();
 export function fournisseurSansOutils(id: string, maintenant = Date.now()): boolean {
@@ -208,6 +210,10 @@ function creerResumeur(deps: DepsOrchestrateur, f: Fournisseur, conversationId: 
     const cle = `${PREFIXE_RESUME}${conversationId}:${hashTexte(corps)}`;
     const cache = await deps.kv.get<string>(cle);
     if (cache) return cache;
+    // Toujours borner le résumé dans le temps, même quand un signal utilisateur est fourni : on combine
+    // les deux (annulation utilisateur OU délai maximal). Un timeout classe « temporaire » (bascule). (#17)
+    const delai = AbortSignal.timeout(TIMEOUT_RESUME_MS);
+    const abortSignal = signal ? AbortSignal.any([signal, delai]) : delai;
     const r = await generateText({
       model: deps.creerModele(f, { raisonnement: "aucun" }),
       system: INSTRUCTION_RESUME,
@@ -215,7 +221,7 @@ function creerResumeur(deps: DepsOrchestrateur, f: Fournisseur, conversationId: 
       temperature: 0.2,
       maxOutputTokens: Math.max(200, Math.min(budgetTokens, 2000)),
       maxRetries: 0,
-      abortSignal: signal,
+      abortSignal,
     });
     const texte = r.text.trim();
     if (!texte) throw new Error("résumé vide");
@@ -575,13 +581,15 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
     // Réponse vide (le raisonnement a tout consommé) ou dégénérée (suite de caractères répétés,
     // défaut passager de certaines infrastructures) : un nouvel essai sur le même fournisseur,
     // puis bascule, sans marquer le fournisseur indisponible.
-    const vide = !t.erreur && t.texte.length === 0 && texte.length === 0 && (t.usage?.sortie ?? 0) > 0;
+    // Réponse vide OU blanche (espaces seuls), que l'usage de sortie soit rapporté ou non : on ne
+    // l'accepte jamais comme un succès (bulle vide persistée, fournisseur « collant »). (#16)
+    const vide = !t.erreur && t.texte.trim().length === 0 && texte.trim().length === 0;
     const degenere = !t.erreur && estDegenere(t.texte);
     if (vide || degenere) {
-      const raison = degenere ? "réponse dégénérée (caractères répétés)" : "réponse vide (raisonnement trop long)";
+      const raison = degenere ? "réponse dégénérée (caractères répétés)" : "réponse vide";
       log(`[chat] ${f.nom} : ${raison}, ${t.usage?.sortie ?? 0} tokens de sortie`);
-      if (degenere) {
-        // Le texte dégénéré ne doit pas rester affiché : on régénère.
+      if (degenere || texte.length > 0) {
+        // Le texte dégénéré (ou les espaces émis) ne doivent pas rester affichés : on régénère.
         regenerations++;
         texte = "";
         continuation = false;

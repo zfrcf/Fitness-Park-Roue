@@ -168,6 +168,15 @@ describe("rotation des fournisseurs", () => {
     expect(await kv.get("fournisseur:etat:a")).toBeNull();
   });
 
+  it("#16 : une réponse blanche sans token de sortie n'est pas prise pour un succès (bascule)", async () => {
+    const r = await executer([fournisseur("A", "blanc"), fournisseur("B", "ok")]);
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse entière du fournisseur ok.");
+    expect(r.meta.fournisseur).toBe("B");
+    expect(serveur.appels.filter((a) => a.scenario === "blanc")).toHaveLength(2); // essai sur place puis bascule
+    expect(r.bascules[0].raison).toMatch(/réponse vide/);
+  });
+
   it("apprend la limite de sortie (OTPM) et évite ensuite le fournisseur, ou plafonne s'il est seul", async () => {
     const r1 = await executer([fournisseur("A", "otpm"), fournisseur("B", "ok")]);
     expect(r1.meta.fournisseur).toBe("B");

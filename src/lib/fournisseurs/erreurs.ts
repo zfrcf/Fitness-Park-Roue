@@ -62,18 +62,25 @@ function lireCorps(corps: unknown): { message?: string; code?: string | number }
 const RE_CONTEXTE =
   /context[_ ]length|context window|too (long|large)|maximum (context|number of tokens)|token limit|reduce the length|exceeds the|prompt is too long|input too long|max_tokens.*(exceed|greater)|request too large/i;
 
+/** 400 propres à un fournisseur (paramètre non supporté, modèle retiré) : basculer, ne pas arrêter la rotation. */
+const RE_REQUETE_FOURNISSEUR =
+  /reasoning_effort|unsupported|not supported|does not support|unknown (field|parameter|argument)|unrecognized|deprecated|decommission|retired|no longer (available|supported)|has been (removed|retired|decommissioned)|invalid model|model .*(not found|does not exist|unavailable)/i;
+
 export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClassee {
-  // Annulation
-  if (err instanceof Error && (err.name === "AbortError" || /aborted|abort/i.test(err.message))) {
-    return { categorie: "abandon", message: "Requête annulée", reessaiA: maintenant, basculer: false };
-  }
-  if (err instanceof Error && (err.name === "TimeoutError" || /timeout|timed out/i.test(err.message))) {
+  // Délai dépassé D'ABORD : AbortSignal.timeout() lève une erreur dont le message contient
+  // « aborted » (« The operation was aborted due to timeout ») ; sans cet ordre, notre propre
+  // délai serait pris pour une annulation utilisateur et ne basculerait pas (#17).
+  if (err instanceof Error && (err.name === "TimeoutError" || /timed out|timeout|aborted due to timeout/i.test(err.message))) {
     return {
       categorie: "temporaire",
       message: "Délai d'attente dépassé",
       reessaiA: maintenant + 2 * 60_000,
       basculer: true,
     };
+  }
+  // Annulation explicite par l'utilisateur (AbortController.abort()).
+  if (err instanceof Error && (err.name === "AbortError" || /\baborted\b/i.test(err.message))) {
+    return { categorie: "abandon", message: "Requête annulée", reessaiA: maintenant, basculer: false };
   }
 
   let statut: number | undefined;
@@ -135,8 +142,11 @@ export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClas
     return { categorie: "contexte", statut, code, message, reessaiA: maintenant, basculer: false };
   }
   if (statut !== undefined && statut >= 400 && statut < 500) {
-    // Modèle introuvable (404) ou requête refusée : inutile d'insister sur ce fournisseur.
-    return { categorie: "requete", statut, code, message, reessaiA: maintenant + 10 * 60_000, basculer: statut === 404 };
+    // Un 400 PROPRE À CE FOURNISSEUR (paramètre non supporté comme reasoning_effort, modèle retiré)
+    // doit faire basculer vers le suivant, pas arrêter toute la rotation (#15). Un 400 générique
+    // (notre requête est malformée partout) ne bascule pas.
+    const specifiqueFournisseur = statut === 404 || RE_REQUETE_FOURNISSEUR.test(message);
+    return { categorie: "requete", statut, code, message, reessaiA: maintenant + 10 * 60_000, basculer: specifiqueFournisseur };
   }
   // Inconnu : on considère temporaire et on bascule.
   return { categorie: "temporaire", statut, code, message, reessaiA, basculer: true };

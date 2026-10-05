@@ -22,6 +22,7 @@ export type Scenario =
   | "cf-3036" // Cloudflare quota journalier
   | "long" // réponse coupée par max_tokens (finish_reason length), puis la suite en continuation
   | "vide" // ne produit que du raisonnement : aucun texte, finish_reason length
+  | "blanc" // réponse blanche (espaces seuls) et AUCUN token de sortie rapporté (finish stop)
   | "degenere" // première réponse « !!!!!!!! », les suivantes normales
   | "otpm" // Groq : refuse si max_tokens > 1000 (OTPM), sinon répond normalement
   | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
@@ -166,6 +167,14 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
         sse();
         res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: { reasoning: "Je réfléchis… " }, finish_reason: null }] })}\n\n`);
         res.end(finChunk(id, 30, 4096, "length"));
+        return;
+      }
+      case "blanc": {
+        // Réponse blanche (espaces) sans usage de sortie : ne doit pas être prise pour un succès (#16).
+        if (nonStream) return reponseJson("   \n ", 30, 0);
+        sse();
+        res.write(chunk(id, "   \n "));
+        res.end(finChunk(id, 30, 0));
         return;
       }
       case "402":

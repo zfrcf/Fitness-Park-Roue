@@ -67,6 +67,12 @@ describe("classerErreur", () => {
     expect(e.categorie).toBe("requete");
     expect(e.basculer).toBe(false);
   });
+  it("#15 : un 400 propre au fournisseur (paramètre non supporté, modèle retiré) bascule", () => {
+    const re = classerErreur(api(400, { error: { message: "Unsupported parameter: 'reasoning_effort' is not supported with this model" } }), T0);
+    expect(re).toMatchObject({ categorie: "requete", basculer: true });
+    const retire = classerErreur(api(400, { error: { message: "The model `old-model` has been decommissioned" } }), T0);
+    expect(retire).toMatchObject({ categorie: "requete", basculer: true });
+  });
   it("401 → auth, bascule", () => {
     expect(classerErreur(api(401, { error: { message: "Invalid API Key" } }), T0)).toMatchObject({ categorie: "auth", basculer: true });
   });
@@ -77,6 +83,15 @@ describe("classerErreur", () => {
     const t = new Error("x");
     t.name = "TimeoutError";
     expect(classerErreur(t, T0)).toMatchObject({ categorie: "temporaire", basculer: true });
+  });
+  it("#17 : un AbortSignal.timeout (message « aborted due to timeout ») est temporaire, pas une annulation", () => {
+    const t = new Error("The operation was aborted due to timeout");
+    t.name = "TimeoutError";
+    expect(classerErreur(t, T0)).toMatchObject({ categorie: "temporaire", basculer: true });
+    // Même avec le nom générique AbortError mais un message de timeout → temporaire.
+    const t2 = new Error("The operation was aborted due to timeout");
+    t2.name = "AbortError";
+    expect(classerErreur(t2, T0).categorie).toBe("temporaire");
   });
   it("réseau", () => {
     expect(classerErreur(new TypeError("fetch failed"), T0)).toMatchObject({ categorie: "temporaire", basculer: true });

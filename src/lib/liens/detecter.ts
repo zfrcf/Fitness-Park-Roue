@@ -1,11 +1,22 @@
 const RE_URL = /\bhttps?:\/\/[^\s<>"'`\]}]+/gi;
 export const MAX_LIENS_PAR_MESSAGE = 5;
 
-/** Extrait les URL http(s) d'un texte, sans doublon, ponctuation finale retirée. */
+/**
+ * Retire les blocs de code (```…``` clôturés ou non) et le code en ligne (`…`) : une URL dans un
+ * journal de compilation Gradle collé en ```text ne doit pas être lue comme un lien du message (#22).
+ */
+function sansCode(texte: string): string {
+  return texte
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/```[\s\S]*$/g, " ") // bloc de code non refermé (journal tronqué)
+    .replace(/`[^`\n]*`/g, " ");
+}
+
+/** Extrait les URL http(s) d'un texte (hors blocs de code), sans doublon, ponctuation finale retirée. */
 export function detecterLiens(texte: string): string[] {
   const vus = new Set<string>();
   const resultat: string[] = [];
-  for (const brut of texte.match(RE_URL) ?? []) {
+  for (const brut of sansCode(texte).match(RE_URL) ?? []) {
     let u = brut;
     // Ponctuation finale et parenthèses fermantes non appariées (lien Wikipédia « (homonymie) » conservé).
     for (;;) {

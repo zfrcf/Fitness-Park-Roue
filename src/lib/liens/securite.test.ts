@@ -14,6 +14,14 @@ describe("detecterLiens", () => {
   it("ignore les textes sans lien", () => {
     expect(detecterLiens("bonjour example.com sans schéma")).toEqual([]);
   });
+  it("#22 : ignore les URL dans un bloc de code (journal Gradle), garde celles hors code", () => {
+    const t = "Vois https://example.com/ok puis le journal :\n```text\nErreur, voir https://docs.gradle.org/erreur et http://ne-pas-lire.test/x\n```\nmerci.";
+    expect(detecterLiens(t)).toEqual(["https://example.com/ok"]);
+    // Bloc de code non refermé (journal tronqué) : les URL internes restent ignorées.
+    expect(detecterLiens("```text\nhttps://interne.test/x")).toEqual([]);
+    // Code en ligne aussi.
+    expect(detecterLiens("essaie `https://enligne.test/y` ok")).toEqual([]);
+  });
 });
 
 describe("adressePublique", () => {

@@ -53,6 +53,34 @@ describe("extraireFichiers", () => {
     expect(estProjetGradle(f)).toBe(true);
     expect(nomArchive(f)).toBe("monmod");
   });
+  it("#38 : titres numérotés, « **Fichier : `x`** », chemin annoté « (corrigé) »", () => {
+    const md = [
+      "### 1. `build.gradle` (corrigé)",
+      "```groovy",
+      "plugins { id 'fabric-loom' }",
+      "```",
+      "",
+      "**Fichier : `src/main/java/com/ex/Mod.java`**",
+      "```java",
+      "class Mod {}",
+      "```",
+      "",
+      "```groovy settings.gradle (inchangé)",
+      "rootProject.name = 'x'",
+      "```",
+    ].join("\n");
+    expect(extraireFichiers(md).map((x) => x.chemin)).toEqual(["build.gradle", "src/main/java/com/ex/Mod.java", "settings.gradle"]);
+  });
+
+  it("#38 : une fence externe plus longue englobe les fences internes (README avec ```bash)", () => {
+    const md = ["````markdown README.md", "# Mon mod", "", "```bash", "./gradlew build", "```", "", "Fin.", "````"].join("\n");
+    const f = extraireFichiers(md);
+    expect(f.map((x) => x.chemin)).toEqual(["README.md"]);
+    expect(f[0].contenu).toContain("```bash");
+    expect(f[0].contenu).toContain("./gradlew build");
+    expect(f[0].contenu).toContain("Fin.");
+  });
+
   it("refuse les chemins dangereux", () => {
     const md = "```txt ../../etc/passwd\nx\n```\n\n```txt /abs/olu.txt\ny\n```";
     expect(extraireFichiers(md)).toEqual([]);

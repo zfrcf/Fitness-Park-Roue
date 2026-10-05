@@ -31,7 +31,8 @@ export function cheminDepuisInfo(info: string): { langue?: string; chemin?: stri
   if (titre) return { langue: t.split(/[\s:]/)[0] || undefined, chemin: nettoyerChemin(titre[1]) ?? undefined };
   const deuxPoints = /^([\w+#-]+):(\S+)$/.exec(t);
   if (deuxPoints) return { langue: deuxPoints[1], chemin: nettoyerChemin(deuxPoints[2]) ?? undefined };
-  const parties = t.split(/\s+/);
+  // On ignore une annotation entre parenthèses (« ```groovy build.gradle (corrigé) »). (#38)
+  const parties = t.split(/\s+/).filter((p) => !/^\(.*\)$/.test(p));
   if (parties.length >= 2) {
     const chemin = nettoyerChemin(parties[parties.length - 1]);
     if (chemin) return { langue: parties[0], chemin };
@@ -47,8 +48,14 @@ export function cheminDepuisInfo(info: string): { langue?: string; chemin?: stri
 
 /** Repère un nom de fichier dans la ligne non vide précédant un bloc. */
 function cheminDepuisLigne(ligne: string): string | null {
-  const l = ligne.trim().replace(/^#{1,6}\s*/, "").replace(/^[-*]\s+/, "").replace(/:$/, "");
-  const m = /^(?:\*\*|`)?(?:fichier|file)?\s*:?\s*(?:\*\*|`)?\s*([^\s*`]+)\s*(?:\*\*|`)?\s*(?:\(.*\))?$/i.exec(l);
+  const l = ligne
+    .trim()
+    .replace(/^#{1,6}\s*/, "") // titre markdown
+    .replace(/^[-*]\s+/, "") // puce
+    .replace(/^\d+[.)]\s*/, "") // énumération « 1. », « 2) » (#38)
+    .replace(/:$/, "");
+  // Marqueurs **…**, `…` (éventuellement combinés : « **Fichier : `x`** ») et annotation « (corrigé) ». (#38)
+  const m = /^[*`\s]*(?:fichier|file)?\s*:?\s*[*`\s]*([^\s*`]+)[*`\s]*(?:\(.*\))?$/i.exec(l);
   if (!m) return null;
   return nettoyerChemin(m[1]);
 }
@@ -71,9 +78,16 @@ function analyserBlocs(lignes: string[]): BlocFichier[] {
     }
     const cloture = ouverture[1];
     const { langue, chemin: cheminInfo } = cheminDepuisInfo(ouverture[2]);
+    // La clôture est une ligne de fences NUE (rien après) du même caractère et d'au moins la même
+    // longueur : une fence interne avec langue (```bash dans un README) n'est pas prise pour une
+    // clôture, et une fence externe plus longue (````) englobe les fences internes ```. (#38)
+    const estCloture = (ligne: string): boolean => {
+      const m = /^\s*(`{3,}|~{3,})\s*$/.exec(ligne);
+      return !!m && m[1][0] === cloture[0] && m[1].length >= cloture.length;
+    };
     let j = i + 1;
     const corps: string[] = [];
-    while (j < lignes.length && !lignes[j].trim().startsWith(cloture)) {
+    while (j < lignes.length && !estCloture(lignes[j])) {
       corps.push(lignes[j]);
       j++;
     }

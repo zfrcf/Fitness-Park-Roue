@@ -186,6 +186,18 @@ describe("rotation des fournisseurs", () => {
     expect(serveur.appels[0].corps.max_tokens).toBe(1000);
   });
 
+  it("limite de débit courte : attend puis retente sur place au lieu de basculer", async () => {
+    const r = await executer([fournisseur("A", "429-court"), fournisseur("B", "ok")], { attenteMaxReessaiMs: 1_200 });
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse entière du fournisseur 429-court.");
+    expect(r.meta.fournisseur).toBe("A");
+    expect(r.bascules).toHaveLength(0);
+    expect(serveur.appels.map((a) => a.scenario)).toEqual(["429-court", "429-court"]);
+    expect(r.chunks.some((c) => c.type === "data-info" && /limite de débit/.test((c as { data: { texte: string } }).data.texte))).toBe(true);
+    // A n'est pas marqué épuisé : il a répondu.
+    expect((await kv.get<{ statut: string }>("fournisseur:etat:a"))?.statut).toBe("disponible");
+  });
+
   it("bascule sur 429 avant tout texte et mémorise l'heure de réessai", async () => {
     const t0 = Date.now();
     const r = await executer([fournisseur("A", "429"), fournisseur("B", "ok")]);

@@ -21,6 +21,8 @@ import type { Bascule, MessageUI, MetaMessage, Reglages } from "./types";
 export interface DepsOrchestrateur {
   /** Ne pas remettre en tête le fournisseur « collant » de la conversation. */
   ignorerPreference?: boolean;
+  /** Attente maximale avant un nouvel essai sur place après une limite de débit courte (15 s par défaut). */
+  attenteMaxReessaiMs?: number;
   fournisseurs: Fournisseur[];
   kv: KV;
   creerModele: (f: Fournisseur, opts: { raisonnement: NiveauRaisonnement }) => LanguageModel;
@@ -619,6 +621,18 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
       tentes.delete(f.id);
       const reduit = { ...f, contexte: Math.max(1024, Math.floor(Math.min(f.contexte, t.tokensEstimes || f.contexte) * 0.6)) };
       deps = { ...deps, fournisseurs: deps.fournisseurs.map((x) => (x.id === f.id ? reduit : x)) };
+      continue;
+    }
+
+    // Limite de débit courte (par minute, sans quota journalier) : mieux vaut attendre quelques
+    // secondes et retenter sur place que de basculer vers un fournisseur plus faible.
+    const delaiReessai = e.reessaiA - maintenant;
+    if (e.categorie === "quota" && delaiReessai > 0 && delaiReessai <= 60_000 && !reessaisMemeFournisseur.has(f.id) && !p.signal?.aborted) {
+      reessaisMemeFournisseur.add(f.id);
+      const attente = Math.max(1_000, Math.min(delaiReessai, deps.attenteMaxReessaiMs ?? 15_000));
+      writer.write({ type: "data-info", data: { texte: `${f.nom} : limite de débit, nouvel essai dans ${Math.ceil(attente / 1000)} s` }, transient: true });
+      await new Promise<void>((r) => setTimeout(r, attente));
+      tentes.delete(f.id);
       continue;
     }
 

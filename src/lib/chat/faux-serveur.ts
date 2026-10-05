@@ -9,6 +9,7 @@ export type Scenario =
   | "ok" // réponse normale en flux
   | "ok-continue" // réponse normale ; si continuation demandée, renvoie la suite
   | "429" // limite de débit avec retry-after
+  | "429-court" // limite de débit de 1 s au premier appel, puis réponse normale
   | "429-quotidien" // quota journalier OpenRouter
   | "402"
   | "401"
@@ -111,6 +112,15 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
           { error: { message: "Rate limit reached for model. Limit 8000, Used 7900, Requested 500. Please try again in 2m0s.", type: "tokens", code: "rate_limit_exceeded" } },
           { "retry-after": "120", "x-ratelimit-reset-tokens": "2m0s", "x-ratelimit-remaining-tokens": "0", "x-ratelimit-limit-tokens": "8000" },
         );
+      case "429-court": {
+        const n = appels.filter((a) => a.scenario === "429-court").length;
+        if (n <= 1) return json(429, { error: { message: "Too Many Requests" } }, { "retry-after": "1" });
+        if (nonStream) return reponseJson("Réponse entière du fournisseur 429-court.", 30, 7);
+        sse();
+        res.write(chunk(id, "Réponse entière du fournisseur 429-court."));
+        res.end(finChunk(id, 30, 7));
+        return;
+      }
       case "429-quotidien":
         return json(429, { error: { code: 429, message: "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day", metadata: {} } });
       case "cf-3036":

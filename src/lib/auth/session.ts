@@ -24,9 +24,10 @@ function depuisBase64url(s: string): Uint8Array<ArrayBuffer> {
 
 function secret(): string {
   const s = process.env.SESSION_SECRET;
-  if (s && s.length >= 16) return s;
-  // Repli : dérivé du mot de passe. Fonctionnel, mais SESSION_SECRET est recommandé.
-  const p = process.env.APP_PASSWORD;
+  const p = process.env.APP_PASSWORD ?? "";
+  // La clé est TOUJOURS liée au mot de passe : changer APP_PASSWORD révoque les sessions existantes
+  // (sinon un SESSION_SECRET fixe les laissait valides 30 jours malgré le changement). (#35)
+  if (s && s.length >= 16) return `${s}:${p}`;
   if (!p) throw new Error("APP_PASSWORD et SESSION_SECRET sont absents.");
   return `derive:${p}`;
 }

@@ -249,7 +249,7 @@ function PanneauFichiersAvecCompilation({
   const liste = useMemo(() => affiches.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [affiches]);
   const { liste: compilations, compiler, lancement, enCours } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
   const titre = complet ? `Projet complet : ${complet.length} fichiers` : undefined;
-  const sousTitre = complet ? `${fichiers.length} modifié${fichiers.length > 1 ? "s" : ""} dans cette réponse` : undefined;
+  const sousTitre = complet && fichiers.length > 0 ? `${fichiers.length} modifié${fichiers.length > 1 ? "s" : ""} dans cette réponse` : complet ? "aucun fichier modifié dans cette réponse" : undefined;
   if (!gradle) return <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} />;
   return (
     <PanneauFichiers
@@ -361,7 +361,9 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : null}
-        {fichiers.length > 0 && (
+        {/* Panneau projet : visible dès que CE message a des fichiers OU que le projet accumulé en a
+            un (fourni au dernier message), même si la dernière réponse est de la prose. (#39) */}
+        {(fichiers.length > 0 || (projet && projet.length > 0)) && (
           <PanneauFichiersAvecCompilation fichiers={fichiers} projet={projet} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">

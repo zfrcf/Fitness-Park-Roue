@@ -11,3 +11,4 @@
 - 05:46 — Check-in : audit en phase « Vérifier » (9 explorations faites). Attente du backlog pour appliquer les correctifs. Tree propre, 11 commits poussés.
 - 06:20 — CLAUDE.md ajouté (architecture/conventions). Audit toujours en vérification (29 agents). Attente de la complétion.
 - 08:14 — BUG utilisateur « chemin réservé .github/workflows/build.yml » : retrait silencieux des chemins réservés (validation + creerBranche, 2 points d'entrée) + plafond 2 M tokens/tâche. commit 5a17cc2. 133 tests.
+- 08:20 — DEMANDE utilisateur : mode automatique des tâches (corriger jusqu'au jar sans limite, borné par 2 M tokens). DB+API+moteur+UI+chat. commit 874eb0c. 134 tests. Migration PGlite OK.

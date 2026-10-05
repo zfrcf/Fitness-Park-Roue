@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getKV } from "@/lib/kv";
-import { blocContexteMinecraft, detecterDemandeMod, jeuNonObfusque, versionsMinecraft, type VersionsMinecraft } from "./contexte";
+import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, extraireVersion, jeuNonObfusque, versionDepuisProjet, versionsMinecraft, type VersionsMinecraft } from "./contexte";
 
 /** Extrait le contenu d'un bloc de code « ```lang chemin » du contexte. */
 function fichier(bloc: string, chemin: string): string {
@@ -19,6 +19,38 @@ describe("detecterDemandeMod", () => {
     expect(detecterDemandeMod("un mod fabric pour la 26.3")).toEqual({ mod: true, version: "26.3" });
     expect(detecterDemandeMod("Explique la version 1.21 de Minecraft")).toEqual({ mod: false, version: "1.21" });
     expect(detecterDemandeMod("Rédige un email")).toEqual({ mod: false, version: undefined });
+  });
+});
+
+describe("versionDepuisProjet (#24 : le projet fait foi, pas le journal d'erreurs)", () => {
+  it("lit minecraft_version dans gradle.properties", () => {
+    expect(versionDepuisProjet([{ chemin: "gradle.properties", contenu: "org.gradle.jvmargs=-Xmx2G\nminecraft_version=26.3\nloader_version=0.19.5" }])).toBe("26.3");
+  });
+  it("ignore une valeur placeholder et retombe sur fabric.mod.json", () => {
+    const fichiers = [
+      { chemin: "gradle.properties", contenu: "minecraft_version=${mcVersion}" },
+      { chemin: "src/main/resources/fabric.mod.json", contenu: JSON.stringify({ depends: { minecraft: ">=1.21.11" } }) },
+    ];
+    expect(versionDepuisProjet(fichiers)).toBe("1.21.11");
+  });
+  it("gère une plage de versions (tableau) et un JSON invalide", () => {
+    expect(versionDepuisProjet([{ chemin: "fabric.mod.json", contenu: JSON.stringify({ depends: { minecraft: ["~26.3", "26.4"] } }) }])).toBe("26.3");
+    expect(versionDepuisProjet([{ chemin: "fabric.mod.json", contenu: "{pas du json" }])).toBeUndefined();
+    expect(versionDepuisProjet([{ chemin: "README.md", contenu: "minecraft_version=26.3" }])).toBeUndefined();
+  });
+});
+
+describe("extraireVersion et conversationConcerneMod (#24 : tour de clarification)", () => {
+  it("extrait une version isolée (« 26.3 » seul au tour de clarification)", () => {
+    expect(extraireVersion("26.3")).toBe("26.3");
+    expect(extraireVersion("plutôt la 1.21.11 finalement")).toBe("1.21.11");
+    expect(extraireVersion("merci beaucoup")).toBeUndefined();
+  });
+  it("détecte un mod sur l'ensemble de la conversation, pas seulement le dernier message", () => {
+    // Le dernier message « 26.3 » seul ne suffit pas ; un message précédent porte l'intention.
+    expect(conversationConcerneMod(["Fais un mod fabric", "quelle version ?", "26.3"])).toBe(true);
+    expect(conversationConcerneMod(["26.3"])).toBe(false);
+    expect(conversationConcerneMod(["Rédige un poème", "sur l'automne"])).toBe(false);
   });
 });
 

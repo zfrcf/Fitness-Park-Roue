@@ -86,6 +86,43 @@ export function detecterDemandeMod(texte: string): { mod: boolean; version?: str
   return { mod, version };
 }
 
+/** Une conversation en cours parle-t-elle d'un mod ? (utile au tour de clarification où « 26.3 » seul ne contient aucun mot-clé) */
+export function conversationConcerneMod(textes: string[]): boolean {
+  return textes.some((t) => RE_MOD.test(t) && RE_MINECRAFT.test(t));
+}
+
+/** Première version de jeu trouvée dans un texte (null si aucune). */
+export function extraireVersion(texte: string): string | undefined {
+  return RE_VERSION.exec(texte)?.[1];
+}
+
+/**
+ * Version du jeu lue DANS LE PROJET (gradle.properties puis fabric.mod.json) : source de vérité
+ * dès qu'un build existe. On n'extrait plus la version d'un message, qui peut être un journal
+ * d'erreurs Gradle contenant « 1.5 fois », « 1.21 » au hasard, etc.
+ */
+export function versionDepuisProjet(fichiers: Array<{ chemin: string; contenu: string }>): string | undefined {
+  for (const f of fichiers) {
+    if (!/(^|\/)gradle\.properties$/.test(f.chemin)) continue;
+    const m = f.contenu.match(/^\s*minecraft_version\s*=\s*(.+?)\s*$/m);
+    const v = m && extraireVersion(m[1]);
+    if (v) return v;
+  }
+  for (const f of fichiers) {
+    if (!/(^|\/)fabric\.mod\.json$/.test(f.chemin)) continue;
+    try {
+      const j = JSON.parse(f.contenu) as { depends?: { minecraft?: string | string[] } };
+      const dep = j?.depends?.minecraft;
+      const brut = Array.isArray(dep) ? dep.join(" ") : dep;
+      const v = typeof brut === "string" ? extraireVersion(brut) : undefined;
+      if (v) return v;
+    } catch {
+      /* fabric.mod.json invalide : on ignore */
+    }
+  }
+  return undefined;
+}
+
 export function blocContexteMinecraft(v: VersionsMinecraft): string {
   const date = new Date(v.recupereA).toISOString().slice(0, 10);
   const nonObfusque = jeuNonObfusque(v.jeu);

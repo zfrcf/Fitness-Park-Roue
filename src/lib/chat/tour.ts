@@ -8,7 +8,7 @@ import { convertToModelMessages, createUIMessageStream, tool, type UIMessageChun
 import { z } from "zod";
 import { blocRecherchePourModele, rechercherWeb } from "@/lib/recherche";
 import { fuseauHoraire } from "@/lib/fuseau";
-import { blocContexteMinecraft, detecterDemandeMod, versionsMinecraft } from "@/lib/minecraft/contexte";
+import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, extraireVersion, versionDepuisProjet, versionsMinecraft } from "@/lib/minecraft/contexte";
 import { blocProjetPourModele, fusionnerProjet, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { executerChat, genererAvecRotation, type DepsOrchestrateur } from "@/lib/chat/orchestrateur";
 import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
@@ -161,9 +161,23 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       }
       // 1 bis. Demande de mod Minecraft : versions à jour et modèle de projet compilable.
       const demandeMod = detecterDemandeMod(texteDernier);
-      if (demandeMod.mod || projet.some((f) => /(^|\/)(fabric\.mod\.json|build\.gradle(\.kts)?)$/.test(f.chemin))) {
+      const projetMinecraft = projet.some((f) => /(^|\/)(fabric\.mod\.json|build\.gradle(\.kts)?)$/.test(f.chemin));
+      // Tour de clarification : « 26.3 » seul ne contient aucun mot-clé ; on regarde les messages récents.
+      const textesRecents = o.messages.slice(-6).map((m) => texteDe(m));
+      if (demandeMod.mod || projetMinecraft || conversationConcerneMod(textesRecents)) {
         try {
-          const v = await versionsMinecraft(demandeMod.version, { kv: deps.kv });
+          // Version : le projet fait foi dès qu'un build existe (on ignore alors les journaux d'erreurs
+          // du dernier message) ; avant tout fichier, on prend le dernier message puis le message
+          // utilisateur récent le plus proche contenant une version.
+          const versionAvantProjet =
+            demandeMod.version ??
+            o.messages
+              .filter((m) => m.role === "user")
+              .map((m) => extraireVersion(texteDe(m)))
+              .reverse()
+              .find(Boolean);
+          const version = projetMinecraft ? versionDepuisProjet(projet) : versionAvantProjet;
+          const v = await versionsMinecraft(version, { kv: deps.kv });
           reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${blocContexteMinecraft(v)}` };
         } catch (e) {
           console.warn("[chat] contexte Minecraft indisponible :", e instanceof Error ? e.message : e);

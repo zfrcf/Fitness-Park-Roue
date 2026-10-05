@@ -110,6 +110,9 @@ export function estimerReessai(e: InfosErreur, maintenant = Date.now()): number 
     /daily|per day|par jour|free allocation|quota journalier/.test(msgMin) ||
     (e.statut === 429 && /(^|\W)day(s)?\b/.test(msgMin) && !/minute/.test(msgMin))
   ) {
+    // Un délai explicite dans le message (« try again in 2h3m ») fait foi, plutôt que minuit UTC. (#29)
+    const dmJour = parserDelaiDansMessage(msg);
+    if (dmJour !== undefined && dmJour > 0) return maintenant + dmJour;
     const minuit = prochainMinuitUTC(maintenant);
     if (e.code === 3036 || e.code === 4006 || /neurons/.test(msgMin)) return Math.min(minuit, maintenant + 3_600_000);
     return minuit;

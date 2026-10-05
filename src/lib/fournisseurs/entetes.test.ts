@@ -75,6 +75,9 @@ describe("estimerReessai", () => {
     expect(estimerReessai({ statut: 429, code: 4006, message: "you have used up your daily free allocation of 10,000 neurons" }, T0)).toBe(Math.min(prochainMinuitUTC(T0), T0 + 3_600_000));
     expect(estimerReessai({ statut: 429, message: "Rate limit exceeded: free-models-per-day" }, T0)).toBe(prochainMinuitUTC(T0));
   });
+  it("#29 : un délai explicite dans un message de quota journalier fait foi (pas minuit UTC)", () => {
+    expect(estimerReessai({ statut: 429, message: "daily limit reached, please try again in 2h3m" }, T0)).toBeCloseTo(T0 + (2 * 3600 + 3 * 60) * 1000, 0);
+  });
   it("replis par statut", () => {
     expect(estimerReessai({ statut: 402 }, T0)).toBe(T0 + 24 * 3_600_000);
     expect(estimerReessai({ statut: 429 }, T0)).toBe(T0 + 60_000);

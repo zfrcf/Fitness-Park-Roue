@@ -491,7 +491,9 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
   writer.write({ type: "text-start", id: partId });
 
   // Boucle : à chaque tour on recalcule l'ordre (un fournisseur peut redevenir disponible).
-  for (let tour = 0; tour < deps.fournisseurs.length + 2; tour++) {
+  // Chaque fournisseur peut être essayé deux fois (un essai + un nouvel essai sur place), plus une marge :
+  // sinon des fournisseurs encore disponibles ne sont jamais atteints après les reprises. (#30)
+  for (let tour = 0; tour < deps.fournisseurs.length * 2 + 2; tour++) {
     if (p.signal?.aborted) break;
     const { candidats, indisponibles } = await ordonnerFournisseurs(deps, p.conversationId);
     const choix = await choisirFournisseur(deps, candidats.filter((c) => !tentes.has(c.id)), entreeEstimee, p.reglages.maxTokens);

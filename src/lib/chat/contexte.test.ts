@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { ajusterAuContexte, estimerTokens, resumerParTranches } from "./contexte";
+import { ajusterAuContexte, budgetEntree, estimerTokens, resumerParTranches, sortieEffective } from "./contexte";
 
 const u = (t: string): ModelMessage => ({ role: "user", content: t });
 const a = (t: string): ModelMessage => ({ role: "assistant", content: t });
@@ -56,5 +56,20 @@ describe("resumerParTranches", () => {
     const r = await resumerParTranches(msgs, 500, async () => `r${n++}`);
     expect(n).toBeGreaterThan(1);
     expect(r).toContain("Partie 1");
+  });
+});
+
+describe("sortieEffective / budget", () => {
+  it("borne la sortie à la moitié de la fenêtre pour garder un budget d'entrée positif", () => {
+    // Fenêtre 8192, maxSortie demandé 16384 → effectif ≤ 4096, budget > 0.
+    expect(sortieEffective({ contexte: 8192, maxSortie: 16384, systeme: "" })).toBeLessThanOrEqual(4096);
+    expect(budgetEntree({ contexte: 8192, maxSortie: 16384, systeme: "S" })).toBeGreaterThan(0);
+  });
+
+  it("fenêtre plus petite que maxSortie : message court conservé, pas tronqué", async () => {
+    const r = await ajusterAuContexte([u("question courte")], { contexte: 8192, maxSortie: 16384, systeme: "S" }, async () => "x");
+    expect(r.tronque).toBe(false);
+    expect(r.maxSortie).toBeLessThanOrEqual(4096);
+    expect((r.messages[0].content as string)).toBe("question courte");
   });
 });

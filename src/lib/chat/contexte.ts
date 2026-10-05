@@ -43,11 +43,18 @@ export interface ResultatAjustement {
   resume: boolean;
   /** Résumé impossible : les anciens messages ont été coupés. */
   tronque: boolean;
+  /** Tokens de sortie réellement utilisables (bornés à la moitié de la fenêtre). */
+  maxSortie: number;
+}
+
+/** Sortie réellement réservable : au plus la moitié de la fenêtre (évite un budget d'entrée négatif). */
+export function sortieEffective(p: ParamsAjustement): number {
+  return Math.min(p.maxSortie, Math.max(256, Math.floor(p.contexte * 0.5)));
 }
 
 export function budgetEntree(p: ParamsAjustement): number {
   const marge = Math.ceil(p.contexte * 0.05) + 64;
-  return p.contexte - p.maxSortie - estimerTokens(p.systeme) - marge;
+  return p.contexte - sortieEffective(p) - estimerTokens(p.systeme) - marge;
 }
 
 /**
@@ -59,9 +66,10 @@ export async function ajusterAuContexte(
   p: ParamsAjustement,
   resumer: Resumeur,
 ): Promise<ResultatAjustement> {
+  const maxSortie = sortieEffective(p);
   const budget = budgetEntree(p);
   const total = messages.reduce((s, m) => s + tokensMessage(m), 0);
-  if (total <= budget) return { messages, systeme: p.systeme, resume: false, tronque: false };
+  if (total <= budget) return { messages, systeme: p.systeme, resume: false, tronque: false, maxSortie };
 
   // On remonte depuis la fin en gardant au moins le dernier message.
   const budgetRecents = Math.floor(budget * 0.7); // 30 % pour le résumé
@@ -91,18 +99,19 @@ export async function ajusterAuContexte(
       systeme: p.systeme,
       resume: false,
       tronque: true,
+      maxSortie,
     };
   }
 
-  if (anciens.length === 0) return { messages: recents, systeme: p.systeme, resume: false, tronque: false };
+  if (anciens.length === 0) return { messages: recents, systeme: p.systeme, resume: false, tronque: false, maxSortie };
 
   const budgetResume = budget - somme;
   try {
     const resume = await resumerParTranches(anciens, Math.max(300, budgetResume), resumer);
     const systeme = `${p.systeme}\n\n## Résumé des échanges précédents de cette conversation\n${resume}`;
-    return { messages: recents, systeme, resume: true, tronque: false };
+    return { messages: recents, systeme, resume: true, tronque: false, maxSortie };
   } catch {
-    return { messages: recents, systeme: p.systeme, resume: false, tronque: true };
+    return { messages: recents, systeme: p.systeme, resume: false, tronque: true, maxSortie };
   }
 }
 

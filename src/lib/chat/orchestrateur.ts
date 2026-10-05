@@ -322,7 +322,8 @@ async function tenter(
     return { texte: "", erreur: classerErreur(err, maintenant), resume: false, tokensEstimes: 0 };
   }
   const tokensEstimes =
-    ajuste.messages.reduce((s, m) => s + tokensMessage(m), 0) + estimerTokens(ajuste.systeme) + p.reglages.maxTokens;
+    ajuste.messages.reduce((s, m) => s + tokensMessage(m), 0) + estimerTokens(ajuste.systeme) + ajuste.maxSortie;
+  if (ajuste.tronque) p.writer.write({ type: "data-info", data: { texte: `${f.nom} : message tronqué pour tenir dans le contexte` }, transient: true });
 
   // 2. Flux avec chien de garde d'inactivité.
   const controleur = new AbortController();
@@ -368,7 +369,7 @@ async function tenter(
       system: ajuste.systeme,
       messages: ajuste.messages,
       temperature: p.reglages.temperature,
-      maxOutputTokens: p.reglages.maxTokens,
+      maxOutputTokens: ajuste.maxSortie,
       maxRetries: 0,
       abortSignal: controleur.signal,
       ...(avecOutils ? { tools: outils, stopWhen: stepCountIs(3) } : {}), // au plus deux recherches par réponse

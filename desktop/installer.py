@@ -219,6 +219,14 @@ def main() -> int:
             return 1
     if a.importer:
         lancer([str(lanceur), "config", "--importer", a.importer], check=False)
+    else:
+        # Fichier de clés livré à côté de l'archive (ou dans Téléchargements) : importé d'office.
+        maison = Path.home()
+        for f in (ICI / "atelier-cles.env", ICI.parent / "atelier-cles.env", maison / "Téléchargements" / "atelier-cles.env", maison / "Downloads" / "atelier-cles.env"):
+            if f.is_file():
+                bleu(f"Clés API trouvées : {f}")
+                lancer([str(lanceur), "config", "--importer", str(f)], check=False)
+                break
 
 
     ajouter_au_path(binaire)

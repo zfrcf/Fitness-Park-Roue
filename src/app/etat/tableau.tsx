@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDureeRelative, formatHeure, formatNombre, formatTokens } from "@/lib/format";
+import { LOCAL } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 import type { EtatFournisseur, FournisseurPublic } from "@/lib/fournisseurs/types";
 
@@ -158,7 +159,9 @@ export function TableauEtat() {
       {donnees.fournisseurs.length === 0 && (
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">
-            Aucun fournisseur configuré. Renseignez PROVIDER_1_NAME, _BASE_URL, _API_KEY, _MODEL et _CONTEXT.
+            {LOCAL
+              ? "Aucun fournisseur configuré. Dans un terminal, lancez « atelier config » (ou déposez atelier-cles.env dans Téléchargements), puis rouvrez Atelier IA."
+              : "Aucun fournisseur configuré. Renseignez PROVIDER_1_NAME, _BASE_URL, _API_KEY, _MODEL et _CONTEXT."}
           </CardContent>
         </Card>
       )}

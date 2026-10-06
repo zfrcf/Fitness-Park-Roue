@@ -539,6 +539,24 @@ def _barre_progression():
     return prog, progression
 
 
+def _verifier_fournisseurs() -> None:
+    """Sans fournisseur, l'application répondrait « Aucun fournisseur configuré » : on importe
+    atelier-cles.env s'il est dans Téléchargements, sinon on explique quoi faire."""
+    from .config import importer_cles_si_absentes
+
+    importe = importer_cles_si_absentes()
+    if importe:
+        n, f = importe
+        console.print(f"[green]✔ {n} fournisseur(s) importé(s) depuis {f}[/green] (vous pouvez supprimer ce fichier).")
+        return
+    fournisseurs, problemes = charger_fournisseurs()
+    if not fournisseurs:
+        console.print("[yellow]Aucun fournisseur IA configuré : l'application ne pourra pas répondre.[/yellow]")
+        for p in problemes:
+            console.print(f"  [yellow]{p}[/yellow]")
+        console.print("  Lancez [bold]atelier config[/bold], ou déposez [bold]atelier-cles.env[/bold] dans Téléchargements puis relancez.")
+
+
 def cmd_ui(a: argparse.Namespace) -> int:
     from . import ui
     from .installation import ErreurInstallation
@@ -551,6 +569,7 @@ def cmd_ui(a: argparse.Namespace) -> int:
             prog, progression = _barre_progression()
             with prog:
                 ui.installer_node(progression)
+        _verifier_fournisseurs()
         if a.reconstruire:
             depot = Path(a.reconstruire).expanduser().resolve() if isinstance(a.reconstruire, str) else ui.ICI.parent.parent
             ui.arreter()

@@ -160,3 +160,36 @@ def test_versions_reseau_simule_et_cache(tmp_path):
     assert (v.jeu, v.fabric_api, v.loom, v.java, v.verifie) == ("26.3", "0.161.0+26.3", "1.18.2", 25, True)
     with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as c:
         assert minecraft.versions(None, client=c, cache=tmp_path).fabric_api == "0.161.0+26.3"  # servi par le cache
+
+
+def test_import_cles_utiles_sans_variables_vercel(tmp_path, monkeypatch):
+    from atelier.config import importer_env, lire_env, fichier_config
+
+    src = tmp_path / "atelier-cles.env"
+    src.write_text(
+        "PROVIDER_1_NAME=Groq\nPROVIDER_1_BASE_URL=https://api.groq.com/openai/v1\nPROVIDER_1_API_KEY=gsk_x\n"
+        "PROVIDER_1_MODEL=m\nPROVIDER_1_CONTEXT=1000\nBRAVE_API_KEY=b\nAPP_PASSWORD=p\nDATABASE_URL=postgres://x\n"
+        "KV_REST_API_TOKEN=k\nQSTASH_TOKEN=q\nGITHUB_TOKEN=g\nSESSION_SECRET=s\n"
+    )
+    n, _ = importer_env(src)
+    v = lire_env(fichier_config())
+    assert n == 1 and v["BRAVE_API_KEY"] == "b"
+    for cle in ("APP_PASSWORD", "DATABASE_URL", "KV_REST_API_TOKEN", "QSTASH_TOKEN", "GITHUB_TOKEN", "SESSION_SECRET"):
+        assert cle not in v
+
+
+def test_import_automatique_depuis_telechargements(tmp_path, monkeypatch):
+    from atelier.config import charger_fournisseurs, importer_cles_si_absentes
+
+    maison = tmp_path / "maison"
+    (maison / "Téléchargements").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(maison))
+    monkeypatch.chdir(tmp_path)
+    assert importer_cles_si_absentes() is None  # rien à importer
+    (maison / "Téléchargements" / "atelier-cles.env").write_text(
+        "PROVIDER_1_NAME=Groq\nPROVIDER_1_BASE_URL=https://api.groq.com/openai/v1\nPROVIDER_1_API_KEY=gsk_x\nPROVIDER_1_MODEL=m\nPROVIDER_1_CONTEXT=1000\n"
+    )
+    n, f = importer_cles_si_absentes()
+    assert n == 1 and f.name == "atelier-cles.env"
+    assert [x.nom for x in charger_fournisseurs()[0]] == ["Groq"]
+    assert importer_cles_si_absentes() is None  # déjà configuré : on ne touche plus à rien

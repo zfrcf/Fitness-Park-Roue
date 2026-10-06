@@ -96,7 +96,9 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
   };
 
   const liste = o.fournisseurs ?? fournisseurs();
-  if (liste.length === 0) return { ok: false, statut: 503, erreur: "Aucun fournisseur configuré (variables PROVIDER_n_*)." };
+  if (liste.length === 0) return { ok: false, statut: 503, erreur: modeLocal()
+        ? "Aucun fournisseur configuré : lancez « atelier config » dans un terminal (ou déposez atelier-cles.env dans Téléchargements), puis rouvrez Atelier IA."
+        : "Aucun fournisseur configuré (variables PROVIDER_n_*)." };
 
   // Historique pour le modèle : parties texte uniquement ; les pages lues aux tours précédents
   // (parties data-page-lue des réponses) sont réinjectées dans le message utilisateur qui les a demandées.

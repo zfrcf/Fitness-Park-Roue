@@ -217,13 +217,48 @@ def charger_reglages(valeurs: dict[str, str] | None = None) -> Reglages:
     )
 
 
+# Autres réglages repris d'un .env de la version web : utiles aussi en local (recherche web, lecture
+# de liens, fuseau, plafond payant). Les variables propres à Vercel (APP_PASSWORD, DATABASE_URL,
+# KV/Upstash, QStash, GITHUB_*, SESSION_SECRET…) sont volontairement ignorées : en local elles
+# seraient inutiles ou nuisibles (base et verrous partagés avec la production).
+CLES_IMPORTABLES = ("BRAVE_API_KEY", "TAVILY_API_KEY", "JINA_API_KEY", "APP_TZ", "PAID_MONTHLY_CAP")
+
+# Fichier de clés que l'atelier importe tout seul s'il le trouve (dossier courant, Téléchargements).
+NOMS_FICHIER_CLES = ("atelier-cles.env",)
+
+
 def importer_env(source: Path) -> tuple[int, Path]:
-    """Copie les PROVIDER_n_* d'un .env (par ex. le .env.local de la version web) dans config.env."""
-    externes = {k: val for k, val in lire_env(source).items() if k.startswith("PROVIDER_") and val}
+    """Copie les PROVIDER_n_* (et les réglages utiles) d'un .env, par ex. le .env.local du web, dans config.env."""
+    brutes = lire_env(source)
+    externes = {k: val for k, val in brutes.items() if val and (k.startswith("PROVIDER_") or k in CLES_IMPORTABLES)}
     actuelles = lire_env(fichier_config())
     # On remplace entièrement la liste des fournisseurs pour garder des rangs contigus.
-    actuelles = {k: val for k, val in actuelles.items() if not k.startswith("PROVIDER_")}
+    if any(k.startswith("PROVIDER_") for k in externes):
+        actuelles = {k: val for k, val in actuelles.items() if not k.startswith("PROVIDER_")}
     actuelles.update(externes)
     ecrire_env(fichier_config(), actuelles)
-    rangs = {re.match(r"PROVIDER_(\d+)_", k).group(1) for k in externes if re.match(r"PROVIDER_(\d+)_", k)}  # type: ignore[union-attr]
+    rangs = {m.group(1) for k in externes if (m := re.match(r"PROVIDER_(\d+)_", k))}
     return len(rangs), fichier_config()
+
+
+def chercher_fichier_cles(dossiers: list[Path] | None = None) -> Path | None:
+    """Fichier atelier-cles.env déposé par l'utilisateur (dossier courant, Téléchargements, Downloads…)."""
+    candidats = list(dossiers or []) + [Path.cwd(), _home() / "Téléchargements", _home() / "Downloads", _home()]
+    for d in candidats:
+        for nom in NOMS_FICHIER_CLES:
+            f = d / nom
+            if f.is_file():
+                return f
+    return None
+
+
+def importer_cles_si_absentes(dossiers: list[Path] | None = None) -> tuple[int, Path] | None:
+    """Aucun fournisseur valide configuré et un fichier atelier-cles.env trouvé : on l'importe."""
+    fournisseurs, _ = charger_fournisseurs()
+    if fournisseurs:
+        return None
+    f = chercher_fichier_cles(dossiers)
+    if not f:
+        return None
+    n, _cfg = importer_env(f)
+    return (n, f) if n else None

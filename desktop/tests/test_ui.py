@@ -74,6 +74,8 @@ def test_raccourci_menu(tmp_path: Path) -> None:
     f = ui.creer_raccourci()
     contenu = f.read_text()
     assert "Name=Atelier IA" in contenu and " ui" in contenu and "Terminal=false" in contenu
+    assert "StartupWMClass=atelier-ia" in contenu  # classe de fenêtre d'Electron (package.json)
+    assert contenu.split("Icon=")[1].splitlines()[0].endswith(".png")
     assert Path(contenu.split("Icon=")[1].splitlines()[0]).exists()
 
 
@@ -93,3 +95,49 @@ def test_choisir_port_saute_un_port_occupe() -> None:
         s.listen()
         occupe = s.getsockname()[1]
         assert ui.choisir_port(occupe) != occupe
+
+
+def _faux_electron(script: str) -> Path:
+    binaire = ui.dossier_electron() / "electron"
+    binaire.parent.mkdir(parents=True, exist_ok=True)
+    binaire.write_text("#!/bin/sh\n" + script)
+    binaire.chmod(0o755)
+    return binaire
+
+
+def test_bureau_repli_sans_bac_a_sable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Ubuntu 24.04 sans espaces de noms : Electron s'arrête aussitôt, on relance sans bac à sable."""
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    traces = tmp_path / "args.txt"
+    _faux_electron(
+        f'echo "$@" >> {traces}\n'
+        'case "$*" in *--no-sandbox*) sleep 3 ;; *) echo "The SUID sandbox helper binary was found, but is not configured correctly."; exit 1 ;; esac\n'
+    )
+    resultat = ui.lancer_bureau("http://127.0.0.1:3999", attente=3)
+    assert "sans bac à sable" in resultat
+    lignes = traces.read_text().splitlines()
+    assert "--no-sandbox" not in lignes[0] and "--url=http://127.0.0.1:3999" in lignes[0]
+    import time
+
+    for _ in range(30):  # le second lancement est détaché
+        if len(traces.read_text().splitlines()) >= 2:
+            break
+        time.sleep(0.1)
+    assert "--no-sandbox" in traces.read_text().splitlines()[1]
+    assert (ui.dossier_ui() / "electron-sans-bac-a-sable").exists()  # retenu pour la prochaine fois
+
+
+def test_bureau_normal_garde_le_bac_a_sable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    traces = tmp_path / "args.txt"
+    _faux_electron(f'echo "$@" >> {traces}\nsleep 3\n')
+    assert ui.lancer_bureau("http://127.0.0.1:3999", attente=1) == "application Atelier IA"
+    assert "--no-sandbox" not in traces.read_text()
+    assert not (ui.dossier_ui() / "electron-sans-bac-a-sable").exists()
+
+
+def test_bureau_autre_echec_signale(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    _faux_electron('echo "error while loading shared libraries: libgtk-3.so.0"; exit 127\n')
+    with pytest.raises(ErreurInstallation, match="arrêtée"):
+        ui.lancer_bureau("http://127.0.0.1:3999", attente=2)

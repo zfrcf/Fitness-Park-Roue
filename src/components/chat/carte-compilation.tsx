@@ -17,6 +17,24 @@ const LIBELLES: Record<CompilationPublique["statut"], string> = {
   erreur: "Compilation impossible",
 };
 
+/**
+ * Application de bureau (mode local) : notification du système à la fin d'une compilation quand
+ * la fenêtre n'est pas au premier plan (gradle build peut durer plusieurs minutes).
+ */
+function notifierFin(c: CompilationPublique) {
+  if (!LOCAL || typeof Notification === "undefined" || document.hasFocus()) return;
+  if (c.statut !== "reussie" && c.statut !== "echouee" && c.statut !== "erreur") return;
+  try {
+    const n = new Notification(c.statut === "reussie" ? "Compilation réussie" : "Compilation échouée", {
+      body: c.statut === "reussie" ? `${c.jarNom ?? "Le .jar"} est prêt.` : (c.erreur ?? "Voir le journal dans l'atelier."),
+      tag: `compilation-${c.id}`,
+    });
+    n.onclick = () => window.focus();
+  } catch {
+    /* notifications indisponibles */
+  }
+}
+
 export function CarteCompilation({
   compilation: initiale,
   onDemanderCorrection,
@@ -65,6 +83,7 @@ export function CarteCompilation({
         if (actif) {
           setC(j.compilation);
           onMaj?.(j.compilation);
+          notifierFin(j.compilation);
         }
       } catch {
         /* nouvel essai au prochain tour */

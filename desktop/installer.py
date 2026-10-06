@@ -157,12 +157,12 @@ def ajouter_au_path(binaire: Path) -> None:
 
 
 def installer_interface(donnees: Path, lanceur: Path) -> bool:
-    """Interface graphique : copie l'application (web/) et installe Node + l'entrée de menu."""
+    """Application de bureau : copie l'application (web/), installe Node, Electron et l'entrée de menu."""
     source = ICI / "web"
     if not (source / "server.js").is_file():
         jaune("Interface graphique absente de cette archive : seule la console est installée.")
         return False
-    bleu("Interface graphique (application locale + Node LTS, sans sudo)")
+    bleu("Application de bureau Atelier IA (Node LTS + Electron, sans sudo)")
     lancer([str(lanceur), "ui", "--arreter"], check=False, capture_output=True)
     cible = donnees / "web"
     tmp = donnees / "web.nouveau"
@@ -180,7 +180,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Installe l'atelier IA local sans droits administrateur.")
     p.add_argument("--importer", metavar="FICHIER_ENV", help="importer les PROVIDER_n_* d'un .env (ex. .env.local de la version web)")
     p.add_argument("--sans-jdk", action="store_true", help="ne pas télécharger JDK et Gradle maintenant (« atelier installer » plus tard)")
-    p.add_argument("--sans-ui", action="store_true", help="ne pas installer l'interface graphique (Node + application)")
+    p.add_argument("--sans-ui", action="store_true", help="ne pas installer l'application de bureau (Node, Electron, interface)")
     # Option de test : force une méthode de repli (sans-ensurepip, cible).
     p.add_argument("--mode", choices=["sans-ensurepip", "cible"], help=argparse.SUPPRESS)
     a = p.parse_args()
@@ -227,7 +227,7 @@ def main() -> int:
     print("  1. Configurer une clé API :   atelier config")
     print("  2. Vérifier :                 atelier doctor   puis   atelier tester")
     if ui_ok:
-        print("  3. Ouvrir l'interface :       atelier ui   (ou « Atelier IA » dans le menu des applications)")
+        print("  3. Ouvrir l'application :     « Atelier IA » dans le menu des applications (ou : atelier ui)")
         print("     En console :               atelier nouveau mon-mod")
     else:
         print("  3. Créer un projet :          atelier nouveau mon-mod")

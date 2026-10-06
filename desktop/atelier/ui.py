@@ -1,14 +1,17 @@
-"""Interface graphique locale : la même application que la version web, sur l'ordinateur.
+"""Application de bureau : la même application que la version web, dans sa propre fenêtre.
 
-  atelier ui                 démarre (si besoin) le serveur local et ouvre la fenêtre
+  atelier ui                 démarre (si besoin) le serveur local et ouvre l'application
+  atelier ui --navigateur    ouvre dans le navigateur au lieu de l'application
   atelier ui --arreter       arrête le serveur
   atelier ui --redemarrer    redémarre le serveur (après « atelier config » par exemple)
-  atelier ui --preparer      installe Node et l'entrée de menu, sans rien ouvrir
+  atelier ui --preparer      installe Node, Electron et l'entrée de menu, sans rien ouvrir
   atelier ui --reconstruire  reconstruit l'application depuis les sources (développement)
 
 Fonctionnement :
   - l'application (construction autonome de Next.js, mode ATELIER_LOCAL) est installée dans
     ~/.local/share/atelier/web ; elle n'a besoin que de Node (téléchargé sans sudo si absent) ;
+  - la fenêtre est une application Electron (desktop/atelier/bureau) : icône, menus en français,
+    une seule instance, dialogue de fermeture si une tâche de fond tourne ;
   - le serveur écoute UNIQUEMENT sur 127.0.0.1 (pas de mot de passe, rien n'est exposé au réseau) ;
   - conversations, réglages et tâches : base locale dans ~/.local/share/atelier/ui/pglite ;
   - les compilations lancent `gradle build` avec le JDK et Gradle de l'atelier.
@@ -29,6 +32,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -315,6 +319,9 @@ def serveur_actif() -> EtatServeur | None:
 
 def _port_libre(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Comme Node : un port dont la connexion précédente se termine (TIME_WAIT) est réutilisable.
+        # Sans cette option, chaque redémarrage changerait de port.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return True
@@ -459,15 +466,137 @@ def assurer_serveur(port: int = PORT_DEFAUT) -> tuple[EtatServeur, str]:
     return demarrer(port), "demarre"
 
 
-# --------------------------------------------------------------------------- fenêtre et menu
+# --------------------------------------------------------------------------- application de bureau (Electron)
+
+# Version d'Electron vérifiée avec l'atelier (fenêtre, menus, téléchargement du jar).
+ELECTRON_VERSION = "44.5.1"
+DOSSIER_BUREAU = ICI / "bureau"  # main.js, package.json, icone.png (livrés avec le paquet)
+
+
+def dossier_electron() -> Path:
+    return dossier_donnees() / "electron"
+
+
+def trouver_electron() -> Path | None:
+    binaire = dossier_electron() / "electron"
+    return binaire if binaire.is_file() and os.access(binaire, os.X_OK) else None
+
+
+def installer_electron(progression: Progression | None = None, forcer: bool = False) -> Path:
+    """Télécharge Electron (github.com/electron, somme SHA-256 vérifiée) dans ~/.local/share/atelier, sans sudo."""
+    if not forcer and trouver_electron() and (dossier_donnees() / f"electron-v{ELECTRON_VERSION}").exists():
+        return trouver_electron()  # type: ignore[return-value]
+    arch = {"x64": "x64", "aarch64": "arm64"}[architecture()]
+    nom = f"electron-v{ELECTRON_VERSION}-linux-{arch}.zip"
+    base_url = f"https://github.com/electron/electron/releases/download/v{ELECTRON_VERSION}"
+    with _client() as c:
+        r = c.get(f"{base_url}/SHASUMS256.txt")
+    somme = next((ligne.split()[0] for ligne in r.text.splitlines() if ligne.strip().endswith(nom)), None) if r.status_code == 200 else None
+    if not somme:
+        raise ErreurInstallation("Somme de contrôle d'Electron introuvable : installation interrompue par prudence.")
+    base = dossier_donnees()
+    base.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=base) as tmp:
+        archive = Path(tmp) / nom
+        telecharger(f"{base_url}/{nom}", archive, somme, progression, f"Electron {ELECTRON_VERSION}")
+        sortie = Path(tmp) / "electron"
+        with zipfile.ZipFile(archive) as z:
+            for info in z.infolist():
+                if info.filename.startswith("/") or ".." in Path(info.filename).parts:
+                    raise ErreurInstallation(f"Archive Electron suspecte : {info.filename}")
+                z.extract(info, sortie)
+                mode = (info.external_attr >> 16) & 0o777
+                if mode:  # zipfile ne restaure pas les droits d'exécution
+                    os.chmod(sortie / info.filename, mode)
+        if not (sortie / "electron").is_file():
+            raise ErreurInstallation("Archive Electron inattendue (pas de binaire electron).")
+        os.chmod(sortie / "electron", 0o755)
+        cible = base / f"electron-v{ELECTRON_VERSION}"
+        if cible.exists():
+            shutil.rmtree(cible)
+        shutil.move(str(sortie), cible)
+    lien = dossier_electron()
+    if lien.is_symlink() or lien.is_file():
+        lien.unlink()
+    elif lien.is_dir():
+        shutil.rmtree(lien)
+    lien.symlink_to(cible.name, target_is_directory=True)
+    return lien / "electron"
+
+
+def lanceur_commande() -> list[str]:
+    """Commande « atelier » sous forme de liste (pour que l'application puisse arrêter le serveur)."""
+    lanceur = lanceur_atelier()
+    return [lanceur] if Path(lanceur).exists() else [sys.executable, "-m", "atelier"]
+
+
+def _fichier_sans_bac_a_sable() -> Path:
+    return dossier_ui() / "electron-sans-bac-a-sable"
+
+
+def lancer_bureau(url: str, attente: float = 6.0) -> str:
+    """Ouvre l'application de bureau sur `url`.
+
+    Le bac à sable de Chromium exige soit un binaire setuid root (impossible sans sudo), soit les
+    espaces de noms utilisateur, que certaines versions d'Ubuntu (24.04+) restreignent. Si Electron
+    s'arrête aussitôt pour cette raison, on le relance sans bac à sable et on s'en souvient. Le
+    risque reste limité : la fenêtre n'affiche que l'application locale, les liens externes
+    s'ouvrent dans le navigateur du système.
+    """
+    electron = trouver_electron()
+    if not electron:
+        raise ErreurInstallation("Electron absent : lancez « atelier ui --preparer ».")
+    dossier_ui().mkdir(parents=True, exist_ok=True)
+    journal = dossier_ui() / "bureau.log"
+    env = dict(os.environ)
+    env.update(
+        {
+            "ATELIER_LANCEUR_JSON": json.dumps(lanceur_commande()),
+            "ATELIER_DONNEES": str(dossier_donnees()),
+            "ELECTRON_NO_ATTACH_CONSOLE": "1",
+        }
+    )
+    env.pop("ELECTRON_RUN_AS_NODE", None)
+    sans_bac = _fichier_sans_bac_a_sable().exists() or os.geteuid() == 0  # root : Chromium l'exige
+
+    def lancer(options: list[str]) -> subprocess.Popen:
+        with journal.open("ab") as sortie:
+            return subprocess.Popen(
+                [str(electron), str(DOSSIER_BUREAU), f"--url={url}", *options],
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=sortie,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+    proc = lancer(["--no-sandbox"] if sans_bac else [])
+    if sans_bac:
+        return "application Atelier IA (sans bac à sable)"
+    fin = time.monotonic() + attente
+    while time.monotonic() < fin and proc.poll() is None:
+        time.sleep(0.2)
+    if proc.poll() not in (None, 0):
+        texte = journal.read_text(encoding="utf-8", errors="replace")[-4000:]
+        if "sandbox" in texte.lower() or "namespace" in texte.lower():
+            _fichier_sans_bac_a_sable().touch()
+            lancer(["--no-sandbox"])
+            return "application Atelier IA (sans bac à sable : non disponible sur ce système)"
+        raise ErreurInstallation(f"L'application de bureau s'est arrêtée (code {proc.returncode}). Journal : {journal}")
+    return "application Atelier IA"
+
+
+# --------------------------------------------------------------------------- navigateur (repli) et menu
 
 NAVIGATEURS_APP = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "brave-browser", "microsoft-edge", "vivaldi"]
 
 
-def ouvrir_fenetre(url: str) -> str:
-    """Ouvre l'application dans une fenêtre dédiée (mode application de Chrome/Chromium), sinon le navigateur."""
+def ouvrir_fenetre(url: str, navigateur: bool = False) -> str:
+    """Application de bureau si Electron est installé, sinon fenêtre « application » d'un navigateur."""
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         return "aucun écran détecté"
+    if not navigateur and trouver_electron():
+        return lancer_bureau(url)
     for nom in NAVIGATEURS_APP:
         chemin = shutil.which(nom)
         if chemin:
@@ -485,14 +614,6 @@ def _detacher(cmd: list[str]) -> None:
     subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
-ICONE_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect width="64" height="64" rx="14" fill="#18181b"/>
-<path d="M18 44 32 16l14 28" fill="none" stroke="#fafafa" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M23 35h18" stroke="#22c55e" stroke-width="5" stroke-linecap="round"/>
-</svg>
-"""
-
-
 def lanceur_atelier() -> str:
     """Chemin de la commande « atelier » (pour l'entrée de menu)."""
     for c in (Path.home() / ".local" / "bin" / "atelier", Path(sys.argv[0]).resolve()):
@@ -507,9 +628,10 @@ def creer_raccourci() -> Path:
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     if os.environ.get("ATELIER_HOME"):
         base = Path(os.environ["ATELIER_HOME"]) / "share"
-    icone = dossier_donnees() / "atelier-ia.svg"
+    icone = dossier_donnees() / "atelier-ia.png"
     icone.parent.mkdir(parents=True, exist_ok=True)
-    icone.write_text(ICONE_SVG, encoding="utf-8")
+    shutil.copyfile(DOSSIER_BUREAU / "icone.png", icone)
+    (dossier_donnees() / "atelier-ia.svg").unlink(missing_ok=True)  # ancienne icône (1.1)
     lanceur = lanceur_atelier()
     exec_ = f'"{lanceur}" ui' if Path(lanceur).exists() else f"{lanceur} ui"
     fichier = base / "applications" / "atelier-ia.desktop"
@@ -520,12 +642,17 @@ def creer_raccourci() -> Path:
                 "[Desktop Entry]",
                 "Type=Application",
                 "Name=Atelier IA",
-                "Comment=Chat IA local, projets Gradle et mods Minecraft",
+                "GenericName=Atelier de développement IA",
+                "Comment=Chat IA, projets Gradle et mods Minecraft compilés sur cet ordinateur",
                 f"Exec={exec_}",
                 f"Icon={icone}",
                 "Terminal=false",
-                "Categories=Development;",
-                "StartupWMClass=AtelierIA",
+                "Categories=Development;IDE;",
+                "Keywords=IA;chat;Minecraft;Gradle;mod;",
+                # Electron nomme sa fenêtre d'après package.json (« atelier-ia ») : le dock regroupe
+                # ainsi la fenêtre sous cette icône.
+                "StartupWMClass=atelier-ia",
+                "StartupNotify=true",
                 "",
             ]
         ),

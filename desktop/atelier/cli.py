@@ -10,12 +10,13 @@
   atelier doctor               vérifier l'installation
   atelier tester               tester chaque fournisseur
   atelier projets              lister les projets
-  atelier ui                   ouvrir l'interface graphique (la même que la version web)
+  atelier ui                   ouvrir l'application de bureau (la même interface que la version web)
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -560,8 +561,15 @@ def cmd_ui(a: argparse.Namespace) -> int:
             console.print("[red]Application graphique absente.[/red] Relancez l'installation depuis l'archive : python3 installer.py")
             return 1
         raccourci = ui.creer_raccourci()
+        veut_bureau = not a.navigateur and (a.preparer or os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        if veut_bureau and ui.trouver_electron() is None:
+            console.print("Installation de l'application de bureau (Electron, une seule fois)…")
+            prog, progression = _barre_progression()
+            with prog:
+                ui.installer_electron(progression)
         if a.preparer:
             console.print(f"[green]✔ Node[/green] : {ui.trouver_node()}")
+            console.print(f"[green]✔ Application de bureau[/green] : Electron {ui.ELECTRON_VERSION} ({ui.trouver_electron()})")
             console.print(f"[green]✔ Entrée de menu[/green] : {raccourci} (« Atelier IA » dans vos applications)")
             return 0
         if a.redemarrer:
@@ -574,7 +582,11 @@ def cmd_ui(a: argparse.Namespace) -> int:
     message = {"deja": "déjà démarrée", "demarre": "démarrée", "redemarre": "redémarrée (configuration ou version changée)"}[comment]
     console.print(f"[green]✔ Interface {message}[/green] : [bold]{etat.url}[/bold]")
     if not a.sans_fenetre:
-        ouvert = ui.ouvrir_fenetre(etat.url)
+        try:
+            ouvert = ui.ouvrir_fenetre(etat.url, navigateur=a.navigateur)
+        except (ErreurInstallation, OSError) as e:
+            console.print(f"[yellow]Application de bureau impossible à ouvrir ({e}) : ouverture dans le navigateur.[/yellow]")
+            ouvert = ui.ouvrir_fenetre(etat.url, navigateur=True)
         console.print(f"  Fenêtre : {ouvert}. Si rien ne s'ouvre, collez l'adresse dans votre navigateur.")
     console.print("  Arrêter : [bold]atelier ui --arreter[/bold]   ·   Journal : " + str(ui.fichier_journal()))
     return 0
@@ -711,12 +723,13 @@ def construire_parseur() -> argparse.ArgumentParser:
     sp.add_parser("doctor", help="vérifier l'installation").set_defaults(func=cmd_doctor)
     sp.add_parser("tester", help="tester chaque fournisseur").set_defaults(func=cmd_tester)
     sp.add_parser("projets", help="lister les projets").set_defaults(func=cmd_projets)
-    s = sp.add_parser("ui", help="interface graphique (fenêtre, comme la version web)")
+    s = sp.add_parser("ui", help="application de bureau (même interface que la version web)")
     s.add_argument("--port", type=int, default=3210)
     s.add_argument("--arreter", action="store_true", help="arrêter le serveur de l'interface")
     s.add_argument("--redemarrer", action="store_true", help="redémarrer le serveur")
     s.add_argument("--preparer", action="store_true", help="installer Node et l'entrée de menu, sans ouvrir")
     s.add_argument("--sans-fenetre", action="store_true", help="démarrer le serveur sans ouvrir de fenêtre")
+    s.add_argument("--navigateur", action="store_true", help="ouvrir dans le navigateur au lieu de l'application de bureau")
     s.add_argument("--reconstruire", nargs="?", const=True, metavar="DEPOT", help=argparse.SUPPRESS)
     s.set_defaults(func=cmd_ui)
     return p

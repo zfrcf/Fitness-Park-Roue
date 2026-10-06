@@ -2,38 +2,51 @@
 
 Version **sur ordinateur** du chat IA, avec deux façons de travailler :
 
-- **`atelier ui`** : la **même interface que la version web** (conversations, fichiers, réglages,
-  tâches de fond, état des fournisseurs), dans une fenêtre d'application. Les compilations se
-  font **sur votre ordinateur avec `gradle build`**, le `.jar` se télécharge d'un clic.
+- **Application de bureau « Atelier IA »** (`atelier ui`, ou l'icône du menu des applications) :
+  une vraie application avec sa fenêtre, son icône dans le dock et ses menus, qui reprend
+  l'interface de la version web (conversations, fichiers, réglages, tâches de fond, état des
+  fournisseurs). Les compilations se font **sur votre ordinateur avec `gradle build`**, le `.jar`
+  s'enregistre d'un clic.
 - **`atelier` en console** : les fichiers produits par le modèle sont **écrits directement dans
   le dossier de votre projet**, compilés en local, corrigés en boucle jusqu'au `.jar`.
 
 Dans les deux cas, JDK 25 et Gradle 9.7.1 sont installés par l'atelier, sans sudo. Seul l'appel au
 modèle IA passe par internet (NVIDIA, Groq, OpenRouter, Cloudflare… avec bascule automatique).
 
-## Interface graphique (`atelier ui`)
+## Application de bureau (`atelier ui`)
 
 ```bash
-atelier ui               # démarre le serveur local si besoin et ouvre la fenêtre
+atelier ui               # ouvre l'application (démarre le serveur local si besoin)
 ```
 
-Ou « **Atelier IA** » dans le menu des applications. La fenêtre s'ouvre en mode application de
-Chrome/Chromium/Brave/Edge s'il est installé, sinon dans le navigateur par défaut.
+Ou « **Atelier IA** » dans le menu des applications (l'icône peut être épinglée au dock).
 
-- Le serveur écoute **uniquement sur 127.0.0.1** (port 3210, ou le suivant s'il est pris) : pas de
-  mot de passe, rien n'est exposé au réseau. Les requêtes venant d'autres sites sont refusées.
+- **Une vraie fenêtre** (Electron, le moteur de VS Code ou Discord) : menus Fichier / Édition /
+  Aller / Affichage / Aide, menu contextuel (copier, coller, correcteur orthographique français),
+  taille de fenêtre mémorisée, une seule instance (relancer ramène la fenêtre), notification à la
+  fin d'une compilation quand la fenêtre est en arrière-plan.
+- **Fermeture** : le serveur local s'arrête avec l'application. Si une tâche de fond tourne,
+  l'application propose de la **laisser tourner en arrière-plan** (le serveur continue, rouvrez
+  Atelier IA pour voir le résultat) ou de tout arrêter (la tâche reprendra au prochain lancement).
+- Les liens externes s'ouvrent dans votre navigateur ; la fenêtre n'affiche que l'atelier.
+- Electron est téléchargé une seule fois (≈ 120 Mo, depuis github.com/electron, somme SHA-256
+  vérifiée) dans `~/.local/share/atelier/electron`, sans sudo. Sur les Ubuntu qui restreignent
+  les espaces de noms (24.04+), le bac à sable de Chromium n'est pas disponible sans droits
+  administrateur : l'application le détecte et se lance sans lui (elle n'affiche que l'atelier
+  local, jamais de site externe).
+- Le serveur écoute **uniquement sur 127.0.0.1** (port 3210, ou le suivant s'il est pris) : pas
+  de mot de passe, rien n'est exposé au réseau. Les requêtes venant d'autres sites sont refusées.
 - Il utilise les clés de `atelier config` ; après un changement, `atelier ui` redémarre le serveur
   tout seul.
-- Conversations et réglages : `~/.local/share/atelier/ui` (base locale). Projets compilés :
-  `~/.local/share/atelier/compilations`.
-- Node (LTS) est téléchargé dans `~/.local/share/atelier/node` si votre système n'en a pas de
-  récent (somme SHA-256 vérifiée, sans sudo).
+- Conversations et réglages : `~/.local/share/atelier/ui` (base locale). Jars compilés :
+  `~/.local/share/atelier/compilations/jars` (menu Fichier → Ouvrir le dossier des compilations).
 
 | Commande | Effet |
 |---|---|
+| `atelier ui --navigateur` | ouvrir dans le navigateur au lieu de l'application |
 | `atelier ui --arreter` | arrêter le serveur |
 | `atelier ui --redemarrer` | redémarrer le serveur |
-| `atelier ui --sans-fenetre` | démarrer sans ouvrir de fenêtre (adresse affichée) |
+| `atelier ui --sans-fenetre` | démarrer le serveur sans ouvrir de fenêtre (adresse affichée) |
 | `atelier ui --port 4000` | autre port |
 
 Journal du serveur : `~/.local/share/atelier/ui/ui.log`.
@@ -60,6 +73,7 @@ Seul prérequis : `python3` 3.10 ou plus récent, présent d'office sur Ubuntu 2
 | Commande | `~/.local/bin/atelier` | ajoutée au `PATH` via `~/.bashrc` si besoin |
 | Interface graphique | `~/.local/share/atelier/web` | application livrée dans l'archive (dossier `web/`) |
 | Node LTS | `~/.local/share/atelier/node` | seulement si le système n'a pas Node 20.9+ ; nodejs.org, SHA-256 vérifié |
+| Electron 44 | `~/.local/share/atelier/electron` | fenêtre de l'application ; github.com/electron, SHA-256 vérifié |
 | Entrée de menu | `~/.local/share/applications/atelier-ia.desktop` | « Atelier IA » |
 
 L'environnement Python est créé par la première méthode qui fonctionne sur votre machine :

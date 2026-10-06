@@ -1,0 +1,9 @@
+{
+  "name": "atelier-ia",
+  "productName": "Atelier IA",
+  "version": "1.2.0",
+  "description": "Atelier IA : chat, projets Gradle et mods Minecraft, compilés sur cet ordinateur",
+  "main": "main.js",
+  "desktopName": "atelier-ia.desktop",
+  "private": true
+}

@@ -62,6 +62,9 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   dans `desktop/web/` (ignoré par git), lancée avec Node sur 127.0.0.1 sans mot de passe (`src/lib/auth/local.ts` :
   anti-rebinding DNS + anti-CSRF ; jamais actif si `VERCEL`). Compilation locale : `src/lib/compilation/locale.ts`
   (`gradle build`, espace par conversation, branche `local/<id>`). Réveil des tâches : `src/instrumentation.ts`.
+  Fenêtre : application Electron (`desktop/atelier/bureau/main.js`, version épinglée `ELECTRON_VERSION` dans ui.py,
+  téléchargée sans sudo) ; repli sans bac à sable détecté automatiquement ; fermeture = arrêt du serveur
+  (sauf « laisser tourner » si une tâche de fond est active).
 - `src/app/` — pages (`/` accueil, `/chat` nouvelle conversation, `/c/[id]`, `/taches`, `/etat`)
   et routes API. `src/components/` — UI.
 

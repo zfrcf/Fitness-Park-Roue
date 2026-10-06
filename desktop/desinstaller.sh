@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retire l'atelier IA local : environnement Python, JDK, Gradle, Node, interface, cache, entrée
+# Retire l'atelier IA local : environnement Python, JDK, Gradle, Node, Electron, interface, cache, entrée
 # de menu et commande « atelier ».
 # Vos projets (~/AtelierProjets), votre configuration (~/.config/atelier) et les conversations de
 # l'interface (~/.local/share/atelier/ui) sont CONSERVÉS, sauf avec --tout (configuration et
@@ -22,7 +22,7 @@ if [[ -x "$DONNEES/gradle/bin/gradle" ]]; then
 fi
 if [[ -L "$BIN/atelier" ]] || grep -qs "atelier" "$BIN/atelier"; then rm -f "$BIN/atelier"; fi
 if [[ "${1:-}" == "--tout" ]]; then
-  rm -rf "$DONNEES" "$CONFIG"
+  rm -rf "$DONNEES" "$CONFIG" "${XDG_CONFIG_HOME:-$HOME/.config}/atelier-ia"
   echo "Atelier retiré ($DONNEES), configuration et conversations comprises ($CONFIG)."
 else
   if [[ -d "$DONNEES" ]]; then

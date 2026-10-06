@@ -65,7 +65,7 @@ describe("masquerFichiersConnus", () => {
   it("remplace les blocs des fichiers connus et garde le reste", () => {
     const r = masquerFichiersConnus(reponse1, new Set(["build.gradle"]));
     expect(r).toContain("Voici le projet.");
-    expect(r).toContain("[fichier `build.gradle` : voir l'état du projet]");
+    expect(r).toContain("⟦note de l'application : fichier build.gradle ; contenu actuel dans l'état du projet ⟧");
     expect(r).not.toContain("fabric-loom");
     expect(r).toContain("int v = 1");
   });

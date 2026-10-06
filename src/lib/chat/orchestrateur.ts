@@ -338,15 +338,20 @@ async function tenter(
   const controleur = new AbortController();
   const onAbort = () => controleur.abort();
   p.signal?.addEventListener("abort", onAbort, { once: true });
-  const delai = deps.delaiInactiviteMs ?? 60_000;
+  // Kimi K3 (NVIDIA) met souvent près d'une minute avant son premier token (file d'attente,
+  // raisonnement) : on lui laisse 2 min pour démarrer, puis 60 s entre deux données comme aux autres.
+  const delaiSuivant = deps.delaiInactiviteMs ?? 60_000;
+  const delaiPremier = deps.delaiInactiviteMs ?? (f.famille === "nvidia" ? 120_000 : 60_000);
+  let delai = delaiPremier; // délai en cours (repris dans le message d'erreur)
   let minuteur: ReturnType<typeof setTimeout> | undefined;
   let inactif = false;
-  const armer = () => {
+  const armer = (ms: number = delaiSuivant) => {
+    delai = ms;
     if (minuteur) clearTimeout(minuteur);
     minuteur = setTimeout(() => {
       inactif = true;
       controleur.abort();
-    }, delai);
+    }, ms);
   };
 
   let emis = "";
@@ -371,7 +376,7 @@ async function tenter(
   };
 
   try {
-    armer();
+    armer(delaiPremier);
     const avecOutils = outils && Object.keys(outils).length > 0 && !continuation;
     const resultat = streamText({
       model: deps.creerModele(f, { raisonnement: p.reglages.raisonnement }),
@@ -381,7 +386,11 @@ async function tenter(
       maxOutputTokens: ajuste.maxSortie,
       maxRetries: 0,
       abortSignal: controleur.signal,
-      ...(avecOutils ? { tools: outils, stopWhen: stepCountIs(3) } : {}), // au plus deux recherches par réponse
+      // Au plus deux recherches par réponse, puis une dernière étape SANS outil : sinon un modèle qui
+      // enchaîne les recherches (Groq) épuise les étapes et s'arrête sans avoir rien écrit.
+      ...(avecOutils
+        ? { tools: outils, stopWhen: stepCountIs(3), prepareStep: ({ stepNumber }: { stepNumber: number }) => (stepNumber >= 2 ? { toolChoice: "none" as const, activeTools: [] } : {}) }
+        : {}),
       onError: () => {}, // les erreurs arrivent aussi dans le flux
     });
 

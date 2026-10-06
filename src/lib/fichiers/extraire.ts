@@ -99,6 +99,8 @@ export function lirePairesModification(corps: string): Array<{ chercher: string;
       if (RE_SEPARATEUR.test(ligne)) etat = "remplacer";
       else chercher.push(ligne);
     } else if (RE_FIN_REMPLACER.test(ligne)) {
+      // Les modèles ajoutent parfois un « ======= » de trop juste avant la fin : ce n'est pas du code.
+      while (remplacer.length && RE_SEPARATEUR.test(remplacer[remplacer.length - 1])) remplacer.pop();
       paires.push({ chercher: chercher.join("\n"), remplacer: remplacer.join("\n") });
       etat = "hors";
     } else remplacer.push(ligne);
@@ -230,4 +232,31 @@ export function nomArchive(fichiers: FichierGenere[], defaut = "fichiers"): stri
     }
   }
   return defaut;
+}
+
+/**
+ * Bloc de fichier encore ouvert à la fin d'un texte en cours d'écriture (réponse en flux) :
+ * le fichier que le modèle est en train d'écrire, pour l'afficher en direct dans l'explorateur.
+ */
+export function blocOuvert(markdown: string): { chemin: string; modification: boolean } | null {
+  const lignes = markdown.split("\n");
+  let ouverture: { indice: number; fence: string; info: string } | null = null;
+  for (let i = 0; i < lignes.length; i++) {
+    if (!ouverture) {
+      const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(lignes[i]);
+      if (m) ouverture = { indice: i, fence: m[1], info: m[2] };
+    } else {
+      const m = /^\s*(`{3,}|~{3,})\s*$/.exec(lignes[i]);
+      if (m && m[1][0] === ouverture.fence[0] && m[1].length >= ouverture.fence.length) ouverture = null;
+    }
+  }
+  if (!ouverture) return null;
+  const { langue, chemin: cheminInfo } = cheminDepuisInfo(ouverture.info);
+  let chemin = cheminInfo ?? null;
+  if (!chemin) {
+    let k = ouverture.indice - 1;
+    while (k >= 0 && !lignes[k].trim()) k--;
+    if (k >= 0) chemin = cheminDepuisLigne(lignes[k]);
+  }
+  return chemin ? { chemin, modification: !!langue && RE_LANGUE_MODIF.test(langue) } : null;
 }

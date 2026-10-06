@@ -334,6 +334,14 @@ describe("rotation des fournisseurs", () => {
     expect(r.meta.usage?.total).toBe(40 + 69);
   });
 
+  it("termine toujours par une réponse écrite, même si le modèle voudrait chercher sans fin", async () => {
+    const r = await executer([fournisseur("A", "outil-acharne")], {}, "Ajoute une commande /aurevoir", "conv-oa", { recherche_web: outilRecherche });
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse finale après les recherches.");
+    const appels = serveur.appels.filter((a) => a.scenario === "outil-acharne");
+    expect(appels.filter((a) => a.corps.tool_choice !== "none" && a.corps.tools).length).toBe(2); // au plus deux recherches
+  });
+
   it("retente sans outils si le fournisseur les refuse", async () => {
     const r = await executer([fournisseur("R", "outil-refuse")], {}, "Bonjour", "conv-or", { recherche_web: outilRecherche });
     expect(r.erreur).toBeUndefined();

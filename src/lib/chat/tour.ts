@@ -76,11 +76,14 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       (o.rechercheWeb === true
         ? "des résultats de recherche web te sont fournis dans le message : appuie-toi dessus et cite tes sources en liens Markdown."
         : reglages.rechercheAuto
-          ? "utilise l'outil recherche_web avant d'affirmer qu'une chose n'existe pas, puis cite tes sources en liens Markdown."
+          ? "utilise l'outil recherche_web avant d'affirmer qu'une chose n'existe pas, puis cite tes sources en liens Markdown. " +
+            "Ne cherche que ce qui le mérite (une API, une version, une information récente) : jamais pour un texte donné par l'utilisateur " +
+            "ni pour modifier un code dont tu as déjà l'état complet."
           : "précise que tu n'as pas pu vérifier et invite l'utilisateur à activer la recherche web (bouton globe).") +
       "\n\nQuand tu produis des fichiers (projet, script, configuration, datapack, mod…), écris chaque fichier dans son propre bloc de code " +
       "avec son chemin complet sur la ligne d'ouverture, par exemple ```java src/main/java/com/exemple/MonMod.java ou ```json fabric.mod.json. " +
-      "Livre des projets complets et cohérents (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») : " +
+      "Un NOUVEAU projet se livre complet et cohérent (tous les fichiers nécessaires, pas de « … » ni de « à compléter ») ; " +
+      "un projet existant se modifie fichier par fichier (voir la règle ci-dessous) : " +
       "l'utilisateur peut les télécharger un par un ou en archive .zip directement depuis la conversation, " +
       (modeLocal()
         ? "et compiler un projet Gradle (mod Minecraft) sur son ordinateur (gradle build) en un clic ; si la compilation automatique est activée, chaque réponse "
@@ -139,7 +142,8 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
         systeme:
           `${reglages.systeme}\n\nATTENTION : dans ta dernière réponse, ces modifications n'ont PAS pu être appliquées (le texte CHERCHER ne correspondait pas exactement au fichier) et l'état ci-dessus ne les contient pas :\n` +
           echecsDernier.map((e) => `- ${e.chemin} : ${e.raison}`).join("\n") +
-          "\nRenvoie ces fichiers EN ENTIER (ou refais la modification avec un texte CHERCHER copié à l'identique).",
+          "\nRefais ces modifications avec un texte CHERCHER copié caractère pour caractère depuis l'état du projet ci-dessus ; " +
+          "renvoie le fichier entier seulement si c'est vraiment impossible.",
       };
     }
   }

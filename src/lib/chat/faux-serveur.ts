@@ -26,6 +26,7 @@ export type Scenario =
   | "degenere" // première réponse « !!!!!!!! », les suivantes normales
   | "otpm" // Groq : refuse si max_tokens > 1000 (OTPM), sinon répond normalement
   | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
+  | "outil-acharne" // appelle l'outil tant qu'on le lui permet ; répond seulement quand les outils sont retirés
   | "outil-refuse"; // 400 si des outils sont envoyés, sinon réponse normale
 
 export interface Appel {
@@ -208,6 +209,20 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
         sse();
         res.write(chunk(id, "Réponse sans outil."));
         res.end(finChunk(id, 20, 4));
+        return;
+      }
+      case "outil-acharne": {
+        sse();
+        const outilsPermis = Array.isArray(corps.tools) && corps.tools.length > 0 && corps.tool_choice !== "none";
+        if (outilsPermis) {
+          const n = (corps.messages as Array<{ role: string }>).filter((m) => m.role === "tool").length;
+          res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${n}`, type: "function", function: { name: "recherche_web", arguments: JSON.stringify({ requete: `requete ${n}` }) } }] }, finish_reason: null }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: 1, model: "faux", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 } })}\n\n`);
+          res.end("data: [DONE]\n\n");
+          return;
+        }
+        res.write(chunk(id, "Réponse finale après les recherches."));
+        res.end(finChunk(id, 60, 9));
         return;
       }
       case "outil": {

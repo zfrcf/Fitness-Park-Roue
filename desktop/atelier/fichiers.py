@@ -168,6 +168,9 @@ def lire_paires(corps: str) -> list[tuple[str, str]]:
             else:
                 chercher.append(ligne)
         elif _RE_REMPLACER.match(ligne):
+            # Les modèles ajoutent parfois un « ======= » de trop juste avant la fin : ce n'est pas du code.
+            while remplacer and _RE_SEPARATEUR.match(remplacer[-1]):
+                remplacer.pop()
             paires.append(("\n".join(chercher), "\n".join(remplacer)))
             etat = "hors"
         else:

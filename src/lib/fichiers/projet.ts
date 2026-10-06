@@ -65,6 +65,10 @@ export function fusionnerProjetDetaille(messages: MessageMinimal[]): { fichiers:
       projet.set(f.chemin, { ...f, messageId: m.id, revision });
       change = true;
     }
+    const ecrits = new Set([...fichiers.map((f) => f.chemin), ...extraireModifications(texte).map((x) => x.chemin)]);
+    for (const chemin of modificationsFantomes(texte, ecrits)) {
+      echecs.push({ messageId: m.id, chemin, raison: "modification annoncée mais non écrite (aucun bloc ```modif dans la réponse)" });
+    }
     for (const modif of extraireModifications(texte)) {
       if (RE_CHEMIN_RESERVE.test(modif.chemin)) continue;
       const actuel = projet.get(modif.chemin);
@@ -149,17 +153,20 @@ export function fichiersModifiesPar(projet: FichierProjet[], messageId: string):
 
 /** Mode d'emploi des modifications partielles, donné au modèle (prompt système et messages de correction). */
 export const INSTRUCTION_MODIFICATIONS =
-  "Pour un changement localisé dans un fichier existant, n'écris pas le fichier entier : utilise un bloc de modification " +
-  "```modif chemin/du/fichier contenant une ou plusieurs paires exactes :\n" +
+  "RÈGLE IMPÉRATIVE pour les fichiers qui existent déjà : ne les réécris JAMAIS en entier. Modifie-les avec un bloc " +
+  "```modif chemin/du/fichier contenant une ou plusieurs paires (autant que de changements) :\n" +
   "<<<<<<< CHERCHER\n(lignes existantes, copiées à l'identique, assez longues pour être uniques)\n=======\n(nouvelles lignes)\n>>>>>>> REMPLACER\n" +
-  "Le texte CHERCHER doit exister tel quel dans le fichier (indentation comprise). Renvoie un fichier EN ENTIER seulement s'il est " +
-  "nouveau ou presque entièrement réécrit.";
+  "Le texte CHERCHER doit exister tel quel dans le fichier (indentation comprise) ; pour ajouter du code, cherche la ligne voisine et " +
+  "remplace-la par elle-même plus les nouvelles lignes. Un fichier n'est écrit en entier que s'il est NOUVEAU, ou si plus de la moitié de " +
+  "ses lignes change. Ne renvoie jamais un fichier inchangé.";
 
 export const INSTRUCTION_PROJET =
   "Un projet est déjà en cours dans cette conversation : son état complet et à jour est donné ci-dessous " +
   "(c'est la seule version qui compte ; les blocs de code de tes réponses précédentes ont été remplacés par des renvois). " +
   "Pour toute modification ou correction, ne touche qu'aux fichiers concernés et ne récris jamais les fichiers inchangés. " +
   INSTRUCTION_MODIFICATIONS +
+  " Dans l'historique, tes anciens blocs de code sont remplacés par des notes « ⟦note de l'application : …⟧ » : ne les écris " +
+  "JAMAIS toi-même ; une modification n'existe que si tu écris le bloc ```modif complet." +
   " Pour supprimer un fichier, écris une ligne « Supprimer : chemin ». L'utilisateur compile et télécharge toujours le projet " +
   "complet (état ci-dessous + tes modifications).";
 
@@ -198,8 +205,26 @@ export function blocProjetPourModele(projet: FichierProjet[], budgetTokens: numb
 /** Remplace, dans une réponse passée, les blocs des fichiers connus par un renvoi à l'état du projet. */
 export function masquerFichiersConnus(markdown: string, chemins: Set<string>): string {
   return remplacerBlocsFichiers(markdown, (chemin, modification) =>
-    chemins.has(chemin) ? (modification ? `[modification de \`${chemin}\` : appliquée, voir l'état du projet]` : `[fichier \`${chemin}\` : voir l'état du projet]`) : null,
+    chemins.has(chemin) ? (modification ? `${NOTE_APPLICATION} bloc modif de ${chemin} appliqué ; contenu actuel dans l'état du projet ⟧` : `${NOTE_APPLICATION} fichier ${chemin} ; contenu actuel dans l'état du projet ⟧`) : null,
   );
+}
+
+/**
+ * Préfixe des notes qui remplacent les anciens blocs de code dans l'historique envoyé au modèle.
+ * Volontairement sans ressemblance avec un format de réponse : un modèle qui imitait l'ancienne
+ * note « [modification de x : appliquée] » croyait avoir modifié le fichier sans rien écrire.
+ */
+export const NOTE_APPLICATION = "⟦note de l'application :";
+
+/**
+ * Fichiers qu'une réponse prétend avoir modifiés sans contenir de bloc pour eux (note recopiée,
+ * « [modification de x : appliquée] »…) : la modification n'a pas eu lieu.
+ */
+export function modificationsFantomes(markdown: string, cheminsEcrits: Set<string>): string[] {
+  const out = new Set<string>();
+  const motifs = [/⟦note de l'application\s*:\s*(?:bloc modif de|fichier)\s+(\S+)/g, /\[modification de `([^`]+)`\s*:\s*appliquée/g, /\[fichier `([^`]+)`\s*:\s*voir l'état du projet\]/g];
+  for (const re of motifs) for (const m of markdown.matchAll(re)) if (!cheminsEcrits.has(m[1])) out.add(m[1]);
+  return [...out];
 }
 
 /** Chemins à supprimer demandés dans une réponse (« Supprimer : chemin »). */

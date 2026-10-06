@@ -71,3 +71,11 @@ def test_marqueurs_nus_acceptes():
     md = "```modif src/A.java\n<<<<<<<\nint v = 1;\n=======\nint v = 2;\n>>>>>>>\n```"
     (m,) = extraire_modifications(md)
     assert m.remplacements == [("int v = 1;", "int v = 2;")]
+
+
+def test_separateur_en_trop_avant_la_fin_ignore():
+    """Cas réel (NVIDIA) : « ======= » répété juste avant >>>>>>> REMPLACER, qui corrompait le fichier."""
+    from atelier.fichiers import lire_paires
+
+    corps = "<<<<<<< CHERCHER\nancien();\n=======\nnouveau();\n=======\n>>>>>>> REMPLACER"
+    assert lire_paires(corps) == [("ancien();", "nouveau();")]

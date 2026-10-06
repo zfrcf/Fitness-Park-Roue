@@ -303,7 +303,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await deps.journaliser(tacheId, "la réponse ne modifie aucun fichier : correction redemandée sans recompiler");
           await deps.ajouterMessageUtilisateur(
             t.conversationId,
-            "Ta réponse ne contenait aucun fichier modifié. Personne ne peut répondre à tes questions : décide toi-même et renvoie EN ENTIER chaque fichier corrigé, chacun dans son bloc de code avec son chemin.",
+            `Ta réponse ne contenait aucun fichier modifié. Personne ne peut répondre à tes questions : décide toi-même et livre les corrections. ${INSTRUCTION_MODIFICATIONS}`,
           );
           await deps.majTache(tacheId, { cycles });
           await suspendre(0, "aucune modification : correction");

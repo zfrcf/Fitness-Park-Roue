@@ -204,7 +204,7 @@ Depuis la 26.x, Minecraft n'utilise plus la numérotation 1.21.x ; la dernière 
 {regle_api}
 - Mixins : sans refmap, cibles en noms Mojang (ex. @Mixin(MinecraftServer.class) + @Inject(method = "loadLevel", at = @At("HEAD"))), "compatibilityLevel": "JAVA_{j}" ; liste chaque mixin dans <modid>.mixins.json. Dans fabric.mod.json, dépends de "fabric-api" (l'ancien id "fabric" n'existe plus).
 - Ne fournis NI gradlew NI gradle-wrapper.jar (Gradle est déjà installé), NI icône.
-- Chaque fichier dans son propre bloc de code avec son chemin complet. Projet complet : build.gradle, settings.gradle, gradle.properties, fabric.mod.json, <modid>.mixins.json (même sans mixin), classe principale, et le reste.
+- Chaque fichier dans son propre bloc de code avec son chemin complet. Nouveau projet : projet complet (build.gradle, settings.gradle, gradle.properties, fabric.mod.json, <modid>.mixins.json même sans mixin, classe principale, et le reste). Projet existant : uniquement des blocs ```modif pour les fichiers qui changent, les nouveaux fichiers en entier, jamais un fichier inchangé.
 - Le mod id : minuscules, chiffres, tirets bas ; identique dans fabric.mod.json, settings.gradle (rootProject.name) et le nom du fichier mixins.
 - Préfère les API Fabric stables (ModInitializer, Registry, ServerTickEvents, CommandRegistrationCallback). Si tu n'es pas sûr d'un nom de classe ou de méthode pour cette version, dis-le plutôt que d'inventer.
 

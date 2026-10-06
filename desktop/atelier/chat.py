@@ -20,11 +20,12 @@ JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 
 INSTRUCTION_MODIFICATIONS = (
-    "Pour un changement localisé dans un fichier existant, n'écris pas le fichier entier : utilise un bloc de modification "
-    "```modif chemin/du/fichier contenant une ou plusieurs paires exactes :\n"
+    "RÈGLE IMPÉRATIVE pour les fichiers qui existent déjà : ne les réécris JAMAIS en entier. Modifie-les avec un bloc "
+    "```modif chemin/du/fichier contenant une ou plusieurs paires (autant que de changements) :\n"
     "<<<<<<< CHERCHER\n(lignes existantes, copiées à l'identique, assez longues pour être uniques)\n=======\n(nouvelles lignes)\n>>>>>>> REMPLACER\n"
-    "Le texte CHERCHER doit exister tel quel dans le fichier (indentation comprise). Renvoie un fichier EN ENTIER seulement s'il est "
-    "nouveau ou presque entièrement réécrit."
+    "Le texte CHERCHER doit exister tel quel dans le fichier (indentation comprise) ; pour ajouter du code, cherche la ligne voisine et "
+    "remplace-la par elle-même plus les nouvelles lignes. Un fichier n'est écrit en entier que s'il est NOUVEAU, ou si plus de la moitié de "
+    "ses lignes change. Ne renvoie jamais un fichier inchangé."
 )
 
 
@@ -41,7 +42,8 @@ def systeme_base() -> str:
         "appuie-toi sur le contexte fourni ou dis ce que tu n'as pas pu vérifier.\n\n"
         "Les fichiers que tu produis sont ÉCRITS DIRECTEMENT dans le dossier du projet de l'utilisateur. Écris chaque fichier dans son "
         "propre bloc de code avec son chemin relatif complet sur la ligne d'ouverture, par exemple ```java src/main/java/com/exemple/App.java "
-        "ou ```json src/main/resources/fabric.mod.json. Livre des projets complets et cohérents (pas de « … » ni de « à compléter »). "
+        "ou ```json src/main/resources/fabric.mod.json. Un NOUVEAU projet se livre complet et cohérent (pas de « … » ni de « à compléter ») ; "
+        "un projet existant se modifie fichier par fichier (voir la règle ci-dessous). "
         + INSTRUCTION_MODIFICATIONS
         + " Pour supprimer un fichier, écris une ligne « Supprimer : chemin ».\n\n"
         "Compilation : l'atelier lance « gradle build » en local dans le dossier du projet (Gradle et le JDK sont déjà installés : "
@@ -127,7 +129,8 @@ class Session:
             systeme += (
                 "\n\nATTENTION : dans ta dernière réponse, ces modifications n'ont PAS pu être appliquées (le texte CHERCHER ne "
                 "correspondait pas exactement au fichier) :\n" + "\n".join(f"- {e}" for e in self.echecs_dernier)
-                + "\nRenvoie ces fichiers EN ENTIER (ou refais la modification avec un texte CHERCHER copié à l'identique)."
+                + "\nRefais ces modifications avec un texte CHERCHER copié caractère pour caractère depuis l'état du projet ; "
+                "renvoie le fichier entier seulement si c'est vraiment impossible."
             )
         # Historique : les fichiers déjà dans le projet sont remplacés par des renvois, puis on garde
         # le premier message (l'objectif) et les plus récents qui tiennent dans le budget.
@@ -251,7 +254,7 @@ class Session:
                     return r
                 consigne = (
                     "Ta réponse ne modifiait aucun fichier du projet, donc la compilation échouerait de la même façon. "
-                    "Livre la correction maintenant, sous forme de blocs de code complets ou de blocs ```modif."
+                    "Livre la correction maintenant : blocs ```modif pour les fichiers existants, fichiers entiers seulement pour les nouveaux."
                 )
 
 

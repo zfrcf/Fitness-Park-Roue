@@ -46,7 +46,13 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
 - `src/lib/minecraft/contexte.ts` — versions Minecraft en direct + modèle de projet Fabric injecté
   dans le prompt. **Distingue 26.x (non obfusqué, pas de mappings, plugin `fabric-loom`) et 1.21.x
   (obfusqué, `fabric-loom-remap` + `officialMojangMappings()`).** Vérifié par compilation réelle.
-- `src/lib/fichiers/` — extraction des fichiers depuis le Markdown, fusion de l'état du projet.
+- `src/lib/fichiers/` — extraction des fichiers depuis le Markdown, fusion de l'état du projet (blocs ```modif,
+  notes « ⟦note de l'application : …⟧ » dans l'historique, modifications « fantômes » signalées comme échecs).
+  `explorateur.ts` : arbre compacté, lignes modifiées (LCS), découpage hljs par ligne ; `blocOuvert` (extraire.ts) :
+  fichier en cours d'écriture pendant le flux.
+- `src/components/explorateur/` — explorateur façon VS Code (arborescence, onglets d'aperçu, éditeur coloré, gouttière
+  des lignes modifiées, U/M, suivi de l'écriture en direct) ; panneau redimensionnable de `fenetre-chat.tsx`
+  (Ctrl+Maj+E, événements `atelier:explorateur` et `atelier:ouvrir-fichier`).
 - `src/lib/db/` — Drizzle. Neon Postgres si `DATABASE_URL`/`POSTGRES_URL`, sinon PGlite
   (`data/pglite`). DDL idempotent exécuté au premier accès (pas de migrations).
 - `src/lib/kv.ts` — Upstash Redis si configuré (`KV_REST_API_*` ou `UPSTASH_REDIS_REST_*`), sinon

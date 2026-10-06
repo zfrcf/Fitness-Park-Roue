@@ -2,11 +2,13 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { ArrowDown, Bot, ListChecks, Loader2 } from "lucide-react";
+import { ArrowDown, Bot, Files, ListChecks, Loader2 } from "lucide-react";
 import Link from "next/link";
 import type { TachePublique } from "@/lib/db/taches";
 import { detecterTacheLongue } from "@/lib/taches/detecter";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Explorateur } from "@/components/explorateur/explorateur";
+import { blocOuvert } from "@/lib/fichiers/extraire";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,36 @@ const SUGGESTIONS = [
   "Explique-moi la différence entre marge brute et marge nette avec un exemple",
   "Propose un plan de réunion d'équipe de 30 minutes",
 ];
+
+/* Préférences de l'explorateur (par navigateur) : ouvert/fermé et largeur du panneau. */
+const CLE_EXPLORATEUR = "atelier:explorateur";
+const CLE_LARGEUR = "atelier:explorateur:largeur";
+const abonnesPref = new Set<() => void>();
+function lirePref(cle: string): string | null {
+  try {
+    return localStorage.getItem(cle);
+  } catch {
+    return null;
+  }
+}
+function ecrirePref(cle: string, valeur: string) {
+  try {
+    localStorage.setItem(cle, valeur);
+  } catch {
+    /* stockage indisponible : préférence non retenue */
+  }
+  abonnesPref.forEach((f) => f());
+}
+function usePref(cle: string, defaut: string): string {
+  return useSyncExternalStore(
+    (f) => {
+      abonnesPref.add(f);
+      return () => abonnesPref.delete(f);
+    },
+    () => lirePref(cle) ?? defaut,
+    () => defaut,
+  );
+}
 
 function texteDe(m: MessageUI | undefined): string {
   return m ? m.parts.filter((p) => p.type === "text").map((p) => p.text).join("") : "";
@@ -172,6 +204,55 @@ export function FenetreChat({
     dernierScrollTop.current = el.scrollTop;
   }
 
+  // Explorateur en direct : projet y compris la réponse en cours d'écriture, état avant la dernière
+  // réponse (décorations U/M et lignes modifiées) et fichier en train d'être écrit.
+  const messagesDirect = useDeferredValue(messages);
+  const projetDirect = useMemo(() => fusionnerProjetDetaille(messagesDirect).fichiers, [messagesDirect]);
+  const precedents = useMemo(() => {
+    const fin = messagesDirect.at(-1)?.role === "assistant" ? messagesDirect.slice(0, -1) : messagesDirect;
+    return new Map(fusionnerProjetDetaille(fin).fichiers.map((f) => [f.chemin, f.contenu]));
+  }, [messagesDirect]);
+  const derniereReponse = messagesDirect.at(-1);
+  const enEcriture = useMemo(
+    () => (occupe && derniereReponse?.role === "assistant" ? blocOuvert(texteDe(derniereReponse)) : null),
+    [occupe, derniereReponse],
+  );
+  const explorateurOuvert = usePref(CLE_EXPLORATEUR, "1") === "1" && projetDirect.length > 0;
+  const largeurExplorateur = Math.max(380, Number(usePref(CLE_LARGEUR, "760")) || 760);
+  const basculerExplorateur = useCallback(() => ecrirePref(CLE_EXPLORATEUR, lirePref(CLE_EXPLORATEUR) === "0" ? "1" : "0"), []);
+  useEffect(() => {
+    const clavier = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        basculerExplorateur();
+      }
+    };
+    const ouvrir = () => ecrirePref(CLE_EXPLORATEUR, "1");
+    window.addEventListener("keydown", clavier);
+    window.addEventListener("atelier:explorateur", basculerExplorateur); // menu de l'application de bureau
+    window.addEventListener("atelier:ouvrir-fichier", ouvrir);
+    return () => {
+      window.removeEventListener("keydown", clavier);
+      window.removeEventListener("atelier:explorateur", basculerExplorateur);
+      window.removeEventListener("atelier:ouvrir-fichier", ouvrir);
+    };
+  }, [basculerExplorateur]);
+  function redimensionner(e: React.PointerEvent) {
+    e.preventDefault();
+    const deplacer = (ev: PointerEvent) => {
+      const l = Math.min(window.innerWidth - 420, Math.max(380, window.innerWidth - ev.clientX));
+      ecrirePref(CLE_LARGEUR, String(Math.round(l)));
+    };
+    const finir = () => {
+      window.removeEventListener("pointermove", deplacer);
+      window.removeEventListener("pointerup", finir);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", deplacer);
+    window.addEventListener("pointerup", finir);
+  }
+
   // État du projet (fusion des fichiers de toutes les réponses) et taille estimée du contexte.
   const messagesStables = occupe ? messages.slice(0, -1) : messages;
   const { fichiers: projet, echecs } = useMemo(() => fusionnerProjetDetaille(messagesStables), [messagesStables]);
@@ -258,7 +339,19 @@ export function FenetreChat({
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {projetDirect.length > 0 && !explorateurOuvert && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="absolute top-2 right-3 z-20 shadow-sm"
+          onClick={basculerExplorateur}
+          title="Ouvrir l'explorateur de fichiers (Ctrl+Maj+E)"
+        >
+          {enEcriture ? <Loader2 className="animate-spin" /> : <Files />} Fichiers · {projetDirect.length}
+        </Button>
+      )}
       {tache && (
         <div className={cn("flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs", tacheActive ? "bg-primary/5" : "bg-muted/40")} role="status">
           {tacheActive ? <Loader2 className="size-3.5 animate-spin" /> : <ListChecks className="size-3.5" />}
@@ -374,6 +467,26 @@ export function FenetreChat({
         rechercheWeb={rechercheWeb}
         onRechercheWeb={setRechercheWeb}
       />
+    </div>
+    {explorateurOuvert && (
+      <>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Redimensionner l'explorateur"
+          onPointerDown={redimensionner}
+          className="hidden w-1 shrink-0 cursor-col-resize border-l bg-border/40 transition-colors hover:bg-primary/40 lg:block"
+        />
+        <Explorateur
+          fichiers={projetDirect}
+          precedents={precedents}
+          enEcriture={enEcriture}
+          onFermer={basculerExplorateur}
+          className="fixed inset-0 z-40 lg:static lg:z-auto lg:w-[var(--largeur-explorateur)] lg:shrink-0"
+          style={{ ["--largeur-explorateur" as string]: `${largeurExplorateur}px` }}
+        />
+      </>
+    )}
     </div>
   );
 }

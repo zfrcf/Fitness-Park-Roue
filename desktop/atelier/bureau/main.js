@@ -270,6 +270,12 @@ function menuPrincipal() {
     {
       label: "&Affichage",
       submenu: [
+        {
+          label: "Explorateur de fichiers",
+          accelerator: "CmdOrCtrl+Shift+E",
+          click: () => fenetre && void fenetre.webContents.executeJavaScript("window.dispatchEvent(new Event('atelier:explorateur'))"),
+        },
+        { type: "separator" },
         { label: "Recharger", role: "reload" },
         { type: "separator" },
         { label: "Zoom avant", role: "zoomIn" },

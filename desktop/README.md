@@ -25,6 +25,10 @@ Ou « **Atelier IA** » dans le menu des applications (l'icône peut être épin
   Aller / Affichage / Aide, menu contextuel (copier, coller, correcteur orthographique français),
   taille de fenêtre mémorisée, une seule instance (relancer ramène la fenêtre), notification à la
   fin d'une compilation quand la fenêtre est en arrière-plan.
+- **Explorateur de fichiers façon VS Code** (Ctrl+Maj+E ou menu Affichage) : arborescence du
+  projet, onglets, code coloré avec numéros de ligne. Pendant que le modèle écrit, le fichier
+  s'ouvre et se remplit en direct ; après une réponse, les fichiers nouveaux portent un **U**, les
+  modifiés un **M**, et les lignes changées sont surlignées en vert dans la marge.
 - **Fermeture** : le serveur local s'arrête avec l'application. Si une tâche de fond tourne,
   l'application propose de la **laisser tourner en arrière-plan** (le serveur continue, rouvrez
   Atelier IA pour voir le résultat) ou de tout arrêter (la tâche reprendra au prochain lancement).

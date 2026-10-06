@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { estProjetGradle, nomArchive, type FichierGenere } from "@/lib/fichiers/extraire";
+import { ouvrirDansExplorateur } from "@/lib/fichiers/explorateur";
 import { cn } from "@/lib/utils";
 import { formatNombre } from "@/lib/format";
 
@@ -82,10 +83,15 @@ export function PanneauFichiers({
       <ul className="max-h-64 divide-y overflow-y-auto">
         {fichiers.map((f) => (
           <li key={f.chemin} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-            <span className={cn("min-w-0 flex-1 truncate font-mono", modifies && !modifies.has(f.chemin) && "text-muted-foreground")} title={f.chemin}>
+            <button
+              type="button"
+              onClick={() => ouvrirDansExplorateur(f.chemin)}
+              className={cn("min-w-0 flex-1 truncate text-left font-mono hover:underline", modifies && !modifies.has(f.chemin) && "text-muted-foreground")}
+              title={`Ouvrir ${f.chemin} dans l'explorateur`}
+            >
               {f.chemin}
               {modifies?.has(f.chemin) && <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] font-sans text-primary">modifié</span>}
-            </span>
+            </button>
             <span className="shrink-0 tabular-nums text-muted-foreground">{formatNombre(f.contenu.length)} car.</span>
             <Button size="icon-xs" variant="ghost" aria-label={`Télécharger ${f.chemin}`} onClick={() => telechargerFichier(f)}>
               <Download />

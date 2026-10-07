@@ -15,13 +15,21 @@ describe("validerFichiers", () => {
     const e = validerFichiers([f(".github/workflows/build.yml"), f("gradlew")]);
     expect(e).toContain("aucun fichier à compiler");
   });
-  it("refuse les chemins dangereux, les doublons et l'absence de build.gradle", () => {
+  it("refuse les chemins dangereux, les doublons et un projet non reconnu", () => {
     const e = validerFichiers([f("../x"), f("/etc/passwd"), f("a.txt"), f("a.txt")]);
     expect(e.join("\n")).toMatch(/chemin refusé : \.\.\/x/);
     expect(e.join("\n")).toMatch(/chemin refusé : \/etc\/passwd/);
     expect(e.join("\n")).toMatch(/en double/);
-    expect(e.join("\n")).toMatch(/build\.gradle/);
+    expect(e.join("\n")).toMatch(/non reconnu/);
     expect(validerFichiers([])).toContain("aucun fichier à compiler");
+  });
+  it("accepte tous les langages reconnus par le script de construction", () => {
+    expect(validerFichiers([f("main.py")])).toEqual([]);
+    expect(validerFichiers([f("package.json"), f("src/index.ts")])).toEqual([]);
+    expect(validerFichiers([f("Cargo.toml"), f("src/main.rs")])).toEqual([]);
+    expect(validerFichiers([f("index.html")])).toEqual([]);
+    // Le script fourni par la chaîne n'est jamais repris du modèle.
+    expect(retirerReserves([f("main.py"), f(".atelier/construire.sh")]).map((x) => x.chemin)).toEqual(["main.py"]);
   });
   it("#44 : refuse .git/, les segments vides et « . »", () => {
     const e = validerFichiers([f("build.gradle"), f(".git/config"), f("a//b.txt"), f("a/./b.java"), f("src/x.java")]);
@@ -44,7 +52,8 @@ describe("retirerReserves", () => {
 describe("workflow et branches", () => {
   it("lit le workflow et nomme la branche", () => {
     expect(contenuWorkflow()).toContain("compilation/**");
-    expect(contenuWorkflow()).toContain("name: jar");
+    expect(contenuWorkflow()).toContain("name: resultat");
+    expect(contenuWorkflow()).toContain("bash .atelier/construire.sh");
     expect(nomBranche("abc")).toBe("compilation/abc");
     expect(depotCompilation({ GITHUB_REPO: "a/b" })).toEqual({ proprietaire: "a", nom: "b" });
     expect(() => depotCompilation({ GITHUB_REPO: "sans-slash" })).toThrow();
@@ -64,6 +73,11 @@ describe("resumerJournal", () => {
     expect(r).toContain("cannot find symbol");
     expect(r).toContain("What went wrong");
     expect(r.length).toBeLessThan(j.length);
+  });
+  it("reconnaît les erreurs des autres langages", () => {
+    const j = ["Collecting x", "Traceback (most recent call last):", '  File "a.py", line 3', "ZeroDivisionError: division by zero", "ok", "src/a.ts(3,5): error TS2322: Type 'string' is not assignable", "error[E0425]: cannot find value `x` in this scope", "main.c:(.text+0x5): undefined reference to `f'"].join("\n");
+    const r = resumerJournal(j);
+    for (const m of ["Traceback", "TS2322", "E0425", "undefined reference"]) expect(r).toContain(m);
   });
   it("replie sur la fin du journal et tronque", () => {
     expect(resumerJournal("a\nb\nc")).toBe("a\nb\nc");

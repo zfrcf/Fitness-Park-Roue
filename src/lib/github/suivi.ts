@@ -3,6 +3,7 @@ import { lireCompilation, majCompilation, type Compilation } from "@/lib/db/comp
 import { artefacts, extraireArtefact, resumerJournal, supprimerBranche, trouverRun } from "./compilation";
 import { ErreurGitHub } from "./api";
 import { estLocale, rafraichirLocale } from "@/lib/compilation/locale";
+import { nomProduit } from "@/lib/compilation/sortie";
 
 const TERMINAUX = new Set(["reussie", "echouee", "erreur"]);
 
@@ -29,7 +30,8 @@ export async function rafraichirCompilation(id: string): Promise<Compilation | n
     }
     // Terminé : artefacts.
     const liste = await artefacts(run.id);
-    const jar = liste.find((a) => a.name === "jar" && !a.expired);
+    // « resultat » : fichiers produits par le script universel ; « jar » : branches lancées avant lui.
+    const jar = liste.find((a) => a.name === "resultat" && !a.expired) ?? liste.find((a) => a.name === "jar" && !a.expired);
     const journalArt = liste.find((a) => a.name === "journal" && !a.expired);
     let journal: string | null = null;
     if (journalArt) {
@@ -45,7 +47,10 @@ export async function rafraichirCompilation(id: string): Promise<Compilation | n
     if (run.statut === "reussie" && jar) {
       try {
         const fichiers = await extraireArtefact(jar.id);
-        jarNom = fichiers.find((f) => f.nom.endsWith(".jar") && !/-(sources|dev|javadoc)\.jar$/.test(f.nom))?.nom ?? fichiers[0]?.nom ?? null;
+        jarNom = nomProduit(
+          fichiers.map((f) => f.nom),
+          c.nom,
+        );
       } catch {
         jarNom = null;
       }
@@ -56,7 +61,7 @@ export async function rafraichirCompilation(id: string): Promise<Compilation | n
       statut !== "erreur"
         ? null
         : !jar && run.statut === "reussie"
-          ? "Compilation réussie mais aucun .jar publié (vérifiez build/libs)."
+          ? "Construction réussie mais aucun résultat publié par GitHub."
           : `Le run GitHub s'est terminé (${run.conclusion ?? "sans conclusion"}) avant l'étape de compilation : aucun journal publié. Consultez le lien du run puis relancez.`;
     const maj = await majCompilation(id, { statut, runId: run.id, runUrl: run.url, journal, jarNom, jarArtefactId: jar?.id ?? null, erreur });
     void supprimerBranche(id);

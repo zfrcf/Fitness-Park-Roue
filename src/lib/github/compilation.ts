@@ -2,18 +2,22 @@
  * Compilation d'un projet via GitHub Actions :
  *  1) le projet est poussé (commit orphelin) sur une branche compilation/<id>, avec le workflow ;
  *  2) le workflow « compilation » tourne ; on suit son état par l'API ;
- *  3) le jar est récupéré depuis l'artefact « jar », le journal depuis « journal ».
+ *  3) les fichiers produits viennent de l'artefact « resultat » (« jar » pour les anciennes
+ *     branches), le journal de « journal ».
+ * Tous les langages passent par le même script (.atelier/construire.sh, script-construction.ts).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { FichierGenere } from "@/lib/fichiers/extraire";
+import { SCRIPT_CONSTRUCTION } from "@/lib/compilation/script-construction";
+import { CHEMIN_SCRIPT } from "@/lib/compilation/sortie";
+import { typeProjet, type FichierGenere } from "@/lib/fichiers/extraire";
 import { depotCompilation, github } from "./api";
 
 export const MAX_FICHIERS = 400;
 export const MAX_OCTETS = 3 * 1024 * 1024;
 const RE_CHEMIN_SUR = /^(?!\.{1,2}(\/|$))(?!\/)(?!.*\/\.\.(\/|$))[\w@.+ -][\w@.+\/ -]*$/;
 /** Chemins que la chaîne fournit elle-même : jamais envoyés, retirés sans refuser le projet. */
-export const RE_CHEMIN_RESERVE = /^\.github\/|^vercel\.json$|(^|\/)gradlew(\.bat)?$|(^|\/)gradle-wrapper\.(jar|properties)$/;
+export const RE_CHEMIN_RESERVE = /^\.github\/|^\.atelier\/|^\.atelier-sortie\/|^vercel\.json$|(^|\/)gradlew(\.bat)?$|(^|\/)gradle-wrapper\.(jar|properties)$/;
 
 /** Retire les fichiers réservés (workflow, wrapper Gradle) d'une liste. */
 export function retirerReserves(fichiers: FichierGenere[]): FichierGenere[] {
@@ -42,7 +46,9 @@ export function validerFichiers(fichiersBruts: FichierGenere[]): string[] {
     vus.add(f.chemin);
   }
   if (total > MAX_OCTETS) erreurs.push(`projet trop volumineux (${Math.round(total / 1024)} Ko > ${MAX_OCTETS / 1024} Ko)`);
-  if (!fichiers.some((f) => /^(build\.gradle(\.kts)?)$/.test(f.chemin))) erreurs.push("build.gradle (ou build.gradle.kts) manquant à la racine");
+  if (fichiers.length && typeProjet(fichiers) === "inconnu") {
+    erreurs.push("type de projet non reconnu : ajoutez un fichier de construction à la racine (build.gradle, package.json, pyproject.toml, Cargo.toml, go.mod, CMakeLists.txt, Makefile, pom.xml…) ou des sources .py, .c, .cpp, .html");
+  }
   return erreurs;
 }
 
@@ -73,10 +79,11 @@ export async function creerBranche(id: string, fichiers: FichierGenere[], nom: s
     // Empêche Vercel de déployer la branche de compilation (sinon déploiement preview en échec, quota consommé).
     { chemin: "vercel.json", contenu: JSON.stringify({ git: { deploymentEnabled: false } }) + "\n" },
     { chemin: ".github/workflows/compiler.yml", contenu: contenuWorkflow() },
+    { chemin: CHEMIN_SCRIPT, contenu: SCRIPT_CONSTRUCTION },
   ];
   // Contenu en ligne dans l'arbre : un seul appel, au lieu d'un POST /git/blobs par fichier (sinon
   // la limite secondaire de GitHub — ~80 requêtes créatrices/min — bloque les gros projets). (#21)
-  const arbre = tous.map((fi) => ({ path: fi.chemin, mode: "100644" as const, type: "blob" as const, content: fi.contenu }));
+  const arbre = tous.map((fi) => ({ path: fi.chemin, mode: (fi.chemin === CHEMIN_SCRIPT ? "100755" : "100644") as "100644" | "100755", type: "blob" as const, content: fi.contenu }));
   const tree = await github<Tree>(`${base}/git/trees`, { method: "POST", body: JSON.stringify({ tree: arbre }) });
   const commit = await github<Commit>(`${base}/git/commits`, {
     method: "POST",
@@ -149,11 +156,15 @@ export async function extraireArtefact(artefactId: number): Promise<Array<{ nom:
   return fichiers;
 }
 
-/** Extrait l'essentiel d'un journal Gradle : erreurs de compilation et cause de l'échec. */
+/**
+ * Extrait l'essentiel d'un journal de construction (Gradle, Maven, Python, Node/TypeScript, Rust,
+ * Go, C/C++, .NET) : erreurs de compilation, tests en échec et cause de l'échec.
+ */
 export function resumerJournal(journal: string, maxCar = 6000): string {
   const lignes = journal.split("\n");
   const retenues: string[] = [];
-  const RE = /error:|FAILED|What went wrong|Could not |Exception|BUILD FAILED|Unresolved|cannot find symbol|incompatible types|does not exist|is not abstract|> Task .* FAILED|Caused by/i;
+  const RE =
+    /error:|FAILED|What went wrong|Could not |Exception|BUILD FAILED|Unresolved|cannot find symbol|incompatible types|does not exist|is not abstract|> Task .* FAILED|Caused by|Traceback|SyntaxError|IndentationError|ModuleNotFoundError|AssertionError|^E {2,}|npm (ERR!|error)|error TS\d+|error\[E\d+\]|panicked at|undefined reference|ld returned|OUTIL ABSENT|NON RECONNU|\bFAIL\b|error CS\d+|ERROR\]/i;
   for (let i = 0; i < lignes.length; i++) {
     if (RE.test(lignes[i])) {
       for (let k = Math.max(0, i - 1); k <= Math.min(lignes.length - 1, i + 3); k++) {

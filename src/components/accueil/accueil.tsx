@@ -16,9 +16,10 @@ import { cn } from "@/lib/utils";
 import { ecrirePremierMessage } from "@/components/chat/utils";
 
 const SUGGESTIONS = [
+  "Crée une application web de gestion de tâches (HTML, CSS, JavaScript) avec sauvegarde locale.",
+  "Écris un script Python qui renomme mes photos selon leur date, avec des tests pytest.",
   "Crée un mod Fabric pour Minecraft 26.3 qui ajoute une commande /heal, puis compile-le.",
-  "Explique-moi les mixins Fabric avec un exemple minimal.",
-  "Résume cette page : https://fabricmc.net/develop/",
+  "Génère une image d'un phare au coucher du soleil, style aquarelle.",
 ];
 
 function salutation() {

@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ vi.mock("@/lib/db/compilations", () => ({
 
 import { cheminJarLocal, dossierEspace, lancerCompilationLocale, rafraichirLocale, synchroniserEspace } from "./locale";
 
+const aGcc = (process.env.PATH ?? "").split(":").some((d) => existsSync(`${d}/gcc`));
 let racine: string;
 let gradle: string;
 
@@ -46,7 +47,7 @@ afterAll(async () => {
 beforeEach(() => etats.clear());
 
 function compilation(id: string, conversationId = "conv-1"): Compilation {
-  const c = { id, conversationId, messageId: "m", branche: `local/${id}`, statut: "en_attente", jarNom: null } as unknown as Compilation;
+  const c = { id, conversationId, messageId: "m", nom: "projet", branche: `local/${id}`, statut: "en_attente", jarNom: null } as unknown as Compilation;
   etats.set(id, { ...c });
   return c;
 }
@@ -88,25 +89,56 @@ describe("lancerCompilationLocale", () => {
 
   it("échec : statut echouee avec le journal résumé", async () => {
     const c = compilation("c-ko", "conv-2");
-    await lancerCompilationLocale(c, [{ chemin: "src/Erreur.java", contenu: "class X { Y y; }" }], { gradle, resumer });
+    await lancerCompilationLocale(c, [{ chemin: "build.gradle", contenu: "// projet" }, { chemin: "src/Erreur.java", contenu: "class X { Y y; }" }], { gradle, resumer });
     const e = etats.get("c-ko")!;
     expect(e.statut).toBe("echouee");
     expect(String(e.journal)).toMatch(/cannot find symbol/);
   });
 
-  it("Gradle introuvable : statut echouee avec un message clair", async () => {
+  it("Gradle introuvable : statut erreur (pas une erreur du code) avec un message clair", async () => {
     const c = compilation("c-absent", "conv-3");
-    await lancerCompilationLocale(c, [{ chemin: "a.txt", contenu: "a" }], { gradle: path.join(racine, "inexistant"), resumer: () => "" });
+    await lancerCompilationLocale(c, [{ chemin: "build.gradle", contenu: "a" }], { gradle: path.join(racine, "inexistant"), resumer: () => "" });
     const e = etats.get("c-absent")!;
-    expect(e.statut).toBe("echouee");
-    expect(String(e.journal)).toMatch(/Impossible de lancer Gradle/);
+    expect(e.statut).toBe("erreur");
+    expect(String(e.erreur)).toMatch(/OUTIL ABSENT/);
+  });
+
+  it("projet non reconnu : statut erreur", async () => {
+    const c = compilation("c-inconnu", "conv-4");
+    await lancerCompilationLocale(c, [{ chemin: "notes.txt", contenu: "a" }], { gradle, resumer: () => "" });
+    expect(etats.get("c-inconnu")!.statut).toBe("erreur");
+    expect(String(etats.get("c-inconnu")!.erreur)).toMatch(/NON RECONNU/);
+  });
+
+  it("projet Python : syntaxe et tests vérifiés, rien à télécharger", async () => {
+    const c = compilation("c-py", "conv-py");
+    const fichiers = [
+      { chemin: "calc.py", contenu: "def add(a, b):\n    return a + b\n" },
+      { chemin: "verif.py", contenu: "from calc import add\nassert add(1, 2) == 3\n" },
+    ];
+    await lancerCompilationLocale(c, fichiers, { gradle, resumer });
+    expect(etats.get("c-py")!.statut).toBe("reussie");
+    expect(etats.get("c-py")!.jarNom).toBeNull();
+    const ko = compilation("c-py-ko", "conv-py");
+    await lancerCompilationLocale(ko, [{ chemin: "calc.py", contenu: "def add(a, b:\n" }], { gradle, resumer: (j) => j });
+    expect(etats.get("c-py-ko")!.statut).toBe("echouee");
+    expect(String(etats.get("c-py-ko")!.journal)).toMatch(/SyntaxError|invalid syntax|never closed/);
+  });
+
+  it.skipIf(!aGcc)("programme C : exécutable produit et téléchargeable", async () => {
+    const c = compilation("c-c", "conv-c");
+    await lancerCompilationLocale(c, [{ chemin: "main.c", contenu: "#include <stdio.h>\nint main(void){puts(\"ok\");return 0;}\n" }], { gradle, resumer });
+    const e = etats.get("c-c")!;
+    expect(e.statut).toBe("reussie");
+    expect(e.jarNom).toBe("programme");
+    expect((await fs.stat(cheminJarLocal({ id: "c-c", jarNom: "programme" })!)).size).toBeGreaterThan(1000);
   });
 
   it("les compilations d'un même espace passent l'une après l'autre", async () => {
     const a = compilation("c-a", "conv-file");
     const b = compilation("c-b", "conv-file");
-    const pa = lancerCompilationLocale(a, [{ chemin: "src/Erreur.java", contenu: "x" }], { gradle, resumer });
-    const pb = lancerCompilationLocale(b, [{ chemin: "ok.txt", contenu: "ok" }], { gradle, resumer });
+    const pa = lancerCompilationLocale(a, [{ chemin: "build.gradle", contenu: "" }, { chemin: "src/Erreur.java", contenu: "x" }], { gradle, resumer });
+    const pb = lancerCompilationLocale(b, [{ chemin: "build.gradle", contenu: "" }, { chemin: "ok.txt", contenu: "ok" }], { gradle, resumer });
     await Promise.all([pa, pb]);
     expect(etats.get("c-a")!.statut).toBe("echouee");
     expect(etats.get("c-b")!.statut).toBe("reussie"); // l'espace a bien été resynchronisé (Erreur.java retiré)

@@ -384,6 +384,8 @@ def environnement_serveur(port: int, node: Path) -> dict[str, str]:
         env["ATELIER_GRADLE"] = str(chaine.gradle)
     if chaine.java_home:
         env["ATELIER_JAVA_HOME"] = str(chaine.java_home)
+    # Python de l'atelier (venv avec pip) pour construire et tester les projets Python.
+    env.setdefault("ATELIER_PYTHON", sys.executable)
     if (env.get("HTTPS_PROXY") or env.get("https_proxy")) and "NODE_USE_ENV_PROXY" not in env:
         env["NODE_USE_ENV_PROXY"] = "1"  # fetch de Node respecte alors le proxy du système
     return env

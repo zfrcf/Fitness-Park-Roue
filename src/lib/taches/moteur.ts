@@ -5,7 +5,7 @@
  * programme la suivante. Toutes les dépendances externes sont injectables pour les tests.
  */
 import type { MessageUI } from "@/lib/chat/types";
-import { estProjetGradle, type FichierGenere } from "@/lib/fichiers/extraire";
+import { estProjetConstructible, typeProjet, type FichierGenere } from "@/lib/fichiers/extraire";
 import { fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS } from "@/lib/fichiers/projet";
 import { empreinteProjet } from "@/lib/github/lancer";
 import { validerFichiers } from "@/lib/github/compilation";
@@ -261,17 +261,22 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await suspendre(0, "modifications inapplicables : fichiers redemandés");
           return;
         }
-        if (!estProjetGradle(projet)) {
+        if (typeProjet(projet) === "web" && projet.some((f) => f.messageId === dernier.id)) {
+          // Site statique : rien à compiler, l'aperçu de l'explorateur suffit.
+          await terminer("terminee", "site web prêt (aperçu dans l'explorateur)", { erreur: null });
+          return;
+        }
+        if (!estProjetConstructible(projet)) {
           // En mode automatique, on redemande le projet complet sans limite (borné par le plafond de tokens).
           if (t.cycles >= 1 && t.auto !== 1) {
-            await terminer("echouee", "aucun projet Gradle compilable n'a été produit", { erreur: "Le modèle n'a pas livré de build.gradle." });
+            await terminer("echouee", "aucun projet compilable n'a été produit", { erreur: "Le modèle n'a livré ni fichier de construction ni sources reconnues." });
             return;
           }
           await deps.majTache(tacheId, { cycles: t.cycles + 1 });
-          await deps.journaliser(tacheId, "pas de projet Gradle dans la réponse : demande du projet complet");
+          await deps.journaliser(tacheId, "pas de projet compilable dans la réponse : demande du projet complet");
           await deps.ajouterMessageUtilisateur(
             t.conversationId,
-            "Tu n'as pas livré de projet compilable. Livre maintenant le projet COMPLET (build.gradle, settings.gradle, gradle.properties, fabric.mod.json, sources), chaque fichier en entier dans son bloc de code avec son chemin.",
+            "Tu n'as pas livré de projet compilable. Livre maintenant le projet COMPLET : le fichier de construction à la racine (build.gradle, package.json, pyproject.toml ou requirements.txt, Cargo.toml, go.mod, CMakeLists.txt…) et toutes les sources, chaque fichier en entier dans son bloc de code avec son chemin.",
           );
           await suspendre(0, "demande du projet complet");
           return;
@@ -288,7 +293,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await deps.journaliser(tacheId, `projet refusé avant envoi (${refus.join(" ; ")}), correction demandée`);
           await deps.ajouterMessageUtilisateur(
             t.conversationId,
-            `Le projet a été refusé avant l'envoi : ${refus.join(" ; ")}. Mets build.gradle, settings.gradle et gradle.properties à la RACINE, un seul projet Gradle sans sous-projet, un seul source set src/main ; renvoie en entier chaque fichier déplacé avec son nouveau chemin et « Supprimer : ancien/chemin ».`,
+            `Le projet a été refusé avant l'envoi : ${refus.join(" ; ")}. Mets le fichier de construction à la RACINE du projet (pour Gradle : build.gradle, settings.gradle et gradle.properties, un seul projet sans sous-projet) ; renvoie en entier chaque fichier déplacé avec son nouveau chemin et « Supprimer : ancien/chemin ».`,
           );
           await deps.majTache(tacheId, { cycles, etape: `correction ${t.auto === 1 ? `${cycles} (auto)` : `${cycles}/${t.maxCycles}`}` });
           await suspendre(0, "projet refusé : correction");
@@ -330,7 +335,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await suspendre(0, "aucune modification : correction");
           return;
         }
-        await deps.majTache(tacheId, { etape: modeLocal() ? `compilation de ${projet.length} fichiers (gradle build)` : `envoi de ${projet.length} fichiers à GitHub` });
+        await deps.majTache(tacheId, { etape: modeLocal() ? `construction de ${projet.length} fichiers (sur cet ordinateur)` : `envoi de ${projet.length} fichiers à GitHub` });
         try {
           compilation = await deps.lancerCompilation({ conversationId: t.conversationId, messageId: dernier.id, fichiers: fichiersProjet });
         } catch (e) {
@@ -339,7 +344,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           await terminer("echouee", "compilation impossible", { erreur: msg });
           return;
         }
-        await deps.majTache(tacheId, { compilationId: compilation.id, empreinteCompilee: empreinte, etape: modeLocal() ? "compilation (gradle build)" : "compilation sur GitHub" });
+        await deps.majTache(tacheId, { compilationId: compilation.id, empreinteCompilee: empreinte, etape: modeLocal() ? "construction (sur cet ordinateur)" : "compilation sur GitHub" });
         await deps.journaliser(tacheId, `compilation lancée (${projet.length} fichiers)`);
       }
 
@@ -358,7 +363,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         return;
       }
       if (compilation.statut === "reussie") {
-        await terminer("terminee", `réussie : ${compilation.jarNom ?? "jar"} prêt`, { jarNom: compilation.jarNom ?? null, jarCompilationId: compilation.id, erreur: null });
+        await terminer("terminee", compilation.jarNom ? `réussie : ${compilation.jarNom} prêt` : "réussie : code vérifié", { jarNom: compilation.jarNom ?? null, jarCompilationId: compilation.id, erreur: null });
         return;
       }
       // Échec : correction, dans la limite des cycles.
@@ -367,7 +372,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         await terminer("echouee", "erreur de la chaîne de compilation", { erreur: compilation.erreur ?? "erreur inconnue" });
         return;
       }
-      // Mode automatique : on continue à corriger jusqu'au jar (seul le plafond de tokens arrête).
+      // Mode automatique : on continue à corriger jusqu'à la réussite (seul le plafond de tokens arrête).
       if (t.auto !== 1 && cycles > t.maxCycles) {
         await terminer("echouee", `échec après ${cycles} compilations`, { cycles, compilationId: null, erreur: "Nombre maximal de corrections atteint." });
         return;

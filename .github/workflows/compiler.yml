@@ -1,6 +1,8 @@
-# Compilation d'un projet Gradle (mod Minecraft Fabric/NeoForge, application Java/Kotlin)
-# poussé par l'application de chat sur une branche compilation/<id>.
-# Le .jar produit est publié comme artefact « jar », le journal complet comme artefact « journal ».
+# Construction d'un projet poussé par l'application de chat sur une branche compilation/<id> :
+# mod Minecraft (Gradle), Maven, Node, Python, Rust, Go, .NET, CMake, make, C/C++, site web.
+# Le script .atelier/construire.sh (ajouté par l'application) détecte le type de projet, installe
+# les dépendances, compile et lance les tests ; il n'exécute jamais le programme lui-même.
+# Les fichiers produits sont publiés comme artefact « resultat », le journal complet comme « journal ».
 name: compilation
 on:
   push:
@@ -16,21 +18,39 @@ jobs:
     steps:
       - name: Récupération du projet
         uses: actions/checkout@v6
+      - name: Type de projet
+        id: type
+        shell: bash
+        run: bash .atelier/construire.sh --detecter >> "$GITHUB_OUTPUT"
       - name: JDK 25
+        if: steps.type.outputs.type == 'gradle' || steps.type.outputs.type == 'maven'
         uses: actions/setup-java@v5
         with:
           java-version: "25"
           distribution: "microsoft"
       - name: Gradle
+        if: steps.type.outputs.type == 'gradle'
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.7.1"
           cache-read-only: false
-      - name: Compilation
+      - name: Node.js
+        if: steps.type.outputs.type == 'node'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Python
+        if: steps.type.outputs.type == 'python'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Construction
         shell: bash
+        env:
+          ATELIER_CI: "1"
         run: |
           set -o pipefail
-          gradle build -x test --no-daemon --console=plain --warning-mode=none 2>&1 | tee journal-compilation.txt
+          bash .atelier/construire.sh 2>&1 | tee journal-compilation.txt
       - name: Journal (toujours)
         if: always()
         uses: actions/upload-artifact@v7
@@ -38,15 +58,12 @@ jobs:
           name: journal
           path: journal-compilation.txt
           retention-days: 14
-      - name: Jar (si réussite)
+      - name: Résultat (si réussite)
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: jar
-          path: |
-            build/libs/*.jar
-            !build/libs/*-sources.jar
-            !build/libs/*-dev.jar
-            !build/libs/*-javadoc.jar
+          name: resultat
+          path: .atelier-sortie/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

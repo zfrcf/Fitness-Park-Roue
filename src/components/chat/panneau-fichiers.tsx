@@ -4,7 +4,7 @@ import { Archive, Download, FileCode2, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { estProjetGradle, nomArchive, type FichierGenere } from "@/lib/fichiers/extraire";
+import { LIBELLES_TYPE, nomArchive, typeProjet, type FichierGenere } from "@/lib/fichiers/extraire";
 import { ouvrirDansExplorateur, type StatsModifications } from "@/lib/fichiers/explorateur";
 import { CompteurLignes } from "./compteur-lignes";
 import { cn } from "@/lib/utils";
@@ -57,7 +57,7 @@ export function PanneauFichiers({
   const [zipEnCours, setZipEnCours] = useState(false);
   if (!fichiers.length) return null;
   const nom = nomArchive(fichiers);
-  const gradle = estProjetGradle(fichiers);
+  const type = typeProjet(fichiers);
 
   async function zip() {
     setZipEnCours(true);
@@ -76,7 +76,7 @@ export function PanneauFichiers({
         <FileCode2 className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">
           {titre ?? `${fichiers.length} fichier${fichiers.length > 1 ? "s" : ""}`}
-          {gradle && <span className="ml-1 text-xs text-muted-foreground">· projet Gradle</span>}
+          {type !== "inconnu" && fichiers.length > 1 && <span className="ml-1 text-xs text-muted-foreground">· {type === "web" ? "site web" : `projet ${LIBELLES_TYPE[type]}`}</span>}
           {sousTitre && <span className="ml-1 text-xs text-muted-foreground">· {sousTitre}</span>}
         </span>
         {stats && stats.fichiers.length > 0 && <CompteurLignes ajouts={stats.ajouts} suppressions={stats.suppressions} className="text-xs" />}

@@ -207,6 +207,59 @@ export function estProjetGradle(fichiers: FichierGenere[]): boolean {
   return fichiers.some((f) => /^(build\.gradle(\.kts)?|settings\.gradle(\.kts)?)$/.test(f.chemin));
 }
 
+/** Type de projet, détecté comme le fait le script de construction (même ordre de priorité). */
+export type TypeProjet = "gradle" | "maven" | "rust" | "go" | "node" | "dotnet" | "cmake" | "make" | "python" | "cpp" | "c" | "web" | "inconnu";
+
+export function typeProjet(fichiers: Array<{ chemin: string }>): TypeProjet {
+  const racine = new Set(fichiers.map((f) => f.chemin));
+  const ext = (re: RegExp) => fichiers.some((f) => re.test(f.chemin) && !/(^|\/)(node_modules|target|\.atelier[^/]*)\//.test(f.chemin));
+  if (racine.has("build.gradle") || racine.has("build.gradle.kts")) return "gradle";
+  if (racine.has("pom.xml")) return "maven";
+  if (racine.has("Cargo.toml")) return "rust";
+  if (racine.has("go.mod")) return "go";
+  if (racine.has("package.json")) return "node";
+  if ([...racine].some((c) => /^[^/]+\.(csproj|sln)$/.test(c))) return "dotnet";
+  if (racine.has("CMakeLists.txt")) return "cmake";
+  if (racine.has("Makefile") || racine.has("makefile") || racine.has("GNUmakefile")) return "make";
+  if (racine.has("pyproject.toml") || racine.has("requirements.txt") || racine.has("setup.py") || ext(/\.py$/)) return "python";
+  if (ext(/\.(cpp|cc|cxx)$/)) return "cpp";
+  if (ext(/\.c$/)) return "c";
+  if (ext(/\.html?$/)) return "web";
+  return "inconnu";
+}
+
+/** Projet que le script de construction sait vérifier (compiler, tester). Un site statique n'a rien à compiler. */
+export function estProjetConstructible(fichiers: Array<{ chemin: string }>): boolean {
+  const t = typeProjet(fichiers);
+  return t !== "inconnu" && t !== "web";
+}
+
+/**
+ * Projet assez structuré pour être compilé automatiquement après chaque réponse : un fichier de
+ * construction à la racine (ou un projet Python de plusieurs fichiers). Un script isolé n'en vaut pas un run.
+ */
+export function estProjetAutoConstructible(fichiers: Array<{ chemin: string }>): boolean {
+  const t = typeProjet(fichiers);
+  if (t === "python") return fichiers.some((f) => /^(pyproject\.toml|requirements\.txt|setup\.py)$|(^|\/)test_[^/]*\.py$/.test(f.chemin));
+  return t !== "inconnu" && t !== "web" && t !== "c" && t !== "cpp";
+}
+
+export const LIBELLES_TYPE: Record<TypeProjet, string> = {
+  gradle: "Gradle",
+  maven: "Maven",
+  rust: "Rust",
+  go: "Go",
+  node: "Node.js",
+  dotnet: ".NET",
+  cmake: "CMake",
+  make: "make",
+  python: "Python",
+  cpp: "C++",
+  c: "C",
+  web: "site web",
+  inconnu: "projet",
+};
+
 export function nomArchive(fichiers: FichierGenere[], defaut = "fichiers"): string {
   const fmj = fichiers.find((f) => /fabric\.mod\.json$/.test(f.chemin));
   if (fmj) {

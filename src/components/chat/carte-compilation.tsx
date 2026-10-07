@@ -10,23 +10,23 @@ import { LOCAL } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
 const LIBELLES: Record<CompilationPublique["statut"], string> = {
-  en_attente: LOCAL ? "En file d'attente (gradle build)…" : "En file d'attente sur GitHub Actions…",
-  en_cours: "Compilation en cours…",
-  reussie: "Compilation réussie",
-  echouee: "Compilation échouée",
-  erreur: "Compilation impossible",
+  en_attente: LOCAL ? "En file d'attente sur cet ordinateur…" : "En file d'attente sur GitHub Actions…",
+  en_cours: "Construction en cours (compilation et tests)…",
+  reussie: "Construction réussie",
+  echouee: "Construction échouée",
+  erreur: "Construction impossible",
 };
 
 /**
  * Application de bureau (mode local) : notification du système à la fin d'une compilation quand
- * la fenêtre n'est pas au premier plan (gradle build peut durer plusieurs minutes).
+ * la fenêtre n'est pas au premier plan (une construction peut durer plusieurs minutes).
  */
 function notifierFin(c: CompilationPublique) {
   if (!LOCAL || typeof Notification === "undefined" || document.hasFocus()) return;
   if (c.statut !== "reussie" && c.statut !== "echouee" && c.statut !== "erreur") return;
   try {
-    const n = new Notification(c.statut === "reussie" ? "Compilation réussie" : "Compilation échouée", {
-      body: c.statut === "reussie" ? `${c.jarNom ?? "Le .jar"} est prêt.` : (c.erreur ?? "Voir le journal dans l'atelier."),
+    const n = new Notification(c.statut === "reussie" ? "Construction réussie" : "Construction échouée", {
+      body: c.statut === "reussie" ? (c.jarNom ? `${c.jarNom} est prêt.` : "Code compilé et testé.") : (c.erreur ?? "Voir le journal dans l'atelier."),
       tag: `compilation-${c.id}`,
     });
     n.onclick = () => window.focus();
@@ -88,7 +88,7 @@ export function CarteCompilation({
       } catch {
         /* nouvel essai au prochain tour */
       }
-    }, LOCAL ? 3_000 : 10_000); // en local, gradle build ne dure souvent que quelques secondes
+    }, LOCAL ? 3_000 : 10_000); // en local, une construction ne dure souvent que quelques secondes
     return () => {
       actif = false;
       clearInterval(t);
@@ -114,11 +114,12 @@ export function CarteCompilation({
           {/* Les artefacts GitHub expirent après 14 jours : au-delà, on n'affiche plus un bouton
               actif qui renverrait un 502, mais un libellé « expiré ». (#44) */}
           {c.statut === "reussie" &&
+            c.jarNom &&
             (!c.locale && new Date().getTime() - new Date(c.creeA).getTime() > 14 * 24 * 3600_000 ? (
               <span className="text-xs text-muted-foreground">Artefact expiré (plus de 14 jours) : relancez la compilation.</span>
             ) : (
               <Button size="sm" nativeButton={false} render={<a href={`/api/compilations/${c.id}/jar`} download />}>
-                <Download /> Télécharger {c.jarNom ?? "le .jar"}
+                <Download /> Télécharger {c.jarNom}
               </Button>
             ))}
           {c.statut === "echouee" && onDemanderCorrection && c.journal && (
@@ -141,13 +142,13 @@ export function CarteCompilation({
           )}
         </div>
       </div>
-      {!terminal && <p className="border-t px-3 py-2 text-xs text-muted-foreground">Un mod Minecraft met en général 3 à 8 minutes (téléchargement de Minecraft et des mappings). Vous pouvez continuer à discuter, l&apos;état se met à jour seul.</p>}
+      {!terminal && <p className="border-t px-3 py-2 text-xs text-muted-foreground">Quelques secondes à quelques minutes selon le langage (un mod Minecraft : 3 à 8 minutes). Vous pouvez continuer à discuter, l&apos;état se met à jour seul.</p>}
       {c.erreur && <p className="border-t px-3 py-2 text-xs text-destructive">{c.erreur}</p>}
       {c.journal && (c.statut === "echouee" || c.statut === "reussie") && (
         <div className="border-t">
           <button type="button" onClick={() => setJournalOuvert((o) => !o)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground" aria-expanded={journalOuvert}>
             <Hammer className="size-3.5" />
-            {c.statut === "echouee" ? "Erreurs de compilation" : "Fin du journal"}
+            {c.statut === "echouee" ? "Erreurs (compilation ou tests)" : "Fin du journal"}
             <ChevronDown className={cn("ml-auto size-3.5 transition-transform", journalOuvert && "rotate-180")} />
           </button>
           {journalOuvert && <pre className="max-h-72 overflow-auto border-t bg-muted/40 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">{c.journal}</pre>}
@@ -200,7 +201,7 @@ export function useCompilations(conversationId: string | undefined, messageId: s
         const c = j.compilation;
         setListe((l) => [c, ...l]);
         if (c.statut === "erreur") toast.error(c.erreur ?? "Envoi impossible.");
-        else toast.message(LOCAL ? "Compilation lancée sur cet ordinateur (gradle build)." : "Projet envoyé sur GitHub, compilation lancée.");
+        else toast.message(LOCAL ? "Construction lancée sur cet ordinateur." : "Projet envoyé sur GitHub, construction lancée.");
       } else toast.error(j.erreur ?? "Compilation impossible.");
     } catch {
       toast.error("Le serveur ne répond pas.");
@@ -217,7 +218,7 @@ export function useCompilations(conversationId: string | undefined, messageId: s
 export function BoutonCompiler({ onClick, occupe }: { onClick: () => void; occupe: boolean }) {
   return (
     <Button size="sm" onClick={onClick} disabled={occupe}>
-      {occupe ? <Loader2 className="animate-spin" /> : <Hammer />} {LOCAL ? "Compiler (gradle build)" : "Compiler sur GitHub"}
+      {occupe ? <Loader2 className="animate-spin" /> : <Hammer />} {LOCAL ? "Construire et tester" : "Construire sur GitHub"}
     </Button>
   );
 }

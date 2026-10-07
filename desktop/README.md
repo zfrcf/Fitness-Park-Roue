@@ -5,8 +5,11 @@ Version **sur ordinateur** du chat IA, avec deux façons de travailler :
 - **Application de bureau « Atelier IA »** (`atelier ui`, ou l'icône du menu des applications) :
   une vraie application avec sa fenêtre, son icône dans le dock et ses menus, qui reprend
   l'interface de la version web (conversations, fichiers, réglages, tâches de fond, état des
-  fournisseurs). Les compilations se font **sur votre ordinateur avec `gradle build`**, le `.jar`
-  s'enregistre d'un clic.
+  fournisseurs). On peut y joindre des fichiers, des archives .zip, des PDF et des images, et
+  demander des images. Les projets **de tous les langages** (Python, JavaScript/TypeScript, Java,
+  mods Minecraft, C/C++, Rust, Go…) sont construits et testés **sur votre ordinateur** d'un clic ;
+  le `.jar`, l'exécutable ou l'archive produite s'enregistre d'un clic, et les sites web
+  s'affichent dans un aperçu.
 - **`atelier` en console** : les fichiers produits par le modèle sont **écrits directement dans
   le dossier de votre projet**, compilés en local, corrigés en boucle jusqu'au `.jar`.
 
@@ -192,7 +195,9 @@ mon-mod/
 ```
 
 L'interface est l'application Next.js du dépôt, construite en mode atelier local
-(`NEXT_PUBLIC_ATELIER_LOCAL=1` : serveur autonome, compilation par `gradle build`, accès limité à
+(`NEXT_PUBLIC_ATELIER_LOCAL=1` : serveur autonome, construction locale par le script universel
+`.atelier/construire.sh` — Gradle et JDK de l'atelier, Node de l'application, Python de l'atelier ;
+Rust, Go, gcc, CMake… s'ils sont installés sur la machine —, accès limité à
 127.0.0.1). Pour la reconstruire dans `desktop/web/` (après `npm ci` à la racine du dépôt) :
 
 ```bash

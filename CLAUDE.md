@@ -43,9 +43,23 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   réponse de tâche publié dans le KV (`flux:<conversation>`, ≤ 1 écriture / 1,2 s), lu par
   `/api/conversations/[id]/flux` et affiché en direct dans la conversation. Une tâche lancée avec une demande
   (message `tache-<id>`) ne réussit pas tant qu'aucune réponse n'a modifié le projet.
-- `src/lib/github/` — compilation des projets Gradle via GitHub Actions (branche orpheline
-  `compilation/<id>`, workflow `.github/workflows/compiler.yml`), suivi des runs, `menage.ts`
-  (nettoyage des branches orphelines).
+- `src/lib/compilation/script-construction.ts` — **script de construction universel** (bash dans une chaîne TS,
+  écrit dans `.atelier/construire.sh`) : détecte le type (Gradle, Maven, Node, Python, Rust, Go, .NET, CMake, make,
+  C, C++, web — même ordre que `typeProjet()` dans `extraire.ts`, test de concordance), installe les dépendances,
+  compile, lance les tests, ne lance jamais le programme ; produits dans `.atelier-sortie/`. Codes 3 (outil absent)
+  et 4 (projet non reconnu) = erreur de chaîne, pas du code. `sortie.ts` : nom du téléchargement (fichier seul,
+  jar principal ou `<projet>.zip`). La colonne/route `jarNom` / `/api/compilations/[id]/jar` gardent leur nom historique.
+- `src/lib/github/` — compilation via GitHub Actions (branche orpheline `compilation/<id>` avec le script,
+  workflow `.github/workflows/compiler.yml` générique, artefacts `resultat` + `journal`, `jar` pour les anciennes
+  branches), suivi des runs, `menage.ts` (nettoyage des branches orphelines).
+- Pièces jointes : `src/lib/fichiers/pieces-jointes.ts` (logique pure : archives, binaires, allègement de
+  l'historique — seul le dernier message envoie son contenu lourd, le serveur réhydrate depuis la base) et
+  `src/components/chat/pieces-jointes.ts` (navigateur : images réduites en JPEG, .zip via jszip, PDF via unpdf,
+  dossiers glissés). Les fichiers de code joints entrent dans le projet de la conversation (`projet.ts`).
+- Images : lecture (parties `file`, 2 derniers messages seulement), génération `src/lib/images/generer.ts`
+  (FLUX schnell sur Cloudflare Workers AI avec le compte du fournisseur Cloudflare, Pollinations en secours),
+  outil `generer_image` imposé à l'étape 0 quand `demandeImage()` reconnaît la demande. Aperçu des sites :
+  `src/lib/fichiers/apercu.ts` + `apercu-web.tsx` (iframe srcdoc sandbox sans allow-same-origin).
 - `src/lib/minecraft/contexte.ts` — versions Minecraft en direct + modèle de projet Fabric injecté
   dans le prompt. **Distingue 26.x (non obfusqué, pas de mappings, plugin `fabric-loom`) et 1.21.x
   (obfusqué, `fabric-loom-remap` + `officialMojangMappings()`).** Vérifié par compilation réelle.
@@ -70,7 +84,8 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   `NEXT_PUBLIC_ATELIER_LOCAL=1` → `output: "standalone"`), construite par `desktop/outils/construire_web.py`
   dans `desktop/web/` (ignoré par git), lancée avec Node sur 127.0.0.1 sans mot de passe (`src/lib/auth/local.ts` :
   anti-rebinding DNS + anti-CSRF ; jamais actif si `VERCEL`). Compilation locale : `src/lib/compilation/locale.ts`
-  (`gradle build`, espace par conversation, branche `local/<id>`). Réveil des tâches : `src/instrumentation.ts`.
+  (script universel, espace par conversation, branche `local/<id>` ; Node de l'application via `ATELIER_NODE_BIN`,
+  Python du venv via `ATELIER_PYTHON`). Réveil des tâches : `src/instrumentation.ts`.
   Fenêtre : application Electron (`desktop/atelier/bureau/main.js`, version épinglée `ELECTRON_VERSION` dans ui.py,
   téléchargée sans sudo) ; repli sans bac à sable détecté automatiquement ; fermeture = arrêt du serveur
   (sauf « laisser tourner » si une tâche de fond est active).

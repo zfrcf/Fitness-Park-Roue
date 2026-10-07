@@ -15,7 +15,18 @@ export interface FichierProjet extends FichierGenere {
 interface MessageMinimal {
   id: string;
   role: string;
-  parts: Array<{ type: string; text?: string }>;
+  parts: Array<{ type: string; text?: string; data?: unknown }>;
+}
+
+/** Fichiers de code joints par l'utilisateur à ce message (ils entrent dans l'état du projet). */
+export function fichiersJointsDuMessage(m: MessageMinimal): Array<{ chemin: string; contenu: string }> {
+  if (m.role !== "user") return [];
+  return m.parts.flatMap((p) => {
+    if (p.type !== "data-fichiers-joints") return [];
+    const d = p.data as { fichiers?: Array<{ chemin: string; contenu: string; genre?: string }>; allege?: boolean } | undefined;
+    if (!d?.fichiers || d.allege) return [];
+    return d.fichiers.filter((f) => f.genre !== "document" && typeof f.contenu === "string").map((f) => ({ chemin: f.chemin, contenu: f.contenu }));
+  });
 }
 
 export function texteDuMessage(m: MessageMinimal): string {
@@ -67,6 +78,16 @@ export function fusionnerProjetDetaille(
   const echecs: EchecModification[] = [];
   let revision = 0;
   for (const m of messages) {
+    if (m.role === "user") {
+      // Fichiers joints par l'utilisateur : ils deviennent (ou remplacent) des fichiers du projet.
+      const joints = fichiersJointsDuMessage(m).filter((f) => !RE_CHEMIN_RESERVE.test(f.chemin));
+      if (!joints.length) continue;
+      const avant = instantanes ? etat() : undefined;
+      for (const f of joints) projet.set(f.chemin, { chemin: f.chemin, contenu: f.contenu.endsWith("\n") ? f.contenu : `${f.contenu}\n`, messageId: m.id, revision });
+      revision++;
+      if (instantanes && avant) instantanes.set(m.id, { avant, apres: etat() });
+      continue;
+    }
     if (m.role !== "assistant") continue;
     const texte = texteDuMessage(m);
     const avant = instantanes ? etat() : undefined;

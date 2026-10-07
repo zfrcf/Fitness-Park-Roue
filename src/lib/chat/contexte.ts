@@ -21,8 +21,12 @@ export function texteDe(m: ModelMessage): string {
     .join("\n");
 }
 
+/** Coût forfaitaire d'une image envoyée au modèle (les fournisseurs comptent ~500 à 1 500 tokens). */
+export const TOKENS_IMAGE = 1000;
+
 export function tokensMessage(m: ModelMessage): number {
-  return estimerTokens(texteDe(m)) + 4; // + enveloppe du rôle
+  const images = typeof m.content === "string" ? 0 : m.content.filter((p) => p.type === "image" || p.type === "file").length;
+  return estimerTokens(texteDe(m)) + 4 + images * TOKENS_IMAGE; // + enveloppe du rôle
 }
 
 export interface ParamsAjustement {

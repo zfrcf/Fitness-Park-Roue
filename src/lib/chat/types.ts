@@ -8,7 +8,7 @@ export interface Reglages {
   raisonnement: NiveauRaisonnement;
   /** Le modèle peut déclencher lui-même une recherche web (outil). */
   rechercheAuto: boolean;
-  /** Après une réponse qui change un projet Gradle, la compilation GitHub est lancée automatiquement. */
+  /** Après une réponse qui change un projet (Gradle, Node, Python, Rust…), la compilation est lancée automatiquement. */
   compilationAuto: boolean;
 }
 
@@ -47,8 +47,24 @@ export interface MetaMessage {
   creeA?: number;
 }
 
+/** Fichier joint par l'utilisateur (texte, code, contenu d'une archive .zip, texte d'un PDF). */
+export interface FichierJoint {
+  chemin: string;
+  contenu: string;
+  /** Taille d'origine en octets. */
+  taille: number;
+  /** « code » : entre dans l'état du projet (modifiable) ; « document » : lu par le modèle (PDF…). */
+  genre: "code" | "document";
+  /** Archive d'origine (« projet.zip »), le cas échéant. */
+  origine?: string;
+}
+
 /** Parties de données personnalisées envoyées pendant le flux. */
 export type DonneesChat = {
+  /** Fichiers joints à un message de l'utilisateur. `allege` : contenu retiré par le navigateur (à reprendre en base). */
+  "fichiers-joints": { fichiers: FichierJoint[]; ignores?: string[]; allege?: boolean };
+  /** Image générée par l'application (outil generer_image). `allege` : image retirée par le navigateur. */
+  image: { url: string; prompt: string; source: string; largeur?: number; hauteur?: number; allege?: boolean; erreur?: string };
   bascule: Bascule;
   /** Marqueur : tout ce qui précède dans le message doit être ignoré (réponse régénérée). */
   regeneration: { raison: string };

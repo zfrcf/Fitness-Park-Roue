@@ -48,6 +48,8 @@ export interface ParamsExecution {
   signal?: AbortSignal;
   /** Outils proposés au modèle (recherche web). Retirés automatiquement si le fournisseur les refuse. */
   outils?: ToolSet;
+  /** Outil à appeler obligatoirement à la première étape (demande explicite : « génère une image… »). */
+  outilImpose?: string;
 }
 
 export interface ResultatExecution {
@@ -399,7 +401,16 @@ async function tenter(
       // Au plus deux recherches par réponse, puis une dernière étape SANS outil : sinon un modèle qui
       // enchaîne les recherches (Groq) épuise les étapes et s'arrête sans avoir rien écrit.
       ...(avecOutils
-        ? { tools: outils, stopWhen: stepCountIs(3), prepareStep: ({ stepNumber }: { stepNumber: number }) => (stepNumber >= 2 ? { toolChoice: "none" as const, activeTools: [] } : {}) }
+        ? {
+            tools: outils,
+            stopWhen: stepCountIs(3),
+            prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+              stepNumber >= 2
+                ? { toolChoice: "none" as const, activeTools: [] }
+                : stepNumber === 0 && p.outilImpose && outils[p.outilImpose]
+                  ? { toolChoice: { type: "tool" as const, toolName: p.outilImpose } }
+                  : {},
+          }
         : {}),
       onError: () => {}, // les erreurs arrivent aussi dans le flux
     });

@@ -12,6 +12,8 @@ import { blocOuvert } from "@/lib/fichiers/extraire";
 import { statsModifications, type StatsModifications } from "@/lib/fichiers/explorateur";
 import { useSondage } from "@/hooks/use-sondage";
 import type { FluxTache } from "@/lib/taches/flux";
+import { allegerHistorique, LIMITE_ENVOI_OCTETS, tailleEnvoi } from "@/lib/fichiers/pieces-jointes";
+import { fichiersDuDepot, preparerPiecesJointes, type PiecesPreparees } from "./pieces-jointes";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,8 @@ const SUGGESTIONS = [
   "Explique-moi la différence entre marge brute et marge nette avec un exemple",
   "Propose un plan de réunion d'équipe de 30 minutes",
 ];
+
+const PIECES_VIDES: PiecesPreparees = { images: [], fichiers: [], ignores: [], erreurs: [] };
 
 /* Préférences de l'explorateur (par navigateur) : ouvert/fermé et largeur du panneau. */
 const CLE_EXPLORATEUR = "atelier:explorateur";
@@ -90,7 +94,15 @@ export function FenetreChat({
   const { messages, sendMessage, status, stop, error, regenerate, setMessages, clearError } = useChat<MessageUI>({
     id: conversationId,
     messages: messagesInitiaux,
-    transport: new DefaultChatTransport({ api: "/api/chat", body: () => ({ conversationId, reglages }) }),
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: () => ({ conversationId, reglages }),
+      // Images et fichiers joints : envoyés avec le nouveau message seulement, le serveur reprend
+      // ceux de l'historique en base (limite de 4,5 Mo par requête sur Vercel).
+      prepareSendMessagesRequest: ({ id, messages: liste, body, trigger, messageId }) => ({
+        body: { ...body, id, messages: allegerHistorique(liste), trigger, messageId },
+      }),
+    }),
     onFinish: () => signalerMajConversations(),
     onData: (part) => {
       if (part.type === "data-bascule") {
@@ -317,12 +329,46 @@ export function FenetreChat({
     setTimeout(signalerMajConversations, 800);
   }
 
+  // Pièces jointes en attente d'envoi.
+  const [pieces, setPieces] = useState<PiecesPreparees>(PIECES_VIDES);
+  const [preparation, setPreparation] = useState(false);
+  const [depotSurvol, setDepotSurvol] = useState(false);
+  async function ajouterFichiers(liste: Array<{ fichier: File; chemin?: string }>) {
+    setPreparation(true);
+    try {
+      const p = await preparerPiecesJointes(liste);
+      p.erreurs.forEach((e) => toast.error(e));
+      setPieces((avant) => {
+        // Même chemin joint deux fois : la nouvelle version remplace l'ancienne.
+        const chemins = new Set(p.fichiers.map((f) => f.chemin));
+        return {
+          images: [...avant.images, ...p.images].slice(0, 4),
+          fichiers: [...avant.fichiers.filter((f) => !chemins.has(f.chemin)), ...p.fichiers],
+          ignores: [...avant.ignores, ...p.ignores],
+          erreurs: [],
+        };
+      });
+    } finally {
+      setPreparation(false);
+    }
+  }
+
   function envoyer(texte = saisie) {
     const t = texte.trim();
-    if (!t || occupe) return;
+    const avecPieces = pieces.images.length > 0 || pieces.fichiers.length > 0;
+    if ((!t && !avecPieces) || occupe || preparation) return;
+    const parts: MessageUI["parts"] = [];
+    if (t) parts.push({ type: "text", text: t });
+    parts.push(...pieces.images);
+    if (pieces.fichiers.length || pieces.ignores.length) parts.push({ type: "data-fichiers-joints", data: { fichiers: pieces.fichiers, ignores: pieces.ignores } });
+    if (tailleEnvoi(parts) > LIMITE_ENVOI_OCTETS) {
+      toast.error("Pièces jointes trop lourdes pour un seul message (3,5 Mo au plus) : retirez-en une partie.");
+      return;
+    }
     clearError();
-    void sendMessage({ text: t }, { body: { rechercheWeb } });
+    void sendMessage({ parts }, { body: { rechercheWeb } });
     setSaisie("");
+    setPieces(PIECES_VIDES);
     setCollé(true);
     premiereFois();
   }
@@ -330,8 +376,10 @@ export function FenetreChat({
   function editer(index: number, texte: string) {
     if (occupe) return;
     clearError();
+    // Les pièces jointes du message édité sont conservées ; seul le texte change.
+    const joints = messages[index]?.parts.filter((p) => p.type === "file" || p.type === "data-fichiers-joints") ?? [];
     setMessages((prev) => prev.slice(0, index));
-    void sendMessage({ text: texte }, { body: { rechercheWeb } });
+    void sendMessage({ parts: [{ type: "text", text: texte }, ...joints] }, { body: { rechercheWeb } });
     setCollé(true);
   }
 
@@ -377,7 +425,31 @@ export function FenetreChat({
 
   return (
     <div className="flex min-h-0 flex-1">
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.types].includes("Files")) return;
+        e.preventDefault();
+        setDepotSurvol(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDepotSurvol(false);
+      }}
+      onDrop={(e) => {
+        if (![...e.dataTransfer.types].includes("Files")) return;
+        e.preventDefault();
+        setDepotSurvol(false);
+        void fichiersDuDepot(e.dataTransfer).then((l) => {
+          if (l.length) void ajouterFichiers(l);
+        });
+      }}
+    >
+      {depotSurvol && (
+        <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85 text-sm font-medium">
+          Déposez vos fichiers, dossiers, archives .zip, PDF ou images
+        </div>
+      )}
       {projetDirect.length > 0 && !explorateurOuvert && (
         <Button
           size="sm"
@@ -504,6 +576,11 @@ export function FenetreChat({
         occupe={occupe}
         rechercheWeb={rechercheWeb}
         onRechercheWeb={setRechercheWeb}
+        pieces={pieces}
+        preparation={preparation}
+        onAjouterFichiers={(l) => void ajouterFichiers(l)}
+        onRetirerImage={(i) => setPieces((p) => ({ ...p, images: p.images.filter((_, j) => j !== i) }))}
+        onRetirerFichiers={(origine) => setPieces((p) => ({ ...p, fichiers: p.fichiers.filter((f) => (f.origine ?? f.chemin) !== origine) }))}
       />
     </div>
     {explorateurOuvert && (

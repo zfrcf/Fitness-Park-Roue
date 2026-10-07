@@ -17,9 +17,12 @@ import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { BoutonCopier } from "./bloc-code";
 import { Markdown } from "./markdown";
-import { estProjetGradle, extraireFichiers } from "@/lib/fichiers/extraire";
+import { estProjetConstructible, extraireFichiers } from "@/lib/fichiers/extraire";
+import { pagesHtml } from "@/lib/fichiers/apercu";
+import { BoutonApercu } from "./apercu-web";
 import type { StatsModifications } from "@/lib/fichiers/explorateur";
 import { ResumeModifications } from "./compteur-lignes";
+import { ImagesGenerees, PiecesDuMessage } from "./pieces-message";
 import type { FichierProjet } from "@/lib/fichiers/projet";
 import { estimerTokens } from "@/lib/chat/contexte";
 import { BoutonCompiler, ListeCompilations, useCompilations } from "./carte-compilation";
@@ -293,9 +296,10 @@ function PanneauFichiersAvecCompilation({
     () => (complet ? new Set([...fichiers.map((f) => f.chemin), ...complet.filter((f) => f.messageId === messageId).map((f) => f.chemin)]) : undefined),
     [complet, fichiers, messageId],
   );
-  const gradle = estProjetGradle(affiches) && !!conversationId && !!projet;
+  const constructible = estProjetConstructible(affiches) && !!conversationId && !!projet;
+  const apercu = pagesHtml(affiches).length > 0 ? <BoutonApercu fichiers={affiches} /> : null;
   const liste = useMemo(() => affiches.map((f) => ({ chemin: f.chemin, contenu: f.contenu })), [affiches]);
-  const { liste: compilations, compiler, lancement, enCours, majCompilation } = useCompilations(gradle ? conversationId : undefined, messageId, liste);
+  const { liste: compilations, compiler, lancement, enCours, majCompilation } = useCompilations(constructible ? conversationId : undefined, messageId, liste);
   const titre = complet ? `Projet complet : ${complet.length} fichiers` : undefined;
   const nbModifies = modifies?.size ?? fichiers.length;
   const sousTitre = complet && nbModifies > 0 ? `${nbModifies} modifié${nbModifies > 1 ? "s" : ""} dans cette réponse` : complet ? "aucun fichier modifié dans cette réponse" : undefined;
@@ -314,11 +318,11 @@ function PanneauFichiersAvecCompilation({
       )}
     </div>
   ) : null;
-  if (!gradle) {
+  if (!constructible) {
     return (
       <>
         {alerte}
-        <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} stats={modifications} />
+        <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} stats={modifications} actions={apercu} />
       </>
     );
   }
@@ -331,7 +335,12 @@ function PanneauFichiersAvecCompilation({
         sousTitre={sousTitre}
         modifies={modifies}
         stats={modifications}
-        actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
+        actions={
+          <>
+            {apercu}
+            <BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />
+          </>
+        }
         pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} onMaj={majCompilation} />}
       />
     </>
@@ -403,7 +412,8 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
           </form>
         ) : (
           <>
-            <div className="max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{texte}</div>
+            {texte && <div className="max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{texte}</div>}
+            <PiecesDuMessage message={m} />
             <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
               <BoutonCopier texte={texte} />
               {onEditer && (
@@ -443,6 +453,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
             <Loader2 className="size-4 animate-spin" />
           </div>
         ) : null}
+        <ImagesGenerees message={m} />
         {/* Panneau projet : visible dès que CE message a des fichiers OU que le projet accumulé en a
             un (fourni au dernier message), même si la dernière réponse est de la prose. (#39) */}
         {fichiers.length > 0 || (projet && projet.length > 0) ? (

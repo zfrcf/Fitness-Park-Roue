@@ -333,3 +333,40 @@ describe("moteur des tâches", () => {
     expect((await ordonnerPourTache(d, "t1")).map((f) => f.id)).toEqual(["a", "b"]);
   });
 });
+
+describe("tâche lancée pour une demande précise", () => {
+  it("ne se déclare pas réussie tant qu'aucune réponse n'a modifié le projet (cas réel)", async () => {
+    const m = monde();
+    tache(m);
+    // Projet déjà compilable avant la tâche, puis la demande de la tâche (message « tache-t1 »).
+    m.conversations.set("c1", [
+      { id: "u0", role: "user", parts: [{ type: "text", text: "Fais un mod" }] },
+      { id: "a0", role: "assistant", parts: [{ type: "text", text: PROJET }] },
+      { id: "tache-t1", role: "user", parts: [{ type: "text", text: "Ajoute une commande /heure" }] },
+    ]);
+    // Le modèle répond sans rien modifier (note recopiée, charabia…).
+    m.reponses.push({ texte: "La commande est ajoutée.", fournisseurId: "a", usage: { entree: 10, sortie: 5 } });
+    m.issues.push("reussie");
+    await executerTranche(deps(m), "t1");
+    const t = m.taches.get("t1")!;
+    expect(t.statut).not.toBe("terminee");
+    expect(t.cycles).toBe(1);
+    const dernier = m.conversations.get("c1")!.at(-1)!;
+    expect(dernier.role).toBe("user");
+    expect((dernier.parts[0] as { text: string }).text).toMatch(/n'a modifié aucun fichier/);
+  });
+
+  it("se termine dès qu'une réponse a réellement modifié le projet et que ça compile", async () => {
+    const m = monde();
+    tache(m);
+    m.conversations.set("c1", [
+      { id: "u0", role: "user", parts: [{ type: "text", text: "Fais un mod" }] },
+      { id: "a0", role: "assistant", parts: [{ type: "text", text: PROJET }] },
+      { id: "tache-t1", role: "user", parts: [{ type: "text", text: "Ajoute un champ" }] },
+    ]);
+    m.reponses.push({ texte: "```modif src/A.java\n<<<<<<< CHERCHER\nclass A {}\n=======\nclass A { int x; }\n>>>>>>> REMPLACER\n```", fournisseurId: "a", usage: { entree: 10, sortie: 5 } });
+    m.issues.push("reussie");
+    await executerTranche(deps(m), "t1");
+    expect(m.taches.get("t1")!.statut).toBe("terminee");
+  });
+});

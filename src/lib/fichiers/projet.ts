@@ -40,6 +40,12 @@ export function fusionnerProjet(messages: MessageMinimal[]): FichierProjet[] {
   return fusionnerProjetDetaille(messages).fichiers;
 }
 
+/** État du projet (chemin → contenu) juste avant et juste après une réponse qui l'a changé. */
+export interface InstantaneProjet {
+  avant: Map<string, string>;
+  apres: Map<string, string>;
+}
+
 /** Une modification partielle qui n'a pas pu être appliquée (le modèle doit renvoyer le fichier entier). */
 export interface EchecModification {
   messageId: string;
@@ -51,15 +57,21 @@ export interface EchecModification {
  * Comme fusionnerProjet, mais applique aussi les blocs de modification partielle
  * (```modif chemin, paires CHERCHER/REMPLACER) et renvoie les modifications qui ont échoué.
  */
-export function fusionnerProjetDetaille(messages: MessageMinimal[]): { fichiers: FichierProjet[]; echecs: EchecModification[] } {
+export function fusionnerProjetDetaille(
+  messages: MessageMinimal[],
+  options: { instantanes?: boolean } = {},
+): { fichiers: FichierProjet[]; echecs: EchecModification[]; instantanes?: Map<string, InstantaneProjet> } {
   const projet = new Map<string, FichierProjet>();
+  const instantanes = options.instantanes ? new Map<string, InstantaneProjet>() : undefined;
+  const etat = () => new Map([...projet.values()].map((f) => [f.chemin, f.contenu]));
   const echecs: EchecModification[] = [];
   let revision = 0;
   for (const m of messages) {
     if (m.role !== "assistant") continue;
     const texte = texteDuMessage(m);
-    for (const chemin of suppressionsDemandees(texte)) projet.delete(chemin);
+    const avant = instantanes ? etat() : undefined;
     let change = false;
+    for (const chemin of suppressionsDemandees(texte)) change = projet.delete(chemin) || change;
     const fichiers = extraireFichiers(texte).filter((f) => !RE_CHEMIN_RESERVE.test(f.chemin));
     for (const f of fichiers) {
       projet.set(f.chemin, { ...f, messageId: m.id, revision });
@@ -95,9 +107,12 @@ export function fusionnerProjetDetaille(messages: MessageMinimal[]): { fichiers:
       projet.set(modif.chemin, { ...actuel, contenu, messageId: m.id, revision });
       change = true;
     }
-    if (change) revision++;
+    if (change) {
+      revision++;
+      if (instantanes && avant) instantanes.set(m.id, { avant, apres: etat() });
+    }
   }
-  return { fichiers: [...projet.values()], echecs };
+  return { fichiers: [...projet.values()], echecs, ...(instantanes ? { instantanes } : {}) };
 }
 
 function resumer(s: string): string {
@@ -165,8 +180,8 @@ export const INSTRUCTION_PROJET =
   "(c'est la seule version qui compte ; les blocs de code de tes réponses précédentes ont été remplacés par des renvois). " +
   "Pour toute modification ou correction, ne touche qu'aux fichiers concernés et ne récris jamais les fichiers inchangés. " +
   INSTRUCTION_MODIFICATIONS +
-  " Dans l'historique, tes anciens blocs de code sont remplacés par des notes « ⟦note de l'application : …⟧ » : ne les écris " +
-  "JAMAIS toi-même ; une modification n'existe que si tu écris le bloc ```modif complet." +
+  " Dans l'historique, les fichiers entiers de tes anciennes réponses sont remplacés par des notes « ⟦note de l'application : …⟧ » : " +
+  "ne les écris JAMAIS toi-même ; une modification n'existe que si tu écris le bloc ```modif complet." +
   " Pour supprimer un fichier, écris une ligne « Supprimer : chemin ». L'utilisateur compile et télécharge toujours le projet " +
   "complet (état ci-dessous + tes modifications).";
 
@@ -202,10 +217,15 @@ export function blocProjetPourModele(projet: FichierProjet[], budgetTokens: numb
   return lignes.join("\n");
 }
 
-/** Remplace, dans une réponse passée, les blocs des fichiers connus par un renvoi à l'état du projet. */
+/**
+ * Remplace, dans une réponse passée, les fichiers ENTIERS connus par un renvoi à l'état du projet
+ * (ils sont déjà dans l'état, inutile de les renvoyer deux fois). Les blocs ```modif, courts, sont
+ * gardés tels quels : ils montrent au modèle le bon format. Remplacés par une note, ils étaient
+ * imités (le modèle recopiait la note au lieu d'écrire sa modification — cas réels Groq et Kimi).
+ */
 export function masquerFichiersConnus(markdown: string, chemins: Set<string>): string {
   return remplacerBlocsFichiers(markdown, (chemin, modification) =>
-    chemins.has(chemin) ? (modification ? `${NOTE_APPLICATION} bloc modif de ${chemin} appliqué ; contenu actuel dans l'état du projet ⟧` : `${NOTE_APPLICATION} fichier ${chemin} ; contenu actuel dans l'état du projet ⟧`) : null,
+    chemins.has(chemin) && !modification ? `${NOTE_APPLICATION} fichier ${chemin} ; contenu actuel dans l'état du projet ⟧` : null,
   );
 }
 

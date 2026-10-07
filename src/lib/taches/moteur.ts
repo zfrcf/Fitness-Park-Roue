@@ -240,7 +240,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
       }
       let compilation: EtatCompilation | null = t.compilationId ? await deps.etatCompilation(t.compilationId) : null;
       if (!compilation) {
-        const { fichiers: projet, echecs } = fusionnerProjetDetaille(messages);
+        const { fichiers: projet, echecs, instantanes } = fusionnerProjetDetaille(messages, { instantanes: true });
         // Modifications partielles de la dernière réponse non appliquées : on redemande les fichiers
         // entiers concernés, sans consommer de run GitHub.
         const echecsDernier = echecs.filter((e) => e.messageId === dernier.id);
@@ -250,10 +250,12 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
             await terminer("echouee", `modifications inapplicables après ${cycles} tentatives`, { cycles, erreur: echecsDernier.map((e) => `${e.chemin} : ${e.raison}`).join(" ; ") });
             return;
           }
-          await deps.journaliser(tacheId, `${echecsDernier.length} modification(s) non applicable(s), fichiers entiers redemandés`);
+          await deps.journaliser(tacheId, `${echecsDernier.length} modification(s) non appliquée(s), à refaire`);
           await deps.ajouterMessageUtilisateur(
             t.conversationId,
-            `Ces modifications n'ont pas pu être appliquées (le texte CHERCHER ne correspond pas exactement au fichier) :\n${echecsDernier.map((e) => `- ${e.chemin} : ${e.raison}`).join("\n")}\nRenvoie ces fichiers EN ENTIER, chacun dans son bloc de code avec son chemin.`,
+            `Ces modifications n'ont pas été appliquées :\n${echecsDernier.map((e) => `- ${e.chemin} : ${e.raison}`).join("\n")}\n` +
+              `Refais-les avec de vrais blocs \`\`\`modif (texte CHERCHER copié caractère pour caractère depuis l'état du projet) ; ` +
+              "n'écris jamais de note « ⟦note de l'application… ⟧ ». Renvoie le fichier entier seulement si c'est vraiment impossible.",
           );
           await deps.majTache(tacheId, { cycles });
           await suspendre(0, "modifications inapplicables : fichiers redemandés");
@@ -290,6 +292,25 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
           );
           await deps.majTache(tacheId, { cycles, etape: `correction ${t.auto === 1 ? `${cycles} (auto)` : `${cycles}/${t.maxCycles}`}` });
           await suspendre(0, "projet refusé : correction");
+          return;
+        }
+        // (b0) Tâche lancée pour une demande précise (message « tache-<id> ») : tant qu'aucune réponse
+        // n'a réellement modifié le projet, la demande n'est pas faite. Sans cette garde, un projet
+        // déjà compilable « réussissait » alors que le modèle n'avait rien écrit (cas réel).
+        const indiceDemande = messages.findIndex((m) => m.id === `tache-${tacheId}`);
+        if (indiceDemande >= 0 && !messages.slice(indiceDemande + 1).some((m) => m.role === "assistant" && instantanes?.has(m.id))) {
+          const cycles = t.cycles + 1;
+          if (t.auto !== 1 && cycles > t.maxCycles) {
+            await terminer("echouee", `demande non réalisée après ${cycles} cycles`, { cycles, erreur: "Le modèle n'a modifié aucun fichier." });
+            return;
+          }
+          await deps.journaliser(tacheId, "aucune modification du projet depuis la demande : réalisation redemandée");
+          await deps.ajouterMessageUtilisateur(
+            t.conversationId,
+            `Ta réponse n'a modifié aucun fichier : la demande n'est pas encore réalisée. Fais-la maintenant. ${INSTRUCTION_MODIFICATIONS}`,
+          );
+          await deps.majTache(tacheId, { cycles });
+          await suspendre(0, "demande non réalisée : relance");
           return;
         }
         // (b) Projet strictement identique au dernier compilé : le modèle n'a rien changé → ne pas recompiler.

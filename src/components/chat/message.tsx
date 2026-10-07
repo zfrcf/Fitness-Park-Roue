@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Bot, Brain, ChevronDown, Check, ExternalLink, FileText, Globe, Loader2, Pencil, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { AlertCircle, Bot, Brain, ChevronDown, Check, ExternalLink, FileText, Globe, Loader2, Pencil, RefreshCw, RotateCcw, Search, Sparkles, Wrench, X } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
 function texteDe(m: MessageUI): string {
@@ -18,11 +18,49 @@ import { cn } from "@/lib/utils";
 import { BoutonCopier } from "./bloc-code";
 import { Markdown } from "./markdown";
 import { estProjetGradle, extraireFichiers } from "@/lib/fichiers/extraire";
+import type { StatsModifications } from "@/lib/fichiers/explorateur";
+import { ResumeModifications } from "./compteur-lignes";
 import type { FichierProjet } from "@/lib/fichiers/projet";
 import { estimerTokens } from "@/lib/chat/contexte";
 import { BoutonCompiler, ListeCompilations, useCompilations } from "./carte-compilation";
 import { PanneauFichiers } from "./panneau-fichiers";
-import { partiesVisibles } from "./utils";
+import { analyserMessageAutomatique, partiesVisibles, type MessageAutomatique } from "./utils";
+
+/**
+ * Message écrit par l'application (correction après une compilation échouée, relance d'une tâche
+ * de fond) : carte compacte avec les erreurs, journal complet dépliable, au lieu d'une grande bulle.
+ */
+function CarteMessageAutomatique({ auto, texte }: { auto: MessageAutomatique; texte: string }) {
+  const [ouvert, setOuvert] = useState(false);
+  const correction = auto.type === "correction";
+  return (
+    <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        {correction ? <Wrench className="size-3.5 text-amber-600" /> : <RotateCcw className="size-3.5 text-muted-foreground" />}
+        <span className="font-medium">{correction ? "Compilation échouée : correction demandée" : "Relance automatique de la tâche de fond"}</span>
+        {auto.nbErreurs !== null && (
+          <span className="rounded bg-red-500/10 px-1.5 text-red-700 dark:text-red-400">
+            {auto.nbErreurs} erreur{auto.nbErreurs > 1 ? "s" : ""}
+          </span>
+        )}
+        <button type="button" onClick={() => setOuvert((o) => !o)} className="ml-auto text-muted-foreground underline decoration-dotted underline-offset-2">
+          {ouvert ? "masquer" : correction ? "journal complet" : "message complet"}
+        </button>
+      </div>
+      {!ouvert && correction && auto.erreurs.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-red-700 dark:text-red-400">
+          {auto.erreurs.map((e, i) => (
+            <li key={i} className="truncate" title={e}>
+              {e}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!ouvert && !correction && <p className="mt-1 truncate text-muted-foreground">{texte.split("\n")[0]}</p>}
+      {ouvert && <pre className="mt-2 max-h-80 overflow-auto rounded bg-background p-2 font-mono text-[11px] whitespace-pre-wrap">{correction ? (auto.journal ?? texte) : texte}</pre>}
+    </div>
+  );
+}
 
 function MetaReponse({ meta, enCours, texte }: { meta?: MetaMessage; enCours?: boolean; texte?: string }) {
   if (!meta?.fournisseur) return null;
@@ -232,7 +270,10 @@ function PanneauFichiersAvecCompilation({
   messageId,
   occupe,
   onEnvoyer,
+  modifications,
 }: {
+  /** Lignes ajoutées / supprimées par ce message (+N −M). */
+  modifications?: StatsModifications;
   /** Fichiers produits par ce message. */
   fichiers: ReturnType<typeof extraireFichiers>;
   /** État complet du projet de la conversation (dernier message seulement). */
@@ -277,7 +318,7 @@ function PanneauFichiersAvecCompilation({
     return (
       <>
         {alerte}
-        <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} />
+        <PanneauFichiers fichiers={affiches} titre={titre} sousTitre={sousTitre} modifies={modifies} stats={modifications} />
       </>
     );
   }
@@ -289,6 +330,7 @@ function PanneauFichiersAvecCompilation({
         titre={titre}
         sousTitre={sousTitre}
         modifies={modifies}
+        stats={modifications}
         actions={<BoutonCompiler onClick={() => void compiler()} occupe={lancement || enCours} />}
         pied={<ListeCompilations liste={compilations} onDemanderCorrection={occupe ? undefined : onEnvoyer} onMaj={majCompilation} />}
       />
@@ -310,11 +352,14 @@ export interface PropsMessage {
   projet?: FichierProjet[];
   /** Modifications partielles (blocs modif) de ce message non appliquées, à signaler. */
   avertissements?: string[];
+  /** Lignes ajoutées / supprimées par ce message dans le projet (+N −M). */
+  modifications?: StatsModifications;
 }
 
-export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer, projet, avertissements }: PropsMessage) {
+export const Message = memo(function Message({ message: m, dernier, enCours, occupe, conversationId, onRegenerer, onEditer, onEnvoyer, projet, avertissements, modifications }: PropsMessage) {
   const [edition, setEdition] = useState(false);
   const fichiers = useMemo(() => (m.role === "assistant" && !enCours ? extraireFichiers(texteDe(m)) : []), [m, enCours]);
+  const automatique = useMemo(() => (m.role === "user" ? analyserMessageAutomatique(m.id, texteDe(m)) : null), [m]);
   const [brouillon, setBrouillon] = useState("");
   const parts = partiesVisibles(m);
   const texte = parts
@@ -328,6 +373,8 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
   const pages = m.parts.filter((p) => p.type === "data-page-lue").map((p) => p.data);
   const recherches = m.parts.filter((p) => p.type === "data-recherche").map((p) => p.data);
   const estUtilisateur = m.role === "user";
+
+  if (estUtilisateur && automatique) return <CarteMessageAutomatique auto={automatique} texte={texte} />;
 
   if (estUtilisateur) {
     return (
@@ -398,8 +445,20 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
         ) : null}
         {/* Panneau projet : visible dès que CE message a des fichiers OU que le projet accumulé en a
             un (fourni au dernier message), même si la dernière réponse est de la prose. (#39) */}
-        {(fichiers.length > 0 || (projet && projet.length > 0)) && (
-          <PanneauFichiersAvecCompilation fichiers={fichiers} projet={projet} avertissements={avertissements} conversationId={conversationId} messageId={m.id} occupe={occupe} onEnvoyer={onEnvoyer} />
+        {fichiers.length > 0 || (projet && projet.length > 0) ? (
+          <PanneauFichiersAvecCompilation
+            fichiers={fichiers}
+            projet={projet}
+            avertissements={avertissements}
+            conversationId={conversationId}
+            messageId={m.id}
+            occupe={occupe}
+            onEnvoyer={onEnvoyer}
+            modifications={modifications}
+          />
+        ) : (
+          // Réponse qui ne fait que modifier (blocs modif) : résumé « N fichiers modifiés +a −b ».
+          modifications && modifications.fichiers.length > 0 && !enCours && <ResumeModifications stats={modifications} />
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <MetaReponse meta={m.metadata} enCours={enCours} texte={texte} />

@@ -23,8 +23,10 @@ describe("blocs modif mal formés par les modèles (cas réels)", () => {
     expect(echecs).toEqual([{ messageId: "a3", chemin: A, raison: expect.stringContaining("non écrite") }]);
   });
 
-  it("les nouvelles notes de l'historique sont reconnues si le modèle les recopie", () => {
-    const note = masquerFichiersConnus(`\`\`\`modif ${A}\n<<<<<<< CHERCHER\nx\n=======\ny\n>>>>>>> REMPLACER\n\`\`\``, new Set([A]));
+  it("les blocs modif restent dans l'historique (bon exemple), les fichiers entiers deviennent des notes", () => {
+    const modif = `\`\`\`modif ${A}\n<<<<<<< CHERCHER\nx\n=======\ny\n>>>>>>> REMPLACER\n\`\`\``;
+    expect(masquerFichiersConnus(modif, new Set([A]))).toBe(modif);
+    const note = masquerFichiersConnus(`\`\`\`java ${A}\nclass Mod {}\n\`\`\``, new Set([A]));
     expect(note.startsWith(NOTE_APPLICATION)).toBe(true);
     expect(modificationsFantomes(note, new Set())).toEqual([A]);
     expect(modificationsFantomes(note, new Set([A]))).toEqual([]); // un vrai bloc pour ce fichier : pas de fantôme

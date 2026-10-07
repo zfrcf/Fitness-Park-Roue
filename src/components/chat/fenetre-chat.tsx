@@ -9,6 +9,9 @@ import { detecterTacheLongue } from "@/lib/taches/detecter";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Explorateur } from "@/components/explorateur/explorateur";
 import { blocOuvert } from "@/lib/fichiers/extraire";
+import { statsModifications, type StatsModifications } from "@/lib/fichiers/explorateur";
+import { useSondage } from "@/hooks/use-sondage";
+import type { FluxTache } from "@/lib/taches/flux";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
 import { Button } from "@/components/ui/button";
@@ -125,6 +128,7 @@ export function FenetreChat({
 
   // Conversation pilotée par une tâche de fond : on suit la tâche et on recharge les messages ajoutés par le serveur.
   const tacheId = tache?.id;
+  const [rechargement, setRechargement] = useState(0);
   useEffect(() => {
     if (!tacheId) return;
     let actif = true;
@@ -150,12 +154,39 @@ export function FenetreChat({
         /* réessai au prochain tic */
       }
     };
+    if (rechargement) void tic(); // la réponse en direct vient d'être enregistrée : on la charge tout de suite
     const id = setInterval(() => void tic(), tacheActive ? 4000 : 20_000);
     return () => {
       actif = false;
       clearInterval(id);
     };
-  }, [tacheId, tacheActive, occupe, conversationId, setMessages]);
+  }, [tacheId, tacheActive, occupe, conversationId, setMessages, rechargement]);
+
+  // Tâche de fond : la réponse qu'elle est en train d'écrire s'affiche en direct dans la conversation.
+  const [flux, setFlux] = useState<FluxTache | null>(null);
+  const fluxPrecedent = useRef<FluxTache | null>(null);
+  const suivreFlux = tacheActive && !occupe;
+  useSondage(
+    useCallback(
+      async (signal: AbortSignal) => {
+        const r = await fetch(`/api/conversations/${conversationId}/flux`, { cache: "no-store", signal });
+        if (!r.ok) return;
+        const { flux: f } = (await r.json()) as { flux: FluxTache | null };
+        if (!f && fluxPrecedent.current) setRechargement((n) => n + 1);
+        fluxPrecedent.current = f;
+        setFlux((prev) => (prev?.maj === f?.maj ? prev : f));
+      },
+      [conversationId],
+    ),
+    suivreFlux ? 1500 : null,
+  );
+  const fluxVisible = suivreFlux && flux?.texte ? flux : null;
+  const messagesAffiches = useMemo<MessageUI[]>(() => {
+    if (!fluxVisible) return messages;
+    // Réponse déjà enregistrée (le flux n'est pas encore effacé) : pas de doublon.
+    if (messages.at(-1)?.role === "assistant" && texteDe(messages.at(-1)) === fluxVisible.texte) return messages;
+    return [...messages, { id: "flux-tache", role: "assistant", parts: [{ type: "text", text: fluxVisible.texte }] } as MessageUI];
+  }, [messages, fluxVisible]);
 
   // Défilement : on suit le bas tant que l'utilisateur n'a pas remonté. Tout geste vers le haut
   // (molette, doigt, barre) décolle immédiatement ; on recolle seulement une fois revenu tout en bas.
@@ -206,7 +237,7 @@ export function FenetreChat({
 
   // Explorateur en direct : projet y compris la réponse en cours d'écriture, état avant la dernière
   // réponse (décorations U/M et lignes modifiées) et fichier en train d'être écrit.
-  const messagesDirect = useDeferredValue(messages);
+  const messagesDirect = useDeferredValue(messagesAffiches);
   const projetDirect = useMemo(() => fusionnerProjetDetaille(messagesDirect).fichiers, [messagesDirect]);
   const precedents = useMemo(() => {
     const fin = messagesDirect.at(-1)?.role === "assistant" ? messagesDirect.slice(0, -1) : messagesDirect;
@@ -214,8 +245,8 @@ export function FenetreChat({
   }, [messagesDirect]);
   const derniereReponse = messagesDirect.at(-1);
   const enEcriture = useMemo(
-    () => (occupe && derniereReponse?.role === "assistant" ? blocOuvert(texteDe(derniereReponse)) : null),
-    [occupe, derniereReponse],
+    () => ((occupe || !!fluxVisible) && derniereReponse?.role === "assistant" ? blocOuvert(texteDe(derniereReponse)) : null),
+    [occupe, fluxVisible, derniereReponse],
   );
   const explorateurOuvert = usePref(CLE_EXPLORATEUR, "1") === "1" && projetDirect.length > 0;
   const largeurExplorateur = Math.max(380, Number(usePref(CLE_LARGEUR, "760")) || 760);
@@ -255,7 +286,13 @@ export function FenetreChat({
 
   // État du projet (fusion des fichiers de toutes les réponses) et taille estimée du contexte.
   const messagesStables = occupe ? messages.slice(0, -1) : messages;
-  const { fichiers: projet, echecs } = useMemo(() => fusionnerProjetDetaille(messagesStables), [messagesStables]);
+  const { fichiers: projet, echecs, instantanes } = useMemo(() => fusionnerProjetDetaille(messagesStables, { instantanes: true }), [messagesStables]);
+  // « +N −M » de chaque réponse qui a changé le projet.
+  const modificationsParMessage = useMemo(() => {
+    const out = new Map<string, StatsModifications>();
+    for (const [id, inst] of instantanes ?? []) out.set(id, statsModifications(inst.avant, inst.apres));
+    return out;
+  }, [instantanes]);
   // Estimation du contexte réellement envoyé : texte des messages + contenu des pages lues
   // (réinjecté au modèle) + état du projet (renvoyé à chaque tour). (#41)
   const tokensContexte = useMemo(() => {
@@ -305,7 +342,7 @@ export function FenetreChat({
     void regenerate({ ...(messageId ? { messageId } : {}), body: { rechercheWeb } });
   }
 
-  const dernierIndex = messages.length - 1;
+  const dernierIndex = messagesAffiches.length - 1;
 
   // Proposition de tâche de fond : dernier message utilisateur « travaille jusqu'à… », au repos, sans tâche active.
   const dernierUser = [...messages].reverse().find((m) => m.role === "user");
@@ -390,19 +427,20 @@ export function FenetreChat({
               </div>
             </div>
           )}
-          {messages.map((m, i) => (
+          {messagesAffiches.map((m, i) => (
             <Message
               key={m.id}
               message={m}
               dernier={i === dernierIndex}
-              enCours={occupe && i === dernierIndex && m.role === "assistant"}
+              enCours={(occupe && i === dernierIndex && m.role === "assistant") || m.id === "flux-tache"}
               occupe={occupe}
               conversationId={conversationId}
               onRegenerer={m.role === "assistant" ? () => regenerer(i === dernierIndex ? undefined : m.id) : undefined}
               onEditer={m.role === "user" ? (t) => editer(i, t) : undefined}
               onEnvoyer={(t) => envoyer(t)}
-              projet={m.role === "assistant" && i === dernierIndex && projet.length > 0 ? projet : undefined}
+              projet={m.role === "assistant" && i === messages.length - 1 && projet.length > 0 ? projet : undefined}
               avertissements={m.role === "assistant" ? echecs.filter((e) => e.messageId === m.id).map((e) => `${e.chemin} : ${e.raison}`) : undefined}
+              modifications={modificationsParMessage.get(m.id)}
             />
           ))}
           {status === "submitted" && messages.at(-1)?.role === "user" && (

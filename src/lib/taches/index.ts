@@ -10,6 +10,7 @@ import { getKV } from "@/lib/kv";
 import { nettoyerBranchesCompilation } from "@/lib/github/menage";
 import { executerTranche, type DepsMoteur, type EtatCompilation } from "./moteur";
 import { planificateurHTTP } from "./planificateur";
+import { creerPublieurFlux } from "./flux";
 import { modeLocal } from "@/lib/mode";
 
 function versEtat(c: { id: string; statut: string; journal: string | null; jarNom: string | null; erreur: string | null; runUrl: string | null }): EtatCompilation {
@@ -34,13 +35,20 @@ export function depsReelles(): DepsMoteur {
       let fidFin: string | undefined;
       const r = await executerTour({ conversationId, messages, fournisseurs: ordre, ignorerPreference: true, signal, persister: false, onFin: (msg, fid) => { reponse = msg; fidFin = fid; } });
       if (!r.ok) return { texte: "", erreur: r.erreur };
-      const c = await consommerTour(r.stream);
-      if (c.texte.trim() && reponse) {
-        try {
-          await ajouterMessage(conversationId, reponse, c.meta.fournisseurId ?? fidFin);
-        } catch (e) {
-          console.warn("[taches] persistance de la réponse impossible :", e instanceof Error ? e.message : e);
+      // Texte publié au fil de l'eau : la conversation affiche la réponse pendant qu'elle s'écrit.
+      const flux = creerPublieurFlux(getKV(), conversationId);
+      let c: Awaited<ReturnType<typeof consommerTour>>;
+      try {
+        c = await consommerTour(r.stream, (t) => flux.publier(t));
+        if (c.texte.trim() && reponse) {
+          try {
+            await ajouterMessage(conversationId, reponse, c.meta.fournisseurId ?? fidFin);
+          } catch (e) {
+            console.warn("[taches] persistance de la réponse impossible :", e instanceof Error ? e.message : e);
+          }
         }
+      } finally {
+        await flux.terminer();
       }
       return { texte: c.texte, fournisseurId: c.meta.fournisseurId ?? fidFin, usage: c.meta.usage, erreur: c.erreur, reessaiA: c.reessaiA };
     },

@@ -269,6 +269,16 @@ export function estDegenere(texte: string): boolean {
   // Signature du défaut passager de NVIDIA/Kimi : une rafale de « ! » (« ```mod!!!!!!… », « OK!!!!… »),
   // qui n'apparaît jamais dans du vrai code, même quand un court préfixe la précède.
   if (/!{16,}/.test(texte)) return true;
+  // Jetons internes du modèle recrachés tels quels (« <|close|>think… ») : sortie partie en vrille.
+  if (/<\|[a-z_]{2,24}\|>/i.test(texte)) return true;
+  // « Salade » multilingue (Kimi K3, cas réel) : des mots chinois éparpillés au milieu de mots latins
+  // sans suite logique. Une citation en chinois dans une réponse française ne fait que 1 ou 2 bascules.
+  const cjk = texte.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu)?.length ?? 0;
+  if (cjk >= 12) {
+    const latin = texte.match(/[A-Za-zÀ-ÿ]/g)?.length ?? 0;
+    const bascules = texte.match(/[A-Za-zÀ-ÿ][\s\p{P}]*[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu)?.length ?? 0;
+    if (latin >= 200 && cjk / (cjk + latin) < 0.5 && bascules >= 8) return true;
+  }
   const compact = texte.replace(/\s+/g, "");
   if (compact.length < 20) return false;
   const suites = compact.match(/(.)\1{19,}/gu) ?? [];

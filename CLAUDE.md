@@ -39,7 +39,10 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   de fond (`consommerTour`, flux consommé côté serveur).
 - `src/lib/taches/` — tâches de fond : `moteur.ts` (boucle génération → compilation → correction
   par tranches ≤ ~4 min 30, injectable pour les tests), `index.ts` (dépendances réelles),
-  `planificateur.ts` (chaînage HTTP + `waitUntil`, QStash optionnel), `detecter.ts`.
+  `planificateur.ts` (chaînage HTTP + `waitUntil`, QStash optionnel), `detecter.ts`. `flux.ts` : texte en cours d'une
+  réponse de tâche publié dans le KV (`flux:<conversation>`, ≤ 1 écriture / 1,2 s), lu par
+  `/api/conversations/[id]/flux` et affiché en direct dans la conversation. Une tâche lancée avec une demande
+  (message `tache-<id>`) ne réussit pas tant qu'aucune réponse n'a modifié le projet.
 - `src/lib/github/` — compilation des projets Gradle via GitHub Actions (branche orpheline
   `compilation/<id>`, workflow `.github/workflows/compiler.yml`), suivi des runs, `menage.ts`
   (nettoyage des branches orphelines).
@@ -48,7 +51,7 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   (obfusqué, `fabric-loom-remap` + `officialMojangMappings()`).** Vérifié par compilation réelle.
 - `src/lib/fichiers/` — extraction des fichiers depuis le Markdown, fusion de l'état du projet (blocs ```modif,
   notes « ⟦note de l'application : …⟧ » dans l'historique, modifications « fantômes » signalées comme échecs).
-  `explorateur.ts` : arbre compacté, lignes modifiées (LCS), découpage hljs par ligne ; `blocOuvert` (extraire.ts) :
+  `explorateur.ts` : arbre compacté, `comparerLignes`/`statsModifications` (LCS, « +N −M »), découpage hljs par ligne ; `blocOuvert` (extraire.ts) :
   fichier en cours d'écriture pendant le flux.
 - `src/components/explorateur/` — explorateur façon VS Code (arborescence, onglets d'aperçu, éditeur coloré, gouttière
   des lignes modifiées, U/M, suivi de l'écriture en direct) ; panneau redimensionnable de `fenetre-chat.tsx`

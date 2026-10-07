@@ -59,3 +59,29 @@ export function messageErreurLisible(err: { message?: string } | null | undefine
   }
   return t || "Une erreur est survenue. Réessayez.";
 }
+
+/**
+ * Message utilisateur écrit par l'application (tâche de fond, bouton de correction) plutôt que
+ * par l'utilisateur : journal de compilation à replier, relance automatique.
+ */
+export interface MessageAutomatique {
+  type: "correction" | "relance";
+  /** Lignes d'erreur du journal (au plus 8), pour l'aperçu. */
+  erreurs: string[];
+  nbErreurs: number | null;
+  journal: string | null;
+}
+
+export function analyserMessageAutomatique(id: string, texte: string): MessageAutomatique | null {
+  const correction = /^La compilation a échoué/.test(texte.trim());
+  if (!correction && !id.startsWith("tache-")) return null;
+  const bloc = /```(?:text)?\n([\s\S]*?)(?:\n```|$)/.exec(texte);
+  const journal = bloc ? bloc[1] : null;
+  const lignes = (journal ?? "").split("\n");
+  const erreurs = lignes
+    .filter((l) => /(^|\s|:)error:|erreur :|FAILURE:|What went wrong/i.test(l))
+    .map((l) => l.replace(/^.*\/(src\/[^:]+:\d+:)/, "$1").trim())
+    .slice(0, 8);
+  const n = /^\s*(\d+) errors?\s*$/m.exec(journal ?? "");
+  return { type: correction ? "correction" : "relance", erreurs, nbErreurs: n ? Number(n[1]) : null, journal };
+}

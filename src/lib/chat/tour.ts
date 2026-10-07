@@ -310,7 +310,11 @@ export async function compilationAutomatique(conversationId: string, historique:
 }
 
 /** Consomme un flux de tour jusqu'au bout (tâches de fond) et renvoie le texte et les métadonnées. */
-export async function consommerTour(stream: ReadableStream<UIMessageChunk>): Promise<{ texte: string; meta: MetaMessage; erreur?: string; reessaiA?: number }> {
+export async function consommerTour(
+  stream: ReadableStream<UIMessageChunk>,
+  /** Appelé avec le texte complet à chaque morceau (affichage en direct des tâches de fond). */
+  onTexte?: (texte: string) => void,
+): Promise<{ texte: string; meta: MetaMessage; erreur?: string; reessaiA?: number }> {
   const lecteur = stream.getReader();
   let texte = "";
   let meta: MetaMessage = {};
@@ -320,8 +324,13 @@ export async function consommerTour(stream: ReadableStream<UIMessageChunk>): Pro
     const { done, value } = await lecteur.read();
     if (done) break;
     const c = value as UIMessageChunk & { data?: unknown };
-    if (c.type === "text-delta") texte += c.delta;
-    else if (c.type === "data-regeneration") texte = "";
+    if (c.type === "text-delta") {
+      texte += c.delta;
+      onTexte?.(texte);
+    } else if (c.type === "data-regeneration") {
+      texte = "";
+      onTexte?.(texte);
+    }
     else if (c.type === "message-metadata") meta = { ...meta, ...(c.messageMetadata as MetaMessage) };
     else if (c.type === "error") erreur = c.errorText;
     else if (c.type === "data-tous-epuises") reessaiA = (c.data as { reessaiA?: number } | undefined)?.reessaiA;

@@ -461,6 +461,17 @@ describe("rotation des fournisseurs", () => {
 });
 
 describe("estDegenere", () => {
+  it("repère la salade multilingue et les jetons internes recrachés (cas réel Kimi K3)", () => {
+    const salade =
+      "<|close|>think力度 worthy运用了放风筝 for of S.splithopefully 0, highlighting of Sal. The weonga of the sw类比 in 全年 the let me just not pure. a search for modern of the maybe issue for the mix. for StatusClimate of the the po Upon of that the best of the most开车 of the the best of 26.3 of and rewrite for重整手部 at and rewrite Salut.java each toy of the the the state of the web for the need to of the of the meaning of the most of the context of the the state of the most of the best of the way to the直径净资产 the modern of the 200 the reality of the lower黄忠 of the math";
+    expect(estDegenere(salade)).toBe(true);
+    expect(estDegenere(salade.replace("<|close|>", ""))).toBe(true);
+  });
+  it("garde une réponse française qui cite un peu de chinois", () => {
+    const t = "Le mot « 你好 » signifie bonjour en chinois. ".repeat(3) + "Voici la commande Fabric : ".repeat(20);
+    expect(estDegenere(t)).toBe(false);
+  });
+
   it("ne confond pas du code légitime avec une dégénérescence", () => {
     expect(estDegenere("// //////////////////////////////\npublic class A {}")).toBe(false);
     expect(estDegenere("long x = 100000000000000000000L; // ok")).toBe(false);

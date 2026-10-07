@@ -1,0 +1,10 @@
+{
+  "required": true,
+  "package": "com.nova.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "ClientBrandRetrieverMixin",
+    "ClientPacketListenerMixin"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}

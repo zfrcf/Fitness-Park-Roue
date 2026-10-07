@@ -15,6 +15,12 @@ documentation en français. Un seul utilisateur, protégé par mot de passe.
 Avant chaque commit : lint + tsc + vitest verts. Un commit par changement cohérent, message en
 français (`feat:`, `fix:`, `docs:`, `chore:`).
 
+**Déploiement automatique (demande de l'utilisateur, 07/10)** : chaque modification du site, une fois
+lint + tsc + vitest verts (et `next build` pour un changement qui touche la construction), est poussée
+aussitôt sur `main` (avance rapide depuis la branche de travail : `git push origin HEAD:main`), ce qui
+déploie sur Vercel. Pas besoin de redemander. Jamais de force-push sur `main` ; si l'avance rapide est
+impossible, fusionner `main` dans la branche d'abord.
+
 ## Pile technique
 
 Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `render`), Vercel AI SDK 7

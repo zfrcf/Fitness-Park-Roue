@@ -597,7 +597,9 @@ export function FenetreChat({
           precedents={precedents}
           enEcriture={enEcriture}
           onFermer={basculerExplorateur}
-          className="fixed inset-0 z-40 lg:static lg:z-auto lg:w-[var(--largeur-explorateur)] lg:shrink-0"
+          // La conversation garde toujours au moins 440 px : sinon, sur un écran moyen, l'explorateur
+          // ouvert automatiquement l'écrasait jusqu'à rendre la saisie inutilisable (cas réel, 1200 px).
+          className="fixed inset-0 z-40 lg:static lg:z-auto lg:w-[max(280px,min(var(--largeur-explorateur),calc(100%_-_440px)))] lg:shrink-0"
           style={{ ["--largeur-explorateur" as string]: `${largeurExplorateur}px` }}
         />
       </>

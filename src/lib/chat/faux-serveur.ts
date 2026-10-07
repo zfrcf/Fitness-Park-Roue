@@ -24,6 +24,7 @@ export type Scenario =
   | "vide" // ne produit que du raisonnement : aucun texte, finish_reason length
   | "blanc" // réponse blanche (espaces seuls) et AUCUN token de sortie rapporté (finish stop)
   | "degenere" // première réponse « !!!!!!!! », les suivantes normales
+  | "degenere-lent" // première réponse : « !!!! » au compte-gouttes pendant 60 s ; les suivantes normales
   | "otpm" // Groq : refuse si max_tokens > 1000 (OTPM), sinon répond normalement
   | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
   | "outil-acharne" // appelle l'outil tant qu'on le lui permet ; répond seulement quand les outils sont retirés
@@ -160,6 +161,26 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
           return;
         }
         res.write(chunk(id, "Réponse entière du fournisseur degenere."));
+        res.end(finChunk(id, 30, 7));
+        return;
+      }
+      case "degenere-lent": {
+        const n = appels.filter((a) => a.scenario === "degenere-lent").length;
+        sse();
+        if (n <= 1) {
+          let ecrits = 0;
+          const minuteur = setInterval(() => {
+            if (res.destroyed || res.writableEnded || ++ecrits > 1200) {
+              clearInterval(minuteur);
+              if (!res.writableEnded) res.end(finChunk(id, 30, ecrits * 10));
+              return;
+            }
+            res.write(chunk(id, "!".repeat(10)));
+          }, 50);
+          res.on("close", () => clearInterval(minuteur));
+          return;
+        }
+        res.write(chunk(id, "Réponse entière après un flux dégénéré."));
         res.end(finChunk(id, 30, 7));
         return;
       }

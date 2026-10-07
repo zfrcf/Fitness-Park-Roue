@@ -157,6 +157,15 @@ describe("rotation des fournisseurs", () => {
     expect(serveur.appels.filter((a) => a.scenario === "degenere")).toHaveLength(2);
   });
 
+  it("flux dégénéré au compte-gouttes : coupé dès les premiers « !!!! », pas au bout de minutes", async () => {
+    const debut = Date.now();
+    const r = await executer([fournisseur("A", "degenere-lent"), fournisseur("B", "ok")]);
+    expect(Date.now() - debut).toBeLessThan(10_000);
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toBe("Réponse entière après un flux dégénéré.");
+    expect(r.regenerations).toBe(1);
+  });
+
   it("bascule quand le raisonnement a consommé toute la sortie (réponse vide), après un essai sur place", async () => {
     const r = await executer([fournisseur("A", "vide"), fournisseur("B", "ok")]);
     expect(r.erreur).toBeUndefined();

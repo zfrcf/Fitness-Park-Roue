@@ -416,10 +416,23 @@ async function tenter(
     });
 
     let raisonnementId: string | undefined;
+    let verifie = 0; // longueur du texte à la dernière vérification de dégénérescence
     for await (const part of resultat.stream) {
       armer();
       if (part.type === "text-delta") {
         tampon += part.text;
+        // Sortie dégénérée (« !!!!… » de Kimi K3, cas réel : 4 min de points d'exclamation au
+        // compte-gouttes) : on coupe dès qu'elle se voit, la suite (nouvel essai, bascule) est la
+        // même que pour une réponse dégénérée complète.
+        const total = emis.length + tampon.length;
+        if (total - verifie >= 120) {
+          verifie = total;
+          if (estDegenere((emis + tampon).slice(-4000))) {
+            vider();
+            controleur.abort();
+            break;
+          }
+        }
         if (tamponFerme || tampon.length >= 300) vider();
       } else if (part.type === "reasoning-delta") {
         // Raisonnement (si activé dans les réglages) : transmis tel quel, affiché replié côté client.

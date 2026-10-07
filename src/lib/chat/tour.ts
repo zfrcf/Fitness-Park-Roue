@@ -11,6 +11,7 @@ import { fuseauHoraire } from "@/lib/fuseau";
 import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, detecterLoader, extraireVersion, versionDepuisProjet, versionsMinecraft } from "@/lib/minecraft/contexte";
 import { blocProjetPourModele, fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { estProjetAutoConstructible } from "@/lib/fichiers/extraire";
+import { consigneRelance } from "./relance";
 import { empreinteProjet, lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
 import { tacheDeConversation } from "@/lib/db/taches";
 import { waitUntil } from "@vercel/functions";
@@ -136,6 +137,9 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       "Si la compilation automatique est activée, chaque réponse qui change un projet est construite aussitôt et le résultat " +
       "(journal d'erreurs) te revient dans la conversation. " +
       "Si l'utilisateur te renvoie un journal d'erreurs, corrige la cause en ne touchant qu'aux fichiers concernés. " +
+      "N'annonce jamais un travail (« je corrige… », « je vais vérifier… ») sans le faire dans la même réponse : une demande " +
+      "de modification reçoit TOUJOURS les blocs de code ou ```modif correspondants, tout de suite ; il n'y a pas de « tour suivant » " +
+      "où tu pourrais finir. Si un détail est incertain, choisis l'option la plus probable et écris le code. " +
       INSTRUCTION_MODIFICATIONS +
       "\n\nTes capacités réelles, grâce à l'application : lire des pages web, chercher sur le web, voir les images que l'utilisateur joint, " +
       "lire ses fichiers joints (code, archives .zip, PDF), générer des images (outil generer_image), produire des fichiers téléchargeables, " +
@@ -345,7 +349,16 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
           : undefined;
       const outils = { ...(outilsRecherche ?? {}), ...outilImage };
       const messages = await convertToModelMessages(messagesUI);
-      const r = await executerChat(deps, { writer, messages, reglages, conversationId, signal: o.signal, outils, outilImpose: imageDemandee ? "generer_image" : undefined });
+      const r = await executerChat(deps, {
+        writer,
+        messages,
+        reglages,
+        conversationId,
+        signal: o.signal,
+        outils,
+        outilImpose: imageDemandee ? "generer_image" : undefined,
+        relance: imageDemandee ? undefined : (texte) => consigneRelance(texteDernier, texte, projet.length > 0),
+      });
       fournisseurUtilise = r.meta.fournisseurId;
       if (imageDemandee && imagesProduites === 0 && !o.signal?.aborted) await produireImage(texteDernier.replace(/^\s*\/image\s*/i, ""));
     },

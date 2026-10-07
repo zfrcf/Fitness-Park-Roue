@@ -5,7 +5,7 @@ import { getKV, type KV } from "@/lib/kv";
 import { creerModele } from "@/lib/fournisseurs/client";
 import type { Fournisseur } from "@/lib/fournisseurs/types";
 import { demarrerFauxServeur, type FauxServeur, type Scenario } from "./faux-serveur";
-import { estDegenere, executerChat, fusionnerContinuation, type DepsOrchestrateur } from "./orchestrateur";
+import { estDegenere, executerChat, fusionnerContinuation, type DepsOrchestrateur, type ParamsExecution } from "./orchestrateur";
 import { REGLAGES_DEFAUT, type MessageUI, type MetaMessage } from "./types";
 
 let serveur: FauxServeur;
@@ -58,12 +58,13 @@ async function executer(
   conversationId = "conv-1",
   outils?: Record<string, typeof outilRecherche>,
   historique: ModelMessage[] = [],
+  extra: Partial<ParamsExecution> = {},
 ): Promise<Sortie> {
   const deps: DepsOrchestrateur = { fournisseurs: liste, kv, creerModele, delaiInactiviteMs: 400, ...opts };
   const chunks: UIMessageChunk[] = [];
   const flux = createUIMessageStream<MessageUI>({
     execute: async ({ writer }) => {
-      await executerChat(deps, { writer, messages: [...historique, { role: "user", content: question }], reglages: REGLAGES_DEFAUT, conversationId, outils });
+      await executerChat(deps, { writer, messages: [...historique, { role: "user", content: question }], reglages: REGLAGES_DEFAUT, conversationId, outils, ...extra });
     },
     onError: (e) => String(e),
   });
@@ -155,6 +156,15 @@ describe("rotation des fournisseurs", () => {
     expect(r.regenerations).toBe(1);
     expect(r.bascules).toHaveLength(0);
     expect(serveur.appels.filter((a) => a.scenario === "degenere")).toHaveLength(2);
+  });
+
+  it("réponse qui annonce sans modifier : relancée une fois sur place, la suite s'ajoute à la réponse", async () => {
+    const relance = (t: string) => (/```modif/.test(t) ? null : "Tu viens de répondre SANS modifier aucun fichier.");
+    const r = await executer([fournisseur("A", "bavard"), fournisseur("B", "ok")], {}, "corrige", "conv-bavard", undefined, [], { relance });
+    expect(r.erreur).toBeUndefined();
+    expect(r.texte).toMatch(/^Je corrige les points d'API\. Je vais vérifier les noms exacts\.\n\n```modif src\/A\.java/);
+    expect(r.meta.fournisseur).toBe("A");
+    expect(serveur.appels.filter((a) => a.scenario === "bavard")).toHaveLength(2); // une seule relance
   });
 
   it("flux dégénéré au compte-gouttes : coupé dès les premiers « !!!! », pas au bout de minutes", async () => {

@@ -50,6 +50,12 @@ export interface ParamsExecution {
   outils?: ToolSet;
   /** Outil à appeler obligatoirement à la première étape (demande explicite : « génère une image… »). */
   outilImpose?: string;
+  /**
+   * Contrôle de la réponse terminée : renvoie une consigne si elle ne fait pas ce qui était demandé
+   * (ex. modifications annoncées mais aucun fichier écrit). Le même fournisseur est alors relancé
+   * une fois avec cette consigne, et sa suite est ajoutée à la même réponse.
+   */
+  relance?: (texte: string) => string | null;
 }
 
 export interface ResultatExecution {
@@ -532,6 +538,7 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
   const tentes = new Set<string>();
   const reessaisMemeFournisseur = new Set<string>(); // un seul nouvel essai sur place par fournisseur
   let erreurContexte = 0;
+  let relance = false; // une seule relance « réponse sans action » par réponse
   const entreeEstimee = p.messages.reduce((s, m) => s + tokensMessage(m), 0) + estimerTokens(p.reglages.systeme);
 
   writer.write({ type: "text-start", id: partId });
@@ -662,6 +669,27 @@ export async function executerChat(deps: DepsOrchestrateur, params: ParamsExecut
         continue;
       }
       t = { ...t, erreur: { categorie: "temporaire", message: raison, reessaiA: maintenant, basculer: true } };
+    }
+
+    // Réponse qui annonce le travail sans le faire (« je corrige… », « je vais vérifier… ») : une
+    // relance sur place, sans outil, pour obtenir les fichiers dans la même réponse.
+    const consigne = !t.erreur && !relance && !p.signal?.aborted ? p.relance?.(texte) : null;
+    if (consigne) {
+      relance = true;
+      log(`[chat] ${f.nom} : réponse sans action, relance`);
+      writer.write({ type: "data-info", data: { texte: "Aucun fichier modifié : l'application demande les modifications" }, transient: true });
+      const sep = texte.endsWith("\n") ? "\n" : "\n\n";
+      writer.write({ type: "text-delta", id: partId, delta: sep });
+      texte += sep;
+      const messagesRelance: ModelMessage[] = [...pf.messages, { role: "assistant", content: texte.trim() }, { role: "user", content: consigne }];
+      const t2 = await tenter(deps, f, { ...pf, messages: messagesRelance, outilImpose: undefined }, partId, "", false, undefined);
+      if (!t2.erreur && !estDegenere(t2.texte)) {
+        await cumuler(t2);
+        t = { ...t2, texte: t.texte + sep + t2.texte };
+      } else {
+        log(`[chat] ${f.nom} : relance sans résultat (${t2.erreur?.message ?? "réponse dégénérée"}), première réponse gardée`);
+      }
+      maintenant = deps.maintenant?.() ?? Date.now();
     }
 
     if (!t.erreur) {

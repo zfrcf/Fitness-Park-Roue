@@ -24,6 +24,7 @@ export type Scenario =
   | "vide" // ne produit que du raisonnement : aucun texte, finish_reason length
   | "blanc" // réponse blanche (espaces seuls) et AUCUN token de sortie rapporté (finish stop)
   | "degenere" // première réponse « !!!!!!!! », les suivantes normales
+  | "bavard" // annonce les corrections sans les écrire, sauf quand l'application le relance
   | "degenere-lent" // première réponse : « !!!! » au compte-gouttes pendant 60 s ; les suivantes normales
   | "otpm" // Groq : refuse si max_tokens > 1000 (OTPM), sinon répond normalement
   | "outil" // appelle l'outil recherche_web, puis répond avec le résultat
@@ -162,6 +163,13 @@ export async function demarrerFauxServeur(): Promise<FauxServeur> {
         }
         res.write(chunk(id, "Réponse entière du fournisseur degenere."));
         res.end(finChunk(id, 30, 7));
+        return;
+      }
+      case "bavard": {
+        sse();
+        const relance = /SANS modifier aucun fichier/.test(prompt);
+        res.write(chunk(id, relance ? "```modif src/A.java\n<<<<<<< CHERCHER\nint a;\n=======\nint b;\n>>>>>>> REMPLACER\n```" : "Je corrige les points d'API. Je vais vérifier les noms exacts."));
+        res.end(finChunk(id, 30, 20));
         return;
       }
       case "degenere-lent": {

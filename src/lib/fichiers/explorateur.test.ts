@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { construireArbre, decouperHtmlParLigne, dossiersParents, langageDuFichier, lignesModifiees, type Noeud } from "./explorateur";
+import { comparerLignes, construireArbre, decouperHtmlParLigne, dossiersParents, langageDuFichier, lignesModifiees, statsModifications, type Noeud } from "./explorateur";
 import { blocOuvert } from "./extraire";
 
 const noms = (n: Noeud[]): string[] => n.map((x) => (x.type === "dossier" ? `${x.nom}/` : x.nom));
@@ -72,5 +72,25 @@ describe("blocOuvert (fichier en cours d'écriture)", () => {
   it("aucun bloc ouvert", () => {
     expect(blocOuvert("```java src/A.java\nclass A {}\n```\nFini.")).toBeNull();
     expect(blocOuvert("du texte")).toBeNull();
+  });
+});
+
+describe("comparerLignes et statsModifications (+N −M)", () => {
+  it("compte ajouts et suppressions comme git diff --stat", () => {
+    const ancien = "a\nb\nc\nd\n";
+    const nouveau = "a\nB\nc\nd\ne\n";
+    const c = comparerLignes(ancien, nouveau);
+    expect([c.ajouts, c.suppressions]).toEqual([2, 1]); // b → B (+1 −1), e ajouté (+1)
+    expect([...c.modifiees].sort()).toEqual([2, 5]);
+  });
+  it("nouveau fichier : tout en ajout, sans ligne vide finale comptée", () => {
+    expect(comparerLignes(undefined, "x\ny\n")).toMatchObject({ ajouts: 2, suppressions: 0 });
+  });
+  it("totaux par réponse : nouveaux, modifiés, supprimés ; inchangés ignorés", () => {
+    const avant = new Map([["A.java", "1\n2\n3\n"], ["B.java", "x\n"], ["C.java", "c\nc\n"]]);
+    const apres = new Map([["A.java", "1\n2bis\n3\n4\n"], ["B.java", "x\n"], ["D.java", "d\n"]]);
+    const s = statsModifications(avant, apres);
+    expect(s.fichiers.map((f) => `${f.chemin}:${f.statut}:+${f.ajouts}-${f.suppressions}`)).toEqual(["A.java:modifie:+2-1", "C.java:supprime:+0-2", "D.java:nouveau:+1-0"]);
+    expect([s.ajouts, s.suppressions]).toEqual([3, 3]);
   });
 });

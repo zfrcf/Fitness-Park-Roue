@@ -5,7 +5,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { estProjetGradle, nomArchive, type FichierGenere } from "@/lib/fichiers/extraire";
-import { ouvrirDansExplorateur } from "@/lib/fichiers/explorateur";
+import { ouvrirDansExplorateur, type StatsModifications } from "@/lib/fichiers/explorateur";
+import { CompteurLignes } from "./compteur-lignes";
 import { cn } from "@/lib/utils";
 import { formatNombre } from "@/lib/format";
 
@@ -38,6 +39,7 @@ export function PanneauFichiers({
   titre,
   sousTitre,
   modifies,
+  stats,
 }: {
   fichiers: FichierGenere[];
   actions?: React.ReactNode;
@@ -47,7 +49,11 @@ export function PanneauFichiers({
   sousTitre?: string;
   /** Chemins modifiés par ce message (mis en évidence dans la liste). */
   modifies?: Set<string>;
+  /** Lignes ajoutées / supprimées par ce message (+N −M), par fichier et au total. */
+  stats?: StatsModifications;
 }) {
+  const statParChemin = new Map((stats?.fichiers ?? []).map((s) => [s.chemin, s]));
+  const supprimes = (stats?.fichiers ?? []).filter((s) => s.statut === "supprime");
   const [zipEnCours, setZipEnCours] = useState(false);
   if (!fichiers.length) return null;
   const nom = nomArchive(fichiers);
@@ -73,6 +79,7 @@ export function PanneauFichiers({
           {gradle && <span className="ml-1 text-xs text-muted-foreground">· projet Gradle</span>}
           {sousTitre && <span className="ml-1 text-xs text-muted-foreground">· {sousTitre}</span>}
         </span>
+        {stats && stats.fichiers.length > 0 && <CompteurLignes ajouts={stats.ajouts} suppressions={stats.suppressions} className="text-xs" />}
         <div className="ml-auto flex flex-wrap gap-1.5">
           {actions}
           <Button size="sm" variant="outline" onClick={() => void zip()} disabled={zipEnCours}>
@@ -90,12 +97,24 @@ export function PanneauFichiers({
               title={`Ouvrir ${f.chemin} dans l'explorateur`}
             >
               {f.chemin}
-              {modifies?.has(f.chemin) && <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] font-sans text-primary">modifié</span>}
+              {statParChemin.get(f.chemin)?.statut === "nouveau" ? (
+                <span className="ml-1.5 rounded bg-emerald-500/10 px-1 font-sans text-[10px] text-emerald-700 dark:text-emerald-400">nouveau</span>
+              ) : (
+                modifies?.has(f.chemin) && !statParChemin.has(f.chemin) && <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] font-sans text-primary">modifié</span>
+              )}
             </button>
+            {statParChemin.has(f.chemin) && <CompteurLignes ajouts={statParChemin.get(f.chemin)!.ajouts} suppressions={statParChemin.get(f.chemin)!.suppressions} />}
             <span className="shrink-0 tabular-nums text-muted-foreground">{formatNombre(f.contenu.length)} car.</span>
             <Button size="icon-xs" variant="ghost" aria-label={`Télécharger ${f.chemin}`} onClick={() => telechargerFichier(f)}>
               <Download />
             </Button>
+          </li>
+        ))}
+        {supprimes.map((f) => (
+          <li key={f.chemin} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+            <span className="min-w-0 flex-1 truncate font-mono line-through opacity-60">{f.chemin}</span>
+            <span className="font-sans text-[10px] text-muted-foreground">supprimé</span>
+            <CompteurLignes ajouts={0} suppressions={f.suppressions} />
           </li>
         ))}
       </ul>

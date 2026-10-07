@@ -28,7 +28,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fabriquerZip, telechargerFichier } from "@/components/chat/panneau-fichiers";
-import { construireArbre, dossiersParents, lignesModifiees, type Noeud } from "@/lib/fichiers/explorateur";
+import { construireArbre, dossiersParents, lignesModifiees, statsModifications, type Noeud, type StatFichier } from "@/lib/fichiers/explorateur";
+import { CompteurLignes } from "@/components/chat/compteur-lignes";
 import { nomArchive, type FichierGenere } from "@/lib/fichiers/extraire";
 import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,9 @@ export function Explorateur({ fichiers: fichiersDirects, precedents, enEcriture,
   // Le flux met à jour les fichiers à chaque morceau : rendu différé pour rester fluide.
   const fichiers = useDeferredValue(fichiersDirects);
   const parChemin = useMemo(() => new Map(fichiers.map((f) => [f.chemin, f])), [fichiers]);
+  // « +N −M » depuis la dernière réponse, par fichier et au total.
+  const stats = useMemo(() => statsModifications(precedents, new Map(fichiers.map((f) => [f.chemin, f.contenu]))), [precedents, fichiers]);
+  const statParChemin = useMemo(() => new Map(stats.fichiers.map((f) => [f.chemin, f])), [stats]);
   const statuts = useMemo(() => {
     const s = new Map<string, StatutFichier>();
     for (const f of fichiers) {
@@ -198,7 +202,11 @@ export function Explorateur({ fichiers: fichiersDirects, precedents, enEcriture,
             <span className="truncate" title={nom}>
               {nom}
             </span>
-            <span className="ml-auto font-normal normal-case text-muted-foreground">{fichiers.length}</span>
+            {stats.fichiers.length > 0 ? (
+              <CompteurLignes ajouts={stats.ajouts} suppressions={stats.suppressions} className="ml-auto font-normal normal-case" />
+            ) : (
+              <span className="ml-auto font-normal normal-case text-muted-foreground">{fichiers.length}</span>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto pb-2 text-[13px]" role="tree">
             <Arbre
@@ -215,6 +223,7 @@ export function Explorateur({ fichiers: fichiersDirects, precedents, enEcriture,
               }
               actif={actif}
               statuts={statuts}
+              statParChemin={statParChemin}
               enEcriture={cheminEcrit}
               dossiersAvecChangements={dossiersAvecChangements}
               ouvrir={ouvrir}
@@ -308,11 +317,12 @@ function Arbre(props: {
   basculer: (dossier: string) => void;
   actif: string | null;
   statuts: Map<string, StatutFichier>;
+  statParChemin: Map<string, StatFichier>;
   enEcriture?: string;
   dossiersAvecChangements: Set<string>;
   ouvrir: (chemin: string, epingler: boolean) => void;
 }) {
-  const { noeuds, profondeur, replies, basculer, actif, statuts, enEcriture, dossiersAvecChangements, ouvrir } = props;
+  const { noeuds, profondeur, replies, basculer, actif, statuts, statParChemin, enEcriture, dossiersAvecChangements, ouvrir } = props;
   const retrait = { paddingLeft: `${8 + profondeur * 12}px` };
   return (
     <ul role="group">
@@ -361,9 +371,14 @@ function Arbre(props: {
                 <Loader2 className="ml-auto size-3 shrink-0 animate-spin text-primary" aria-label="en cours d'écriture" />
               ) : (
                 st && (
-                  <span className={cn("ml-auto shrink-0 text-[11px] font-semibold", LETTRE[st].classe)} title={LETTRE[st].titre}>
-                    {LETTRE[st].lettre}
-                  </span>
+                  <>
+                    {statParChemin.has(n.chemin) && (
+                      <CompteurLignes ajouts={statParChemin.get(n.chemin)!.ajouts} suppressions={statParChemin.get(n.chemin)!.suppressions} className="ml-auto text-[10px]" />
+                    )}
+                    <span className={cn("shrink-0 text-[11px] font-semibold", !statParChemin.has(n.chemin) && "ml-auto", LETTRE[st].classe)} title={LETTRE[st].titre}>
+                      {LETTRE[st].lettre}
+                    </span>
+                  </>
                 )
               )}
             </button>

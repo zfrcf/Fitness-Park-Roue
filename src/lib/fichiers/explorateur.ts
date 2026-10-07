@@ -71,23 +71,39 @@ export function dossiersParents(chemin: string): string[] {
   return parties.slice(0, -1).map((_, i) => parties.slice(0, i + 1).join("/"));
 }
 
+/** Résultat d'une comparaison ligne à ligne (comme `git diff --stat`). */
+export interface ComparaisonLignes {
+  /** Numéros de ligne (à partir de 1) de la nouvelle version ajoutés ou modifiés. */
+  modifiees: Set<number>;
+  ajouts: number;
+  suppressions: number;
+}
+
+function lignesDe(texte: string): string[] {
+  // Un fichier qui se termine par un saut de ligne n'a pas de « ligne vide » finale.
+  const l = texte.split("\n");
+  if (l.length > 1 && l[l.length - 1] === "") l.pop();
+  return texte === "" ? [] : l;
+}
+
 /**
- * Numéros de ligne (à partir de 1) de `nouveau` ajoutés ou modifiés par rapport à `ancien`
- * (plus longue sous-suite commune sur les lignes, comme la gouttière de VS Code).
- * Au-delà d'une taille raisonnable, comparaison ligne à ligne (approximation suffisante).
+ * Compare deux versions d'un fichier par plus longue sous-suite commune sur les lignes : lignes
+ * ajoutées/modifiées (gouttière de VS Code) et décompte +ajouts −suppressions. Au-delà d'une taille
+ * raisonnable, comparaison ligne à ligne (approximation suffisante).
  */
-export function lignesModifiees(ancien: string | undefined, nouveau: string): Set<number> {
-  const b = nouveau.split("\n");
-  if (ancien === undefined) return new Set(b.map((_, i) => i + 1));
-  const a = ancien.split("\n");
-  const out = new Set<number>();
+export function comparerLignes(ancien: string | undefined, nouveau: string | undefined): ComparaisonLignes {
+  const b = nouveau === undefined ? [] : lignesDe(nouveau);
+  if (ancien === undefined) return { modifiees: new Set(b.map((_, i) => i + 1)), ajouts: b.length, suppressions: 0 };
+  const a = lignesDe(ancien);
+  const modifiees = new Set<number>();
   if (a.length * b.length > 4_000_000) {
     b.forEach((l, i) => {
-      if (a[i] !== l) out.add(i + 1);
+      if (a[i] !== l) modifiees.add(i + 1);
     });
-    return out;
+    const communes = Math.min(a.length, b.length) - [...modifiees].filter((x) => x <= a.length).length;
+    return { modifiees, ajouts: b.length - communes, suppressions: a.length - communes };
   }
-  // Table LCS compacte (Uint16 suffit : < 65 536 lignes communes vu la borne ci-dessus).
+  // Table LCS compacte (Uint16 suffit : au plus ~2 000 lignes communes vu la borne ci-dessus).
   const n = a.length;
   const m = b.length;
   const t = new Uint16Array((n + 1) * (m + 1));
@@ -105,11 +121,46 @@ export function lignesModifiees(ancien: string | undefined, nouveau: string): Se
     } else if (i < n && t[(i + 1) * (m + 1) + j] >= t[i * (m + 1) + j + 1]) {
       i++;
     } else {
-      out.add(j + 1);
+      modifiees.add(j + 1);
       j++;
     }
   }
-  return out;
+  const communes = t[0];
+  return { modifiees, ajouts: m - communes, suppressions: n - communes };
+}
+
+/** Numéros de ligne (à partir de 1) de `nouveau` ajoutés ou modifiés par rapport à `ancien`. */
+export function lignesModifiees(ancien: string | undefined, nouveau: string): Set<number> {
+  return comparerLignes(ancien, nouveau).modifiees;
+}
+
+export interface StatFichier {
+  chemin: string;
+  statut: "nouveau" | "modifie" | "supprime";
+  ajouts: number;
+  suppressions: number;
+}
+
+export interface StatsModifications {
+  fichiers: StatFichier[];
+  ajouts: number;
+  suppressions: number;
+}
+
+/** Décompte « +N −M » entre deux états du projet (chemin → contenu), fichiers inchangés exclus. */
+export function statsModifications(avant: Map<string, string>, apres: Map<string, string>): StatsModifications {
+  const fichiers: StatFichier[] = [];
+  for (const [chemin, contenu] of apres) {
+    const ancien = avant.get(chemin);
+    if (ancien === contenu) continue;
+    const c = comparerLignes(ancien, contenu);
+    fichiers.push({ chemin, statut: ancien === undefined ? "nouveau" : "modifie", ajouts: c.ajouts, suppressions: c.suppressions });
+  }
+  for (const [chemin, contenu] of avant) {
+    if (!apres.has(chemin)) fichiers.push({ chemin, statut: "supprime", ajouts: 0, suppressions: lignesDe(contenu).length });
+  }
+  fichiers.sort((x, y) => x.chemin.localeCompare(y.chemin));
+  return { fichiers, ajouts: fichiers.reduce((s, f) => s + f.ajouts, 0), suppressions: fichiers.reduce((s, f) => s + f.suppressions, 0) };
 }
 
 /**

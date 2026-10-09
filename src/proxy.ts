@@ -1,11 +1,28 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { NOM_COOKIE, verifierJeton } from "@/lib/auth/session";
+import { lireJeton, NOM_COOKIE } from "@/lib/auth/session";
+import { COOKIE_APPAREIL, DUREE_APPAREIL_SECONDES } from "@/lib/comptes/appareil";
 import { modeLocal } from "@/lib/mode";
 import { requeteLocaleSure } from "@/lib/auth/local";
 
 /** Chemins accessibles sans session. */
 // /api/taches/executer vérifie son jeton interne ; /api/taches/reveiller est idempotent, verrouillé, et exige REVEIL_TOKEN si défini.
-const PUBLICS = new Set(["/connexion", "/api/connexion", "/api/taches/executer", "/api/taches/reveiller"]);
+const PUBLICS = new Set(["/connexion", "/inscription", "/api/connexion", "/api/inscription", "/api/verification", "/api/taches/executer", "/api/taches/reveiller"]);
+/** Pages et API réservées à l'administrateur. */
+const RE_ADMIN = /^\/(etat|admin)(\/|$)|^\/api\/(etat\/(test|reinitialiser)|admin)(\/|$)/;
+
+/** Identifiant d'appareil posé une fois (httpOnly) : sert à refuser les doubles comptes. */
+function avecAppareil(request: NextRequest, reponse: NextResponse): NextResponse {
+  if (!request.cookies.get(COOKIE_APPAREIL) && !request.nextUrl.pathname.startsWith("/api/")) {
+    reponse.cookies.set(COOKIE_APPAREIL, crypto.randomUUID().replace(/-/g, ""), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: DUREE_APPAREIL_SECONDES,
+    });
+  }
+  return reponse;
+}
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -20,17 +37,25 @@ export async function proxy(request: NextRequest) {
     return pathname === "/connexion" ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
   }
 
-  const connecte = await verifierJeton(request.cookies.get(NOM_COOKIE)?.value);
+  const identite = await lireJeton(request.cookies.get(NOM_COOKIE)?.value);
+  const connecte = identite !== null;
 
   if (PUBLICS.has(pathname)) {
-    // Déjà connecté : pas besoin de revoir la page de connexion.
-    if (connecte && pathname === "/connexion") {
+    // Déjà connecté : pas besoin de revoir la page de connexion ni d'inscription.
+    if (connecte && (pathname === "/connexion" || pathname === "/inscription")) {
       return NextResponse.redirect(new URL("/", request.url));
     }
-    return NextResponse.next();
+    return avecAppareil(request, NextResponse.next());
   }
 
-  if (connecte) return NextResponse.next();
+  if (connecte) {
+    if (identite.role !== "admin" && RE_ADMIN.test(pathname)) {
+      return pathname.startsWith("/api/")
+        ? NextResponse.json({ erreur: "Réservé à l'administrateur.", code: "acces_refuse" }, { status: 403 })
+        : NextResponse.redirect(new URL("/", request.url));
+    }
+    return avecAppareil(request, NextResponse.next());
+  }
 
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(

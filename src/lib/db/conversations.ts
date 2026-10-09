@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { MessageUI, MetaMessage } from "@/lib/chat/types";
 import { getDB } from "./index";
 import { conversations, messages } from "./schema";
@@ -53,7 +53,12 @@ function partiesVisibles(parts: MessageUI["parts"]): MessageUI["parts"] {
   return [...avant, ...parts.slice(idx + 1)];
 }
 
-export async function listerConversations(recherche?: string, limite = 200): Promise<ResumeConversation[]> {
+/** Filtre « appartient à » : null = l'administrateur (conversations sans propriétaire). */
+function duProprietaire(proprietaire: string | null) {
+  return proprietaire === null ? isNull(conversations.utilisateurId) : eq(conversations.utilisateurId, proprietaire);
+}
+
+export async function listerConversations(recherche?: string, limite = 200, proprietaire: string | null = null): Promise<ResumeConversation[]> {
   const db = await getDB();
   const q = recherche?.trim();
   // Identifiants qualifiés explicitement : Drizzle retire les noms de table dans les sous-requêtes de projection.
@@ -62,6 +67,7 @@ export async function listerConversations(recherche?: string, limite = 200): Pro
     const lignes = await db
       .select({ id: conversations.id, titre: conversations.titre, fournisseurId: conversations.fournisseurId, creeA: conversations.creeA, majA: conversations.majA, nbMessages: nb })
       .from(conversations)
+      .where(duProprietaire(proprietaire))
       .orderBy(desc(conversations.majA))
       .limit(limite);
     return lignes.map((l) => ({ ...l, creeA: l.creeA.toISOString(), majA: l.majA.toISOString() }));
@@ -74,7 +80,7 @@ export async function listerConversations(recherche?: string, limite = 200): Pro
   const lignes = await db
     .select({ id: conversations.id, titre: conversations.titre, fournisseurId: conversations.fournisseurId, creeA: conversations.creeA, majA: conversations.majA, nbMessages: nb })
     .from(conversations)
-    .where(or(ilike(conversations.titre, motif), inArray(conversations.id, ids)))
+    .where(and(duProprietaire(proprietaire), or(ilike(conversations.titre, motif), inArray(conversations.id, ids))))
     .orderBy(desc(conversations.majA))
     .limit(limite);
   // Extraits : premier message correspondant par conversation.
@@ -95,6 +101,13 @@ export async function listerConversations(recherche?: string, limite = 200): Pro
   return lignes.map((l) => ({ ...l, creeA: l.creeA.toISOString(), majA: l.majA.toISOString(), extrait: parConv.get(l.id) }));
 }
 
+/** Propriétaire d'une conversation (null = administrateur), ou `existe: false` si elle n'existe pas encore. */
+export async function proprietaireConversation(id: string): Promise<{ existe: boolean; proprietaire: string | null }> {
+  const db = await getDB();
+  const [c] = await db.select({ u: conversations.utilisateurId }).from(conversations).where(eq(conversations.id, id)).limit(1);
+  return c ? { existe: true, proprietaire: c.u } : { existe: false, proprietaire: null };
+}
+
 export async function lireConversation(id: string): Promise<{ conversation: ResumeConversation; messages: MessageUI[] } | null> {
   const db = await getDB();
   const [c] = await db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
@@ -112,13 +125,13 @@ export async function lireConversation(id: string): Promise<{ conversation: Resu
 }
 
 /** Crée la conversation si besoin et remplace ses messages par la liste fournie (source de vérité : le client). */
-export async function enregistrerMessages(id: string, liste: MessageUI[], fournisseurId?: string): Promise<void> {
+export async function enregistrerMessages(id: string, liste: MessageUI[], fournisseurId?: string, proprietaire: string | null = null): Promise<void> {
   const db = await getDB();
   const premierUtilisateur = liste.find((m) => m.role === "user");
   const titre = sansNul(titreDepuisTexte(premierUtilisateur ? texteDesParties(premierUtilisateur.parts) : ""));
   await db
     .insert(conversations)
-    .values({ id, titre, fournisseurId: fournisseurId ?? null })
+    .values({ id, titre, fournisseurId: fournisseurId ?? null, utilisateurId: proprietaire })
     .onConflictDoUpdate({
       target: conversations.id,
       set: { majA: new Date(), ...(fournisseurId ? { fournisseurId } : {}) },
@@ -192,8 +205,16 @@ export async function supprimerConversation(id: string): Promise<boolean> {
   return r.length > 0;
 }
 
-export async function toutExporter(): Promise<Array<{ conversation: ResumeConversation; messages: MessageUI[] }>> {
-  const liste = await listerConversations(undefined, 10_000);
+/** Supprime toutes les conversations (et tâches) d'un compte membre. */
+export async function supprimerConversationsDe(utilisateurId: string): Promise<number> {
+  const db = await getDB();
+  await db.execute(sql`DELETE FROM taches WHERE utilisateur_id = ${utilisateurId}`);
+  const r = await db.delete(conversations).where(eq(conversations.utilisateurId, utilisateurId)).returning({ id: conversations.id });
+  return r.length;
+}
+
+export async function toutExporter(proprietaire: string | null = null): Promise<Array<{ conversation: ResumeConversation; messages: MessageUI[] }>> {
+  const liste = await listerConversations(undefined, 10_000, proprietaire);
   const resultat = [];
   for (const c of liste) {
     const r = await lireConversation(c.id);

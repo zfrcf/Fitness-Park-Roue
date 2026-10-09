@@ -3,25 +3,39 @@ import { compilationsDuMessage, versPublic } from "@/lib/db/compilations";
 import type { FichierGenere } from "@/lib/fichiers/extraire";
 import { ErreurGitHub } from "@/lib/github/api";
 import { lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
+import { avecAcces, exigerConversation, exigerUtilisateur } from "@/lib/auth/utilisateur";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-export async function GET(req: Request) {
+export const GET = avecAcces(async (req: Request) => {
+  const u = await exigerUtilisateur(req);
   const messageId = new URL(req.url).searchParams.get("messageId");
   if (!messageId) return NextResponse.json({ erreur: "messageId manquant." }, { status: 400 });
   try {
-    return NextResponse.json({ compilations: (await compilationsDuMessage(messageId)).map(versPublic) });
+    const liste = await compilationsDuMessage(messageId);
+    const visibles = [];
+    for (const c of liste) {
+      try {
+        await exigerConversation(u, c.conversationId);
+        visibles.push(c);
+      } catch {
+        /* compilation d'un autre compte : invisible */
+      }
+    }
+    return NextResponse.json({ compilations: visibles.map(versPublic) });
   } catch (e) {
     return NextResponse.json({ erreur: e instanceof Error ? e.message : "base indisponible" }, { status: 503 });
   }
-}
+});
 
-export async function POST(req: Request) {
+export const POST = avecAcces(async (req: Request) => {
+  const u = await exigerUtilisateur(req);
   const corps = (await req.json().catch(() => null)) as { conversationId?: string; messageId?: string; fichiers?: FichierGenere[] } | null;
   if (!corps || typeof corps.conversationId !== "string" || typeof corps.messageId !== "string" || !Array.isArray(corps.fichiers)) {
     return NextResponse.json({ erreur: "Requête invalide." }, { status: 400 });
   }
+  await exigerConversation(u, corps.conversationId);
   const fichiers = corps.fichiers
     .filter((f) => f && typeof f.chemin === "string" && typeof f.contenu === "string")
     .map((f) => ({ chemin: f.chemin, contenu: f.contenu }));
@@ -38,4 +52,4 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ erreur: `Base de données indisponible : ${message}` }, { status: 503 });
   }
-}
+});

@@ -12,6 +12,7 @@ import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, det
 import { blocProjetPourModele, fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { estProjetAutoConstructible } from "@/lib/fichiers/extraire";
 import { consigneRelance } from "./relance";
+import { compterMessage, compterTokens, depassement, lireQuota } from "@/lib/comptes/quota";
 import { empreinteProjet, lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
 import { tacheDeConversation } from "@/lib/db/taches";
 import { waitUntil } from "@vercel/functions";
@@ -46,6 +47,11 @@ export interface OptionsTour {
   persister?: boolean;
   /** Appelé en fin de flux avec le message de l'assistant complet. */
   onFin?: (message: MessageUI, fournisseurId?: string) => void | Promise<void>;
+  /**
+   * Compte membre propriétaire de la conversation (ses réglages, son quota du jour) ; absent ou
+   * null = l'administrateur, sans quota.
+   */
+  utilisateurId?: string | null;
 }
 
 export type ResultatTour = { ok: true; stream: ReadableStream<UIMessageChunk> } | { ok: false; statut: number; erreur: string };
@@ -98,10 +104,19 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
     o = { ...o, messages: rehydraterHistorique(o.messages, enBase) };
   }
   const persister = o.persister ?? conversationId !== "sans-id";
+  const membre = o.utilisateurId ?? null;
+  // Quota du jour des membres : vérifié avant tout appel aux fournisseurs, compté ici (message) et en
+  // fin de flux (tokens).
+  if (membre) {
+    const kvQuota = getKV();
+    const refus = depassement(await lireQuota(kvQuota, membre));
+    if (refus) return { ok: false, statut: 429, erreur: refus };
+    await compterMessage(kvQuota, membre);
+  }
   // Réglages : ceux de la base, surchargés par ceux envoyés par le client.
   let reglages: Reglages;
   try {
-    reglages = normaliserReglages({ ...(await lireReglages()), ...(o.reglagesClient ?? {}) });
+    reglages = normaliserReglages({ ...(await lireReglages(membre)), ...(o.reglagesClient ?? {}) });
   } catch {
     reglages = normaliserReglages(o.reglagesClient);
   }
@@ -211,7 +226,7 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
   // L'historique envoyé par le client fait foi (édition, régénération) : on le persiste tel quel.
   if (persister) {
     try {
-      await enregistrerMessages(conversationId, o.messages);
+      await enregistrerMessages(conversationId, o.messages, undefined, membre);
     } catch (e) {
       console.warn("[chat] persistance impossible :", e instanceof Error ? e.message : e);
     }
@@ -364,6 +379,10 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
     },
     onError: (e) => (e instanceof Error ? e.message : String(e)),
     onEnd: async ({ responseMessage }) => {
+      if (membre) {
+        const usage = (responseMessage.metadata as MetaMessage | undefined)?.usage;
+        await compterTokens(getKV(), membre, usage?.total ?? (usage ? usage.entree + usage.sortie : 0)).catch(() => {});
+      }
       if (persister) {
         try {
           await ajouterMessage(conversationId, responseMessage, fournisseurUtilise);

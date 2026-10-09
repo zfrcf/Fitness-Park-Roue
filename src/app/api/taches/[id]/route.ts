@@ -1,24 +1,31 @@
 import { NextResponse } from "next/server";
 import { journaliser, lireTache, majTache, supprimerTache, versPublic } from "@/lib/db/taches";
 import { planificateurHTTP } from "@/lib/taches/planificateur";
+import { AccesRefuse, avecAcces, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
+
+/** La tâche du compte connecté, sinon « introuvable » (sans révéler qu'elle existe). */
+async function tacheDe(req: Request, id: string) {
+  const u = await exigerUtilisateur(req);
+  const t = await lireTache(id).catch(() => null);
+  if (!t || t.utilisateurId !== proprietaire(u)) throw new AccesRefuse(404, "Tâche introuvable.");
+  return t;
+}
 
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, { params }: Ctx) {
+export const GET = avecAcces(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
-  const t = await lireTache(id).catch(() => null);
-  if (!t) return NextResponse.json({ erreur: "Tâche introuvable." }, { status: 404 });
+  const t = await tacheDe(req, id);
   return NextResponse.json({ tache: versPublic(t) });
-}
+});
 
 /** Actions : pause, reprendre, arreter, maxCycles (nombre de corrections, modifiable à tout moment). */
-export async function PATCH(req: Request, { params }: Ctx) {
+export const PATCH = avecAcces(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
+  const t = await tacheDe(req, id);
   const { action, maxCycles } = ((await req.json().catch(() => ({}))) as { action?: string; maxCycles?: number }) ?? {};
-  const t = await lireTache(id).catch(() => null);
-  if (!t) return NextResponse.json({ erreur: "Tâche introuvable." }, { status: 404 });
   let maj = t;
   if (action === "maxCycles") {
     const n = Math.min(50, Math.max(1, Math.round(Number(maxCycles) || 0)));
@@ -39,10 +46,11 @@ export async function PATCH(req: Request, { params }: Ctx) {
     return NextResponse.json({ erreur: "Action impossible dans cet état." }, { status: 409 });
   }
   return NextResponse.json({ tache: versPublic(maj) });
-}
+});
 
-export async function DELETE(_req: Request, { params }: Ctx) {
+export const DELETE = avecAcces(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
+  await tacheDe(req, id);
   const ok = await supprimerTache(id).catch(() => false);
   return ok ? NextResponse.json({ ok: true }) : NextResponse.json({ erreur: "Tâche introuvable." }, { status: 404 });
-}
+});

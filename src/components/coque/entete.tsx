@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Home, ListChecks, LogOut, MessageSquare } from "lucide-react";
+import { Activity, Home, ListChecks, LogOut, MessageSquare, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -9,17 +9,22 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LOCAL } from "@/lib/mode";
 import { cn } from "@/lib/utils";
+import { useMoi } from "./moi";
 
 const LIENS = [
   { href: "/", libelle: "Accueil", icone: Home },
   { href: "/chat", libelle: "Chat", icone: MessageSquare },
   { href: "/taches", libelle: "Tâches", icone: ListChecks },
-  { href: "/etat", libelle: "État", icone: Activity },
+  { href: "/etat", libelle: "État", icone: Activity, admin: true },
+  { href: "/admin", libelle: "Comptes", icone: Users, admin: true },
 ] as const;
 
 export function Entete({ children }: { children?: React.ReactNode }) {
   const chemin = usePathname();
   const routeur = useRouter();
+  const moi = useMoi();
+  const admin = moi?.utilisateur.admin ?? false;
+  const q = moi?.quota;
 
   async function deconnecter() {
     await fetch("/api/deconnexion", { method: "POST" });
@@ -31,7 +36,7 @@ export function Entete({ children }: { children?: React.ReactNode }) {
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
       {children}
       <nav className="flex items-center gap-1">
-        {LIENS.map(({ href, libelle, icone: Icone }) => {
+        {LIENS.filter((l) => !("admin" in l) || admin).map(({ href, libelle, icone: Icone }) => {
           const actif = href === "/" ? chemin === "/" : href === "/chat" ? chemin.startsWith("/chat") || chemin.startsWith("/c/") : chemin.startsWith(href);
           return (
             <Link
@@ -49,6 +54,16 @@ export function Entete({ children }: { children?: React.ReactNode }) {
         })}
       </nav>
       <div className="ml-auto flex items-center gap-1">
+        {moi && !admin && (
+          <span className="hidden max-w-48 truncate px-1 text-xs text-muted-foreground sm:inline" title={moi.utilisateur.email ?? undefined}>
+            {moi.utilisateur.nom}
+            {q && q.limiteMessages > 0 && (
+              <span className={cn("ml-1.5 tabular-nums", q.messages >= q.limiteMessages && "text-destructive")} title="Messages utilisés aujourd'hui (renouvelés à minuit)">
+                · {q.messages}/{q.limiteMessages}
+              </span>
+            )}
+          </span>
+        )}
         <ReglagesDialogue />
         <ThemeToggle />
         {/* Atelier local : pas de mot de passe, donc pas de déconnexion. */}

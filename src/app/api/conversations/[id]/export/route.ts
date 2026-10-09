@@ -1,4 +1,5 @@
 import { lireConversation, versMarkdown } from "@/lib/db/conversations";
+import { avecAcces, exigerConversation, exigerUtilisateur } from "@/lib/auth/utilisateur";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +13,9 @@ function nomFichier(titre: string, ext: string) {
   return `${base}.${ext}`;
 }
 
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const GET = avecAcces(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
+  await exigerConversation(await exigerUtilisateur(req), id);
   const format = new URL(req.url).searchParams.get("format") === "json" ? "json" : "md";
   const r = await lireConversation(id);
   if (!r) return Response.json({ erreur: "Conversation introuvable." }, { status: 404 });
@@ -31,4 +33,4 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       "content-disposition": `attachment; filename="${nomFichier(r.conversation.titre, "md")}"`,
     },
   });
-}
+});

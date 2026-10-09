@@ -28,12 +28,12 @@ export function depsReelles(): DepsMoteur {
     lireMessages: async (conversationId) => (await lireConversation(conversationId))?.messages ?? [],
     ajouterMessageUtilisateur: (conversationId, texte) =>
       ajouterMessage(conversationId, { id: `tache-${Date.now().toString(36)}`, role: "user", parts: [{ type: "text", text: texte }] }),
-    generer: async ({ conversationId, messages, fournisseurs: ordre, signal }) => {
+    generer: async ({ conversationId, messages, fournisseurs: ordre, signal, utilisateurId }) => {
       // persister: false → on ne réécrit pas l'historique déjà en base, et on ne garde la réponse
       // QUE si du texte visible a été produit (un message vide après quota fausserait la reprise).
       let reponse: import("@/lib/chat/types").MessageUI | undefined;
       let fidFin: string | undefined;
-      const r = await executerTour({ conversationId, messages, fournisseurs: ordre, ignorerPreference: true, signal, persister: false, onFin: (msg, fid) => { reponse = msg; fidFin = fid; } });
+      const r = await executerTour({ conversationId, messages, fournisseurs: ordre, ignorerPreference: true, signal, persister: false, utilisateurId, onFin: (msg, fid) => { reponse = msg; fidFin = fid; } });
       if (!r.ok) return { texte: "", erreur: r.erreur };
       // Texte publié au fil de l'eau : la conversation affiche la réponse pendant qu'elle s'écrit.
       const flux = creerPublieurFlux(getKV(), conversationId);

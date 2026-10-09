@@ -1,4 +1,4 @@
-import { bigint, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { MetaMessage } from "@/lib/chat/types";
 
 export const conversations = pgTable(
@@ -7,10 +7,34 @@ export const conversations = pgTable(
     id: text("id").primaryKey(),
     titre: text("titre").notNull().default("Nouvelle conversation"),
     fournisseurId: text("fournisseur_id"),
+    /** Propriétaire : null = l'administrateur (conversations d'avant les comptes). */
+    utilisateurId: text("utilisateur_id"),
     creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
     majA: timestamp("maj_a", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("conversations_maj_idx").on(t.majA)],
+  (t) => [index("conversations_maj_idx").on(t.majA), index("conversations_utilisateur_idx").on(t.utilisateurId)],
+);
+
+/** Comptes des utilisateurs inscrits (l'administrateur se connecte avec APP_PASSWORD, sans ligne ici). */
+export const utilisateurs = pgTable(
+  "utilisateurs",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    /** Forme canonique (alias Gmail, +suffixe…) : unique, c'est elle qui empêche les doubles comptes. */
+    emailNormalise: text("email_normalise").notNull(),
+    nom: text("nom").notNull().default(""),
+    hash: text("hash").notNull(),
+    role: text("role").notNull().default("membre"), // membre | admin
+    statut: text("statut").notNull().default("en_attente"), // en_attente | actif | bloque
+    /** Identifiants d'appareil vus à l'inscription (cookie + stockage du navigateur). */
+    appareils: jsonb("appareils").$type<string[]>().notNull().default([]),
+    /** Empreinte HMAC de l'adresse IP d'inscription (jamais l'adresse en clair). */
+    ipHash: text("ip_hash"),
+    creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
+    derniereConnexion: timestamp("derniere_connexion", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("utilisateurs_email_idx").on(t.emailNormalise), index("utilisateurs_ip_idx").on(t.ipHash)],
 );
 
 export const messages = pgTable(
@@ -76,6 +100,8 @@ export const taches = pgTable(
   {
     id: text("id").primaryKey(),
     conversationId: text("conversation_id").notNull(),
+    /** Propriétaire : null = l'administrateur. */
+    utilisateurId: text("utilisateur_id"),
     titre: text("titre").notNull(),
     objectif: text("objectif").notNull(),
     /** Boucle génération → compilation → correction jusqu'au .jar ; sinon une seule réponse. */
@@ -192,4 +218,22 @@ CREATE TABLE IF NOT EXISTS taches (
 CREATE INDEX IF NOT EXISTS taches_statut_idx ON taches (statut);
 ALTER TABLE taches ADD COLUMN IF NOT EXISTS auto INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE taches ADD COLUMN IF NOT EXISTS empreinte_compilee TEXT;
+ALTER TABLE taches ADD COLUMN IF NOT EXISTS utilisateur_id TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS utilisateur_id TEXT;
+CREATE INDEX IF NOT EXISTS conversations_utilisateur_idx ON conversations (utilisateur_id);
+CREATE TABLE IF NOT EXISTS utilisateurs (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  email_normalise TEXT NOT NULL,
+  nom TEXT NOT NULL DEFAULT '',
+  hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'membre',
+  statut TEXT NOT NULL DEFAULT 'en_attente',
+  appareils JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ip_hash TEXT,
+  cree_a TIMESTAMPTZ NOT NULL DEFAULT now(),
+  derniere_connexion TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS utilisateurs_email_idx ON utilisateurs (email_normalise);
+CREATE INDEX IF NOT EXISTS utilisateurs_ip_idx ON utilisateurs (ip_hash);
 `;

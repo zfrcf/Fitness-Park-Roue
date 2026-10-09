@@ -8,6 +8,7 @@ import type { TachePublique } from "@/lib/db/taches";
 import { detecterTacheLongue } from "@/lib/taches/detecter";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Explorateur } from "@/components/explorateur/explorateur";
+import { rafraichirMoi } from "@/components/coque/moi";
 import { blocOuvert } from "@/lib/fichiers/extraire";
 import { statsModifications, type StatsModifications } from "@/lib/fichiers/explorateur";
 import { useSondage } from "@/hooks/use-sondage";
@@ -103,7 +104,10 @@ export function FenetreChat({
         body: { ...body, id, messages: allegerHistorique(liste), trigger, messageId },
       }),
     }),
-    onFinish: () => signalerMajConversations(),
+    onFinish: () => {
+      signalerMajConversations();
+      rafraichirMoi();
+    },
     onData: (part) => {
       if (part.type === "data-bascule") {
         const b = part.data;

@@ -5,10 +5,12 @@ import { lireLimites } from "@/lib/fournisseurs/limites";
 import { creneauxUtilises, rpmDe } from "@/lib/fournisseurs/debit";
 import { getKV } from "@/lib/kv";
 import { depensesDuMois, moisCourant, plafondMensuel } from "@/lib/depenses";
+import { avecAcces, exigerUtilisateur } from "@/lib/auth/utilisateur";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = avecAcces(async (req: Request) => {
+  const u = await exigerUtilisateur(req);
   const liste = fournisseurs();
   const kv = getKV();
   const maintenant = Date.now();
@@ -23,6 +25,13 @@ export async function GET() {
       })),
     ),
   ]);
+  if (!u.admin) {
+    // Membres : disponibilité seulement (ni dépenses, ni limites, ni détails des comptes fournisseurs).
+    return NextResponse.json({
+      fournisseurs: liste.map((f, i) => ({ ...versPublic(f), etat: { statut: etats[i].statut, majA: etats[i].majA, reessaiA: etats[i].reessaiA } })),
+      maintenant,
+    });
+  }
   return NextResponse.json({
     fournisseurs: liste.map((f, i) => ({
       ...versPublic(f),
@@ -38,4 +47,4 @@ export async function GET() {
     depenseTotale: depenses.reduce((s, d) => s + d.montant, 0),
     maintenant,
   });
-}
+});

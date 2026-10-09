@@ -80,7 +80,21 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   (`data/pglite`). DDL idempotent exécuté au premier accès (pas de migrations).
 - `src/lib/kv.ts` — Upstash Redis si configuré (`KV_REST_API_*` ou `UPSTASH_REDIS_REST_*`), sinon
   mémoire de processus.
-- `src/lib/auth/` + `src/proxy.ts` — accès privé : cookie signé HMAC, limite de tentatives.
+- `src/lib/auth/` + `src/proxy.ts` — accès privé : cookie signé HMAC (porte `u`/`r` : compte et rôle ; sans `u` =
+  administrateur, sessions d'avant les comptes), limite de tentatives. `utilisateur.ts` : utilisateur de la requête
+  (`exigerUtilisateur`, `exigerAdmin`, `exigerConversation`, `avecAcces`), membre bloqué/supprimé refusé (cache KV 30 s).
+- **Comptes** (`src/lib/comptes/`, table `utilisateurs`, `src/lib/db/utilisateurs.ts`) : l'administrateur se connecte
+  avec `APP_PASSWORD` (lien « Accès administrateur »), les membres par e-mail + mot de passe (scrypt). Inscription
+  ouverte (`/inscription`, `INSCRIPTIONS_FERMEES=1` pour fermer). Anti-doublons : adresse normalisée unique (alias
+  Gmail, `+suffixe`), adresses jetables et domaines sans MX refusés, 1 compte par appareil sur 30 j (cookie httpOnly
+  `appareil` posé par le proxy + identifiant localStorage), `INSCRIPTIONS_PAR_IP` comptes par IP sur 30 j (défaut 1,
+  empreinte HMAC). Vérification : lien par e-mail si `RESEND_API_KEY` (+ `EMAIL_EXPEDITEUR`), sinon validation par
+  l'administrateur (`/admin`) ; `INSCRIPTION_VERIFICATION=aucune|admin|email` pour forcer. **Isolation** : colonne
+  `utilisateur_id` sur `conversations` et `taches` (null = administrateur) ; toute route/page qui lit une conversation,
+  une tâche ou une compilation passe par ces contrôles. Réglages par compte (`global` / `u:<id>`). **Quota** des membres
+  (`quota.ts`) : `QUOTA_MESSAGES_JOUR` (60) et `QUOTA_TOKENS_JOUR` (600 000) par jour, vérifié et compté dans
+  `executerTour` (chat et tâches) ; tous utilisent les clés fournisseurs de l'administrateur. `/etat` et `/admin`
+  réservés à l'administrateur.
 - `desktop/` — **version locale pour Ubuntu** (« atelier », Python : `httpx` + `rich`) : chat en terminal, fichiers écrits
   directement dans le dossier du projet (blocs ```modif inclus), `gradle build` local avec JDK 25 + Gradle 9.7.1 installés
   sans sudo par `install.sh` → `installer.py` (venv, ou venv sans ensurepip + get-pip, ou pip.pyz --target) puis `atelier installer`

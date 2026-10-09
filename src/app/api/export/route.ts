@@ -1,10 +1,11 @@
 import { toutExporter } from "@/lib/db/conversations";
+import { avecAcces, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
 
 export const dynamic = "force-dynamic";
 
 /** Export complet de l'historique (JSON). */
-export async function GET() {
-  const tout = await toutExporter();
+export const GET = avecAcces(async (req: Request) => {
+  const tout = await toutExporter(proprietaire(await exigerUtilisateur(req)));
   const date = new Date().toISOString().slice(0, 10);
   return new Response(JSON.stringify({ exporteLe: new Date().toISOString(), conversations: tout }, null, 2), {
     headers: {
@@ -12,4 +13,4 @@ export async function GET() {
       "content-disposition": `attachment; filename="chat-ia-export-${date}.json"`,
     },
   });
-}
+});

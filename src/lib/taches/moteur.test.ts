@@ -28,6 +28,7 @@ function tache(m: Monde, extra: Partial<Tache> = {}): Tache {
   const t: Tache = {
     id: "t1",
     conversationId: "c1",
+    utilisateurId: null,
     titre: "Mod test",
     objectif: "Fais un mod",
     compiler: 1,

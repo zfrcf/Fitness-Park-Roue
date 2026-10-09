@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, isNull, sql } from "drizzle-orm";
 import { getDB } from "./index";
 import { taches } from "./schema";
 
@@ -25,9 +25,12 @@ export async function tacheDeConversation(conversationId: string): Promise<Tache
   return liste.find((t) => t.statut === "en_cours" || t.statut === "en_attente") ?? liste[0] ?? null;
 }
 
-export async function listerTaches(limite = 100): Promise<Tache[]> {
+/** Tâches d'un propriétaire (null = administrateur ; undefined = toutes, usage interne). */
+export async function listerTaches(limite = 100, proprietaire?: string | null): Promise<Tache[]> {
   const db = await getDB();
-  return db.select().from(taches).orderBy(desc(taches.majA)).limit(limite);
+  const q = db.select().from(taches);
+  const filtre = proprietaire === undefined ? undefined : proprietaire === null ? isNull(taches.utilisateurId) : eq(taches.utilisateurId, proprietaire);
+  return (filtre ? q.where(filtre) : q).orderBy(desc(taches.majA)).limit(limite);
 }
 
 export async function majTache(id: string, valeurs: Partial<typeof taches.$inferInsert>): Promise<Tache | null> {

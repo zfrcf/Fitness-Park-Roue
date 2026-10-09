@@ -46,20 +46,36 @@ interface Charge {
   exp: number; // epoch secondes
   iat: number;
   v: 1;
+  /** Compte connecté ; absent = administrateur (sessions d'avant les comptes). */
+  u?: string;
+  r?: Role;
 }
 
-export async function creerJeton(): Promise<string> {
+export type Role = "admin" | "membre";
+export interface Identite {
+  uid: string;
+  role: Role;
+}
+/** Identifiant de l'administrateur (connexion par APP_PASSWORD). */
+export const ID_ADMIN = "admin";
+
+export async function creerJeton(identite: Identite = { uid: ID_ADMIN, role: "admin" }): Promise<string> {
   const maintenant = Math.floor(Date.now() / 1000);
-  const charge: Charge = { v: 1, iat: maintenant, exp: maintenant + DUREE_SESSION_SECONDES };
+  const charge: Charge = { v: 1, iat: maintenant, exp: maintenant + DUREE_SESSION_SECONDES, u: identite.uid, r: identite.role };
   const corps = base64url(encodeur.encode(JSON.stringify(charge)));
   const sig = await crypto.subtle.sign("HMAC", await cle(), encodeur.encode(corps));
   return `${corps}.${base64url(sig)}`;
 }
 
 export async function verifierJeton(jeton: string | undefined | null): Promise<boolean> {
-  if (!jeton) return false;
+  return (await lireJeton(jeton)) !== null;
+}
+
+/** Identité portée par un jeton valide et non expiré, sinon null. */
+export async function lireJeton(jeton: string | undefined | null): Promise<Identite | null> {
+  if (!jeton) return null;
   const [corps, sig] = jeton.split(".");
-  if (!corps || !sig) return false;
+  if (!corps || !sig) return null;
   try {
     const ok = await crypto.subtle.verify(
       "HMAC",
@@ -67,13 +83,14 @@ export async function verifierJeton(jeton: string | undefined | null): Promise<b
       depuisBase64url(sig),
       encodeur.encode(corps),
     );
-    if (!ok) return false;
+    if (!ok) return null;
     const charge = JSON.parse(
       new TextDecoder().decode(depuisBase64url(corps)),
     ) as Charge;
-    return charge.v === 1 && charge.exp > Math.floor(Date.now() / 1000);
+    if (charge.v !== 1 || charge.exp <= Math.floor(Date.now() / 1000)) return null;
+    return { uid: charge.u ?? ID_ADMIN, role: charge.r === "membre" ? "membre" : charge.u && charge.u !== ID_ADMIN ? "membre" : "admin" };
   } catch {
-    return false;
+    return null;
   }
 }
 

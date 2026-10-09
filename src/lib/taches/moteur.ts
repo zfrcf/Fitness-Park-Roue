@@ -57,7 +57,7 @@ export interface DepsMoteur {
   lireMessages: (conversationId: string) => Promise<MessageUI[]>;
   ajouterMessageUtilisateur: (conversationId: string, texte: string) => Promise<void>;
   /** Exécute un tour de chat sur la conversation (le message de l'assistant est persisté par le tour). */
-  generer: (p: { conversationId: string; messages: MessageUI[]; fournisseurs: Fournisseur[]; signal: AbortSignal }) => Promise<ResultatGeneration>;
+  generer: (p: { conversationId: string; messages: MessageUI[]; fournisseurs: Fournisseur[]; signal: AbortSignal; utilisateurId?: string | null }) => Promise<ResultatGeneration>;
   lancerCompilation: (p: { conversationId: string; messageId: string; fichiers: FichierGenere[] }) => Promise<EtatCompilation>;
   etatCompilation: (id: string) => Promise<EtatCompilation | null>;
   programmer: (tacheId: string, delaiMs: number) => Promise<void>;
@@ -186,7 +186,7 @@ export async function executerTranche(deps: DepsMoteur, tacheId: string): Promis
         }, INTERVALLE_SURVEILLANCE_MS);
         let r: ResultatGeneration;
         try {
-          r = await deps.generer({ conversationId: t.conversationId, messages, fournisseurs: ordre, signal: controleur.signal });
+          r = await deps.generer({ conversationId: t.conversationId, messages, fournisseurs: ordre, signal: controleur.signal, utilisateurId: t.utilisateurId });
         } finally {
           clearTimeout(minuteur);
           clearInterval(surveillance);

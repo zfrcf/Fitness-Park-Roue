@@ -3,20 +3,22 @@ import { ajouterMessage, enregistrerMessages, lireConversation, titreDepuisTexte
 import { creerTache, listerTaches, versPublic } from "@/lib/db/taches";
 import { reveillerTaches } from "@/lib/taches";
 import { planificateurHTTP } from "@/lib/taches/planificateur";
+import { avecAcces, exigerConversation, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+export const GET = avecAcces(async (req: Request) => {
+  const u = await exigerUtilisateur(req);
   try {
     // Chaque consultation relance aussi les tâches dues (filet si aucun cron n'est configuré).
     const relancees = await reveillerTaches().catch(() => [] as string[]);
-    const liste = (await listerTaches()).map(versPublic);
+    const liste = (await listerTaches(100, proprietaire(u))).map(versPublic);
     return NextResponse.json({ taches: liste, relancees, maintenant: Date.now() });
   } catch (e) {
     return NextResponse.json({ erreur: e instanceof Error ? e.message : "base indisponible" }, { status: 503 });
   }
-}
+});
 
 interface Corps {
   objectif?: string;
@@ -28,7 +30,8 @@ interface Corps {
   maxCycles?: number;
 }
 
-export async function POST(req: Request) {
+export const POST = avecAcces(async (req: Request) => {
+  const u = await exigerUtilisateur(req);
   const corps = ((await req.json().catch(() => null)) as Corps | null) ?? {};
   const objectif = typeof corps.objectif === "string" ? corps.objectif.trim() : "";
   const compiler = corps.compiler !== false;
@@ -39,6 +42,7 @@ export async function POST(req: Request) {
     let conversationId = typeof corps.conversationId === "string" ? corps.conversationId.slice(0, 64) : "";
     let titre: string;
     if (conversationId) {
+      await exigerConversation(u, conversationId);
       const conv = await lireConversation(conversationId);
       if (!conv) return NextResponse.json({ erreur: "Conversation introuvable." }, { status: 404 });
       titre = conv.conversation.titre;
@@ -51,11 +55,12 @@ export async function POST(req: Request) {
       if (objectif.length < 3) return NextResponse.json({ erreur: "Décrivez l'objectif de la tâche." }, { status: 400 });
       conversationId = `t${id.replace("-", "")}`.slice(0, 20);
       titre = titreDepuisTexte(objectif);
-      await enregistrerMessages(conversationId, [{ id: `u-${id}`, role: "user", parts: [{ type: "text", text: objectif }] }]);
+      await enregistrerMessages(conversationId, [{ id: `u-${id}`, role: "user", parts: [{ type: "text", text: objectif }] }], undefined, proprietaire(u));
     }
     const t = await creerTache({
       id,
       conversationId,
+      utilisateurId: proprietaire(u),
       titre,
       objectif: objectif || corps.messageInitial?.slice(0, 500) || titre,
       compiler: compiler ? 1 : 0,
@@ -70,4 +75,4 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json({ erreur: e instanceof Error ? e.message : "base indisponible" }, { status: 503 });
   }
-}
+});

@@ -5,6 +5,7 @@ import { fichierATelecharger, typeMime, type FichierProduit } from "@/lib/compil
 import { lireCompilation } from "@/lib/db/compilations";
 import { extraireArtefact } from "@/lib/github/compilation";
 import { ErreurGitHub } from "@/lib/github/api";
+import { avecAcces, exigerConversation, exigerUtilisateur } from "@/lib/auth/utilisateur";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -26,10 +27,11 @@ const AUCUN = () => Response.json({ erreur: "Aucun fichier à télécharger pour
  * plusieurs fichiers) : depuis le disque (atelier local) ou depuis l'artefact GitHub (l'artefact
  * lui-même exige une session GitHub, d'où ce relais). La route garde son nom « jar » historique.
  */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const GET = avecAcces(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const c = await lireCompilation(id);
   if (!c || c.statut !== "reussie" || !c.jarNom) return AUCUN();
+  await exigerConversation(await exigerUtilisateur(req), c.conversationId);
   if (estLocale(c)) {
     const dossier = dossierProduits(c.id);
     const noms = await listerFichiers(dossier);
@@ -51,4 +53,4 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }
     return Response.json({ erreur: e instanceof Error ? e.message : "téléchargement impossible" }, { status: 502 });
   }
-}
+});

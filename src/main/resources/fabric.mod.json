@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "novaclient",
+  "version": "${version}",
+  "name": "NovaClient",
+  "description": "Client utility modulaire avec GUI custom, addons et vanilla spoofer.",
+  "authors": ["Nova"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": { "client": ["com.nova.client.NovaClient"] },
+  "mixins": ["novaclient.mixins.json"],
+  "depends": { "fabricloader": ">=0.19.5", "minecraft": "~26.2", "java": ">=25", "fabric-api": "*" }
+}

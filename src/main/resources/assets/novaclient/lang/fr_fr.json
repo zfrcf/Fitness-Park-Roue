@@ -1,0 +1,6 @@
+{
+  "key.novaclient.gui": "Ouvrir NovaClient GUI",
+  "key.categories.misc": "Divers",
+  "novaclient.gui.title": "NovaClient",
+  "novaclient.command.prefix_changed": "Préfixe changé en %s"
+}

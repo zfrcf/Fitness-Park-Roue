@@ -75,6 +75,13 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   d'importer bien plus sous la limite 4,5 Mo de Vercel ; limites relevées dans `pieces-jointes.ts`.
 - Lecture de la conversation par le modèle : outil `lire_conversation` (`src/lib/chat/lecture-conversation.ts`,
   pur, testé) — retrouve un détail d'un message ancien même après résumé/élagage du contexte.
+- Console Python interactive : panneau REPL (`src/components/chat/console-python.tsx`, bascule dans `coque.tsx`,
+  Ctrl+`) ; variables/imports persistants entre cellules, exécuté dans le navigateur (Pyodide).
+- Bons/mauvais points + mémoire de leçons (`src/lib/comptes/lecons.ts` pur/testé, table `lecons`,
+  `src/lib/db/lecons.ts`, API `/api/retours`, UI `bouton-retour.tsx` + store `retours.ts`) : 👍/👎 avec note sur
+  chaque réponse → leçons « à refaire / à éviter » par compte, réinjectées dans le prompt système (`tour.ts`,
+  `blocLecons`). Points visibles dans l'en-tête et dans `/api/moi`. PAS un ré-entraînement (modèles hébergés
+  figés) : mémoire ajoutée au contexte. Un vote par message (le dernier remplace), isolé par compte.
 - Optimisation des tokens : le contenu complet des pages web lues n'est réinjecté que pour les 2 derniers
   messages (`resumePagesLues` dans `src/lib/liens/`), comme les images.
 - `src/lib/minecraft/contexte.ts` — versions Minecraft en direct + modèle de projet Fabric injecté

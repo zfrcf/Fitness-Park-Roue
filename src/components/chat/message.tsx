@@ -16,6 +16,7 @@ import type { MessageUI, MetaMessage } from "@/lib/chat/types";
 import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { BoutonCopier } from "./bloc-code";
+import { BoutonRetour } from "./bouton-retour";
 import { Markdown } from "./markdown";
 import { estProjetConstructible, extraireFichiers } from "@/lib/fichiers/extraire";
 import { pagesHtml } from "@/lib/fichiers/apercu";
@@ -476,6 +477,7 @@ export const Message = memo(function Message({ message: m, dernier, enCours, occ
           {!enCours && (
             <div className={cn("flex gap-0.5 transition-opacity", dernier ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
               <BoutonCopier texte={texte} />
+              {conversationId && m.id && <BoutonRetour conversationId={conversationId} messageId={m.id} />}
               {onRegenerer && (
                 <Button type="button" variant="ghost" size="xs" disabled={occupe} onClick={onRegenerer}>
                   <RefreshCw /> <span className="hidden sm:inline">Régénérer</span>

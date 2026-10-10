@@ -132,6 +132,21 @@ export const taches = pgTable(
   (t) => [index("taches_statut_idx").on(t.statut)],
 );
 
+/** Retours « bons / mauvais points » : leçons retenues par compte et réinjectées dans le prompt. */
+export const lecons = pgTable(
+  "lecons",
+  {
+    id: text("id").primaryKey(),
+    utilisateurId: text("utilisateur_id"), // null = administrateur
+    type: text("type").notNull(), // bon | mauvais
+    texte: text("texte").notNull().default(""),
+    conversationId: text("conversation_id"),
+    messageId: text("message_id"),
+    creeA: timestamp("cree_a", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("lecons_utilisateur_idx").on(t.utilisateurId, t.creeA)],
+);
+
 /** DDL idempotent, exécuté au premier accès (pas de système de migration à gérer). */
 export const DDL = `
 CREATE TABLE IF NOT EXISTS conversations (
@@ -219,6 +234,16 @@ CREATE INDEX IF NOT EXISTS taches_statut_idx ON taches (statut);
 ALTER TABLE taches ADD COLUMN IF NOT EXISTS auto INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE taches ADD COLUMN IF NOT EXISTS empreinte_compilee TEXT;
 ALTER TABLE taches ADD COLUMN IF NOT EXISTS utilisateur_id TEXT;
+CREATE TABLE IF NOT EXISTS lecons (
+  id TEXT PRIMARY KEY,
+  utilisateur_id TEXT,
+  type TEXT NOT NULL,
+  texte TEXT NOT NULL DEFAULT '',
+  conversation_id TEXT,
+  message_id TEXT,
+  cree_a TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS lecons_utilisateur_idx ON lecons (utilisateur_id, cree_a);
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS utilisateur_id TEXT;
 CREATE INDEX IF NOT EXISTS conversations_utilisateur_idx ON conversations (utilisateur_id);
 CREATE TABLE IF NOT EXISTS utilisateurs (

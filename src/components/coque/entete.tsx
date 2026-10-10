@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Home, ListChecks, LogOut, MessageSquare, Terminal, Users } from "lucide-react";
+import { Activity, Home, ListChecks, LogOut, MessageSquare, Terminal, ThumbsDown, ThumbsUp, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ export function Entete({ children, consoleOuverte, onBasculerConsole }: { childr
   const moi = useMoi();
   const admin = moi?.utilisateur.admin ?? false;
   const q = moi?.quota;
+  const pts = moi?.points;
 
   async function deconnecter() {
     await fetch("/api/deconnexion", { method: "POST" });
@@ -62,6 +63,16 @@ export function Entete({ children, consoleOuverte, onBasculerConsole }: { childr
                 · {q.messages}/{q.limiteMessages}
               </span>
             )}
+          </span>
+        )}
+        {pts && (pts.bons > 0 || pts.mauvais > 0) && (
+          <span className="hidden items-center gap-1.5 px-1 text-xs text-muted-foreground sm:flex" title="Bons et mauvais points donnés à l'assistant : il en tient compte dans vos prochaines conversations">
+            <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+              <ThumbsUp className="size-3" /> {pts.bons}
+            </span>
+            <span className="flex items-center gap-0.5 text-muted-foreground">
+              <ThumbsDown className="size-3" /> {pts.mauvais}
+            </span>
           </span>
         )}
         {onBasculerConsole && (

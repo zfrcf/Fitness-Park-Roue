@@ -12,6 +12,8 @@ import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, det
 import { blocProjetPourModele, fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { estProjetAutoConstructible } from "@/lib/fichiers/extraire";
 import { consigneRelance } from "./relance";
+import { blocLecons } from "@/lib/comptes/lecons";
+import { leconsPourPrompt } from "@/lib/db/lecons";
 import { chercherPassages, indexerMessages, lireMessage, listerMessages } from "./lecture-conversation";
 import { compterMessage, compterTokens, depassement, lireQuota } from "@/lib/comptes/quota";
 import { empreinteProjet, lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
@@ -166,6 +168,15 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       "activité légitime, encouragée par Mojang ; l'utilisateur travaille sur ses propres projets. Si une demande est vraiment impossible " +
       "(information introuvable, API inexistante dans cette version), explique précisément pourquoi et propose la meilleure alternative.",
   };
+
+  // Mémoire des retours (bons/mauvais points) : les leçons retenues avec ce compte sont réinjectées
+  // pour que l'assistant reproduise ce qui a plu et évite ses erreurs passées.
+  try {
+    const bloc = blocLecons(await leconsPourPrompt(membre));
+    if (bloc) reglages = { ...reglages, systeme: `${reglages.systeme}\n\n${bloc}` };
+  } catch (e) {
+    console.warn("[chat] leçons indisponibles :", e instanceof Error ? e.message : e);
+  }
 
   const liste = o.fournisseurs ?? fournisseurs();
   if (liste.length === 0) return { ok: false, statut: 503, erreur: modeLocal()

@@ -6,6 +6,7 @@ import { LOCAL } from "@/lib/mode";
 export interface Moi {
   utilisateur: { id: string; nom: string; email: string | null; admin: boolean };
   quota: { messages: number; tokens: number; limiteMessages: number; limiteTokens: number } | null;
+  points?: { bons: number; mauvais: number };
 }
 
 let cache: Moi | null = null;

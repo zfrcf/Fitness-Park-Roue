@@ -2,6 +2,7 @@ import { createUIMessageStreamResponse } from "ai";
 import { executerTour } from "@/lib/chat/tour";
 import type { CorpsRequeteChat } from "@/lib/chat/types";
 import { avecAcces, exigerConversation, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
+import { ENTETE_ENCODAGE, gunzipVersTexte } from "@/lib/chat/compression";
 
 // Node.js + Fluid Compute : 300 s est le maximum du plan Hobby (800 s en Pro).
 export const maxDuration = 300;
@@ -11,7 +12,12 @@ export const POST = avecAcces(async (req: Request) => {
   const u = await exigerUtilisateur(req);
   let corps: CorpsRequeteChat;
   try {
-    corps = (await req.json()) as CorpsRequeteChat;
+    // Corps éventuellement gzippé par le navigateur (imports volumineux) : on décompresse d'abord.
+    const brut =
+      req.headers.get(ENTETE_ENCODAGE) === "gzip"
+        ? await gunzipVersTexte(await req.arrayBuffer())
+        : await req.text();
+    corps = JSON.parse(brut) as CorpsRequeteChat;
   } catch {
     return Response.json({ erreur: "Corps de requête invalide." }, { status: 400 });
   }

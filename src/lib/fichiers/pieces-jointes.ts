@@ -4,10 +4,14 @@
  */
 import type { FichierJoint, MessageUI } from "@/lib/chat/types";
 
-/** Limite de Vercel : 4,5 Mo par requête. On garde une marge pour l'historique et le JSON. */
-export const LIMITE_ENVOI_OCTETS = 3_500_000;
-export const LIMITE_FICHIER_TEXTE = 512 * 1024;
-export const LIMITE_FICHIERS_ARCHIVE = 400;
+/**
+ * Taille des pièces jointes AVANT compression. Le corps de la requête est gzippé (voir
+ * `compression.ts`), et le code/texte compresse beaucoup : on autorise donc bien plus que la
+ * limite réseau de 4,5 Mo de Vercel, tant que le corps compressé reste sous le plafond.
+ */
+export const LIMITE_ENVOI_OCTETS = 24_000_000;
+export const LIMITE_FICHIER_TEXTE = 2 * 1024 * 1024;
+export const LIMITE_FICHIERS_ARCHIVE = 2000;
 export const LIMITE_IMAGES = 4;
 /** Texte d'un PDF gardé pour le modèle (le reste est tronqué). */
 export const LIMITE_DOCUMENT = 120_000;

@@ -14,6 +14,7 @@ import { statsModifications, type StatsModifications } from "@/lib/fichiers/expl
 import { useSondage } from "@/hooks/use-sondage";
 import type { FluxTache } from "@/lib/taches/flux";
 import { allegerHistorique, LIMITE_ENVOI_OCTETS, tailleEnvoi } from "@/lib/fichiers/pieces-jointes";
+import { compressionDisponible, fetchCompresse, gzipTexte, LIMITE_CORPS_RESEAU, SEUIL_COMPRESSION } from "@/lib/chat/compression";
 import { fichiersDuDepot, preparerPiecesJointes, type PiecesPreparees } from "./pieces-jointes";
 import { toast } from "sonner";
 import { signalerMajConversations } from "@/components/coque/barre-laterale";
@@ -97,6 +98,8 @@ export function FenetreChat({
     messages: messagesInitiaux,
     transport: new DefaultChatTransport({
       api: "/api/chat",
+      // Corps gzippé quand il est volumineux : on peut importer beaucoup plus sous la limite Vercel.
+      fetch: fetchCompresse,
       body: () => ({ conversationId, reglages }),
       // Images et fichiers joints : envoyés avec le nouveau message seulement, le serveur reprend
       // ceux de l'historique en base (limite de 4,5 Mo par requête sur Vercel).
@@ -357,7 +360,7 @@ export function FenetreChat({
     }
   }
 
-  function envoyer(texte = saisie) {
+  async function envoyer(texte = saisie) {
     const t = texte.trim();
     const avecPieces = pieces.images.length > 0 || pieces.fichiers.length > 0;
     if ((!t && !avecPieces) || occupe || preparation) return;
@@ -366,8 +369,20 @@ export function FenetreChat({
     parts.push(...pieces.images);
     if (pieces.fichiers.length || pieces.ignores.length) parts.push({ type: "data-fichiers-joints", data: { fichiers: pieces.fichiers, ignores: pieces.ignores } });
     if (tailleEnvoi(parts) > LIMITE_ENVOI_OCTETS) {
-      toast.error("Pièces jointes trop lourdes pour un seul message (3,5 Mo au plus) : retirez-en une partie.");
+      toast.error("Pièces jointes trop lourdes pour un seul message : retirez-en une partie.");
       return;
+    }
+    // Le corps est gzippé à l'envoi : on vérifie que la version COMPRESSÉE tient sous la limite de Vercel.
+    if (avecPieces && compressionDisponible()) {
+      try {
+        const compresse = (await gzipTexte(tailleEnvoi(parts) > SEUIL_COMPRESSION ? JSON.stringify(parts) : "")).length;
+        if (compresse > LIMITE_CORPS_RESEAU) {
+          toast.error("Même compressées, ces pièces jointes dépassent la limite d'un message (surtout des images) : envoyez-les en plusieurs fois.");
+          return;
+        }
+      } catch {
+        /* on laisse passer : le serveur rejettera au besoin */
+      }
     }
     clearError();
     void sendMessage({ parts }, { body: { rechercheWeb } });
@@ -513,7 +528,7 @@ export function FenetreChat({
               conversationId={conversationId}
               onRegenerer={m.role === "assistant" ? () => regenerer(i === dernierIndex ? undefined : m.id) : undefined}
               onEditer={m.role === "user" ? (t) => editer(i, t) : undefined}
-              onEnvoyer={(t) => envoyer(t)}
+              onEnvoyer={(t) => void envoyer(t)}
               projet={m.role === "assistant" && i === messages.length - 1 && projet.length > 0 ? projet : undefined}
               avertissements={m.role === "assistant" ? echecs.filter((e) => e.messageId === m.id).map((e) => `${e.chemin} : ${e.raison}`) : undefined}
               modifications={modificationsParMessage.get(m.id)}
@@ -575,7 +590,7 @@ export function FenetreChat({
         complement={messages.length > 0 ? <span className="tabular-nums" title="taille estimée de l'historique envoyé au modèle">contexte ≈ {formatNombre(tokensContexte)} tokens</span> : undefined}
         valeur={saisie}
         onChange={setSaisie}
-        onEnvoyer={() => envoyer()}
+        onEnvoyer={() => void envoyer()}
         onArreter={() => stop()}
         occupe={occupe}
         rechercheWeb={rechercheWeb}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Home, ListChecks, LogOut, MessageSquare, Users } from "lucide-react";
+import { Activity, Home, ListChecks, LogOut, MessageSquare, Terminal, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ const LIENS = [
   { href: "/admin", libelle: "Comptes", icone: Users, admin: true },
 ] as const;
 
-export function Entete({ children }: { children?: React.ReactNode }) {
+export function Entete({ children, consoleOuverte, onBasculerConsole }: { children?: React.ReactNode; consoleOuverte?: boolean; onBasculerConsole?: () => void }) {
   const chemin = usePathname();
   const routeur = useRouter();
   const moi = useMoi();
@@ -63,6 +63,25 @@ export function Entete({ children }: { children?: React.ReactNode }) {
               </span>
             )}
           </span>
+        )}
+        {onBasculerConsole && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant={consoleOuverte ? "secondary" : "ghost"}
+                  size="icon"
+                  aria-label="Console Python"
+                  aria-pressed={consoleOuverte}
+                  onClick={onBasculerConsole}
+                  className={consoleOuverte ? "text-primary" : "text-muted-foreground"}
+                />
+              }
+            >
+              <Terminal className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>Console Python (Ctrl+`)</TooltipContent>
+          </Tooltip>
         )}
         <ReglagesDialogue />
         <ThemeToggle />

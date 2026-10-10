@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BarreLaterale } from "./barre-laterale";
 import { Entete } from "./entete";
+import { ConsolePython } from "@/components/chat/console-python";
 
 const CLE = "chat:barre-ouverte";
 const ecouteurs = new Set<() => void>();
@@ -44,6 +45,7 @@ export function Coque({ children }: { children: React.ReactNode }) {
   // Préférence persistée dans localStorage, hydratation sûre via useSyncExternalStore.
   const ouverte = useSyncExternalStore(abonner, lireOuverte, () => true);
   const [mobile, setMobile] = useState(false);
+  const [consoleOuv, setConsole] = useState(false);
   const routeur = useRouter();
 
   function basculer() {
@@ -59,6 +61,9 @@ export function Coque({ children }: { children: React.ReactNode }) {
       } else if (mod && e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         routeur.push("/chat");
+      } else if (mod && (e.key === "`" || e.key === "²")) {
+        e.preventDefault();
+        setConsole((v) => !v);
       }
     };
     window.addEventListener("keydown", h);
@@ -112,8 +117,17 @@ export function Coque({ children }: { children: React.ReactNode }) {
           </SheetContent>
         </Sheet>
         <div className="flex min-w-0 flex-1 flex-col">
-          <Entete>{bouton}</Entete>
-          {children}
+          <Entete consoleOuverte={consoleOuv} onBasculerConsole={() => setConsole((v) => !v)}>
+            {bouton}
+          </Entete>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+            {consoleOuv && (
+              <div className="h-[38vh] min-h-48 shrink-0 border-t">
+                <ConsolePython onFermer={() => setConsole(false)} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </ReglagesProvider>

@@ -17,7 +17,7 @@ import { empreinteProjet, lancerCompilationProjet, ProjetRefuse } from "@/lib/gi
 import { tacheDeConversation } from "@/lib/db/taches";
 import { waitUntil } from "@vercel/functions";
 import { executerChat, genererAvecRotation, type DepsOrchestrateur } from "@/lib/chat/orchestrateur";
-import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, type PageLuePart } from "@/lib/liens";
+import { blocPagesPourModele, budgetPage, detecterLiens, lireLiensDuMessage, resumePagesLues, type PageLuePart } from "@/lib/liens";
 import { normaliserReglages } from "@/lib/chat/reglages";
 import type { MessageUI, MetaMessage, Reglages } from "@/lib/chat/types";
 import { ajouterMessage, enregistrerMessages, lireConversation } from "@/lib/db/conversations";
@@ -177,6 +177,13 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
     .map((m, i) => (m.role === "user" && m.parts.some((p) => p.type === "file" && p.mediaType.startsWith("image/")) ? i : -1))
     .filter((i) => i >= 0)
     .slice(-2);
+  // Pages web lues : le contenu complet n'est réinjecté que pour les 2 derniers messages qui en ont
+  // (comme les images). Au-delà, une simple ligne « titre + URL » : une longue conversation de
+  // recherche ne traîne pas tout le texte des pages à chaque tour (gros gain de tokens).
+  const avecPages = o.messages
+    .map((m, i) => (m.role === "user" && o.messages[i + 1]?.role === "assistant" && o.messages[i + 1].parts.some((p) => p.type === "data-page-lue") ? i : -1))
+    .filter((i) => i >= 0)
+    .slice(-2);
   const messagesUI: MessageUI[] = [];
   for (let i = 0; i < o.messages.length; i++) {
     const m = o.messages[i];
@@ -186,7 +193,7 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       const pages = (suivant?.role === "assistant" ? suivant.parts : [])
         .filter((p) => p.type === "data-page-lue")
         .map((p) => p.data as PageLuePart);
-      if (pages.length) supplement = blocPagesPourModele(pages);
+      if (pages.length) supplement = avecPages.includes(i) ? blocPagesPourModele(pages) : resumePagesLues(pages);
       messagesUI.push({ ...m, parts: messageUtilisateurPourModele(m, supplement, avecImages.includes(i)) });
       continue;
     }

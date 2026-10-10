@@ -99,6 +99,21 @@ export function blocPagesPourModele(pages: PageLuePart[]): string {
   );
 }
 
+/**
+ * Résumé d'une ligne par page, pour les messages anciens : on garde le fait qu'une page a été lue
+ * (titre + URL) sans réinjecter son texte à chaque tour. Économise beaucoup de tokens sur les
+ * longues conversations de recherche.
+ */
+export function resumePagesLues(pages: PageLuePart[]): string {
+  const lignes = pages.map((p) =>
+    p.ok && p.contenu
+      ? `- ${neutraliserDelimiteurs(p.titre) || p.url} (${p.url}) — lue plus tôt, contenu non redonné`
+      : `- ${p.url} — non lue`,
+  );
+  if (!lignes.length) return "";
+  return `\n\n[Pages déjà lues dans ce message (redemande-les si tu dois t'y référer en détail) :\n${lignes.join("\n")}]`;
+}
+
 export function budgetPage(contexteMin: number): number {
   return Math.max(3000, Math.min(12_000, Math.floor(contexteMin * 0.25)));
 }

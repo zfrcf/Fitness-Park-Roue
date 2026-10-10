@@ -38,3 +38,23 @@ describe("neutraliserDelimiteurs (#33)", () => {
     expect(sortie).toContain("‹/page_lue>");
   });
 });
+
+import { blocPagesPourModele, resumePagesLues } from "./index";
+
+describe("résumé des pages lues (optimisation des tokens)", () => {
+  const pages = [
+    { url: "https://exemple.fr/a", titre: "Page A", source: "direct" as const, caracteres: 9000, ok: true, contenu: "x".repeat(9000) },
+    { url: "https://exemple.fr/b", titre: "Page B", source: "jina" as const, caracteres: 0, ok: false, erreur: "403" },
+  ];
+  it("garde titre et URL sans réinjecter le contenu (bien plus court que le bloc complet)", () => {
+    const resume = resumePagesLues(pages);
+    expect(resume).toContain("Page A");
+    expect(resume).toContain("https://exemple.fr/a");
+    expect(resume).not.toContain("x".repeat(50));
+    expect(resume).toContain("non lue");
+    expect(resume.length).toBeLessThan(blocPagesPourModele(pages).length / 5);
+  });
+  it("vide si aucune page", () => {
+    expect(resumePagesLues([])).toBe("");
+  });
+});

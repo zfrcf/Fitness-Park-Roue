@@ -66,6 +66,17 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   (FLUX schnell sur Cloudflare Workers AI avec le compte du fournisseur Cloudflare, Pollinations en secours),
   outil `generer_image` imposé à l'étape 0 quand `demandeImage()` reconnaît la demande. Aperçu des sites :
   `src/lib/fichiers/apercu.ts` + `apercu-web.tsx` (iframe srcdoc sandbox sans allow-same-origin).
+- Exécution de code DANS LE NAVIGATEUR (jamais sur le serveur) : `src/lib/execution/python-navigateur.ts` lance
+  Python via Pyodide (WASM, CDN jsDelivr, chargé au premier « Exécuter ») ; bouton sur les blocs ```python
+  (`executer-python.tsx`, dans `bloc-code.tsx`). `langues.ts` : langages exécutables (pur, testé). Offre « Python
+  intégré » à tout utilisateur sans faille — aucun terminal serveur public (RCE refusée).
+- Compression des imports : `src/lib/chat/compression.ts` gzippe le corps des requêtes de chat (navigateur →
+  `fetchCompresse`, serveur → `gunzipVersTexte` dans `/api/chat`, en-tête `x-corps-encodage: gzip`). Permet
+  d'importer bien plus sous la limite 4,5 Mo de Vercel ; limites relevées dans `pieces-jointes.ts`.
+- Lecture de la conversation par le modèle : outil `lire_conversation` (`src/lib/chat/lecture-conversation.ts`,
+  pur, testé) — retrouve un détail d'un message ancien même après résumé/élagage du contexte.
+- Optimisation des tokens : le contenu complet des pages web lues n'est réinjecté que pour les 2 derniers
+  messages (`resumePagesLues` dans `src/lib/liens/`), comme les images.
 - `src/lib/minecraft/contexte.ts` — versions Minecraft en direct + modèle de projet Fabric injecté
   dans le prompt. **Distingue 26.x (non obfusqué, pas de mappings, plugin `fabric-loom`) et 1.21.x
   (obfusqué, `fabric-loom-remap` + `officialMojangMappings()`).** Vérifié par compilation réelle.

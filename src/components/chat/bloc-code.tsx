@@ -4,6 +4,8 @@ import { Check, Copy } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { langueExecutable } from "@/lib/execution/langues";
+import { ExecuterPython } from "./executer-python";
 
 const LANGUES: Record<string, string> = {
   js: "JavaScript",
@@ -80,10 +82,13 @@ export function BoutonCopier({ texte, libelle = "Copier", className }: { texte: 
   );
 }
 
-/** Bloc de code avec en-tête (langage) et bouton copier. */
+/** Bloc de code avec en-tête (langage), bouton copier et, pour Python, un bouton « Exécuter ». */
 export function BlocCode({ langue, chemin, code, children }: { langue?: string; chemin?: string; code: string; children: ReactNode }) {
   const nomLangue = langue ? (LANGUES[langue.toLowerCase()] ?? langue) : "";
   const nom = chemin ? `${chemin}${nomLangue ? ` · ${nomLangue}` : ""}` : nomLangue;
+  // Python exécutable dans le navigateur (hors blocs modif/fichier d'un chemin précis : ce sont
+  // des fichiers de projet, pas un script à lancer).
+  const executable = !chemin && langueExecutable(langue) === "python";
   return (
     <div className="group/code my-3 overflow-hidden rounded-lg border bg-muted/40 text-[13px]">
       <div className="flex h-8 items-center justify-between border-b bg-muted/60 pr-1 pl-3">
@@ -95,6 +100,7 @@ export function BlocCode({ langue, chemin, code, children }: { langue?: string; 
       <pre className="overflow-x-auto p-3 leading-relaxed">
         <code className={langue ? `hljs language-${langue}` : "hljs"}>{children}</code>
       </pre>
+      {executable && <ExecuterPython code={code} />}
     </div>
   );
 }

@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "com.nova.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "BreakEspMixin",
+    "CameraClipMixin",
+    "ClientBrandRetrieverMixin",
+    "ClientPacketListenerMixin",
+    "EntityGlowMixin",
+    "XRayMixin"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}

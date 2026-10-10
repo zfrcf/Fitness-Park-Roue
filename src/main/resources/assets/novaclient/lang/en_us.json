@@ -1,0 +1,4 @@
+{
+  "novaclient.gui.title": "NovaClient",
+  "novaclient.command.prefix_changed": "Prefix changed to %s"
+}

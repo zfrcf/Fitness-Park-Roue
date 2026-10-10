@@ -12,6 +12,7 @@ import { blocContexteMinecraft, conversationConcerneMod, detecterDemandeMod, det
 import { blocProjetPourModele, fusionnerProjetDetaille, INSTRUCTION_MODIFICATIONS, INSTRUCTION_PROJET, masquerFichiersConnus } from "@/lib/fichiers/projet";
 import { estProjetAutoConstructible } from "@/lib/fichiers/extraire";
 import { consigneRelance } from "./relance";
+import { chercherPassages, indexerMessages, lireMessage, listerMessages } from "./lecture-conversation";
 import { compterMessage, compterTokens, depassement, lireQuota } from "@/lib/comptes/quota";
 import { empreinteProjet, lancerCompilationProjet, ProjetRefuse } from "@/lib/github/lancer";
 import { tacheDeConversation } from "@/lib/db/taches";
@@ -157,6 +158,7 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
       "où tu pourrais finir. Si un détail est incertain, choisis l'option la plus probable et écris le code. " +
       INSTRUCTION_MODIFICATIONS +
       "\n\nTes capacités réelles, grâce à l'application : lire des pages web, chercher sur le web, voir les images que l'utilisateur joint, " +
+      "relire la conversation en cours pour retrouver un détail d'un message précédent (outil lire_conversation), " +
       "lire ses fichiers joints (code, archives .zip, PDF), générer des images (outil generer_image), produire des fichiers téléchargeables, " +
       "des archives .zip, et des programmes compilés et testés dans tous les langages (Python, JavaScript/TypeScript, Java, Kotlin, C, C++, " +
       "C#, Rust, Go, HTML/CSS, mods Minecraft en .jar…). Ne dis jamais que tu ne peux pas créer de fichiers, de programmes, de mods ou de .jar, " +
@@ -369,7 +371,33 @@ export async function executerTour(o: OptionsTour): Promise<ResultatTour> {
               }),
             }
           : undefined;
-      const outils = { ...(outilsRecherche ?? {}), ...outilImage };
+      // 5. Lecture de la conversation : le modèle peut relire/retrouver des messages anciens, même
+      // ceux résumés ou élagués du contexte pour économiser des tokens. Le serveur a l'historique
+      // complet en mémoire (o.messages), donc aucun coût tant que l'outil n'est pas appelé.
+      const indexConv = indexerMessages(o.messages.map((m) => ({ role: m.role, texte: texteDe(m) })));
+      const outilConversation = {
+        lire_conversation: tool({
+          description:
+            "Relis la conversation en cours pour retrouver un détail exact d'un message précédent (une consigne, un chiffre, un extrait de code, une décision), surtout si le contexte a été résumé ou raccourci. " +
+            "Sans argument : renvoie la liste numérotée des messages. Avec `recherche` : les passages contenant ces mots. Avec `numero` : le message entier.",
+          inputSchema: z.object({
+            recherche: z.string().max(200).optional().describe("Mots-clés à retrouver dans les messages précédents"),
+            numero: z.number().int().positive().optional().describe("Numéro d'un message à relire en entier (voir la liste)"),
+          }),
+          execute: async ({ recherche, numero }) => {
+            if (!indexConv.length) return { messages: "Aucun message antérieur dans cette conversation." };
+            if (numero) return lireMessage(indexConv, numero);
+            if (recherche && recherche.trim()) {
+              const resultats = chercherPassages(indexConv, recherche);
+              return resultats.length
+                ? { recherche, resultats, consigne: "Utilise `numero` pour relire un message en entier si besoin." }
+                : { recherche, resultats, consigne: "Aucun message ne contient ces mots." };
+            }
+            return { total: indexConv.length, liste: listerMessages(indexConv), consigne: "Rappelle un message précis avec `numero`, ou cherche avec `recherche`." };
+          },
+        }),
+      };
+      const outils = { ...(outilsRecherche ?? {}), ...outilImage, ...outilConversation };
       const messages = await convertToModelMessages(messagesUI);
       const r = await executerChat(deps, {
         writer,

@@ -8,7 +8,7 @@
  *
  * Pyodide (~10 Mo) n'est chargé qu'au premier « Exécuter », depuis le CDN jsDelivr.
  */
-import { indiceShell, transformerPip } from "./python-shell";
+import { indiceShell, messageMicropip, transformerPip } from "./python-shell";
 
 const VERSION = "0.26.4";
 const BASE = `https://cdn.jsdelivr.net/pyodide/v${VERSION}/full/`;
@@ -85,7 +85,11 @@ export async function executerPython(code: string, onProgres?: (etape: string) =
     return { sortie: [sortie, rendu && !sortie.endsWith(rendu) ? rendu : ""].filter(Boolean).join(sortie && rendu ? "\n" : "") };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    // Commande shell / outil de build tapé par réflexe : on montre l'aide seule, sans le traceback.
     const indice = indiceShell(code, message);
-    return { sortie: morceaux.join(""), erreur: indice ? `${indice}\n\n${message}` : message };
+    if (indice) return { sortie: morceaux.join(""), erreur: indice };
+    // Échec d'installation micropip : message clair plutôt qu'un long traceback.
+    const micropip = messageMicropip(message, paquets);
+    return { sortie: morceaux.join(""), erreur: micropip ?? message };
   }
 }

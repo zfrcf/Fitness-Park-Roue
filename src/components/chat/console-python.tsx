@@ -96,7 +96,7 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
       <div className="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-[12.5px] leading-relaxed">
         {cellules.length === 0 && (
           <p className="text-muted-foreground">
-            Tapez du Python et appuyez sur Entrée. Les variables et les imports (numpy, pandas…) restent d&apos;une commande à l&apos;autre. Maj+Entrée pour une nouvelle ligne.
+            Tapez du Python et appuyez sur Entrée. Installez un paquet avec <code>pip install nom</code>. Les variables et les imports restent d&apos;une commande à l&apos;autre. Maj+Entrée pour une nouvelle ligne.
           </p>
         )}
         {cellules.map((c, i) => (

@@ -8,6 +8,8 @@
  *
  * Pyodide (~10 Mo) n'est chargé qu'au premier « Exécuter », depuis le CDN jsDelivr.
  */
+import { indiceShell, transformerPip } from "./python-shell";
+
 const VERSION = "0.26.4";
 const BASE = `https://cdn.jsdelivr.net/pyodide/v${VERSION}/full/`;
 
@@ -16,6 +18,7 @@ interface Pyodide {
   setStdout(opts: { batched: (s: string) => void }): void;
   setStderr(opts: { batched: (s: string) => void }): void;
   loadPackagesFromImports(code: string): Promise<void>;
+  loadPackage(nom: string): Promise<void>;
 }
 
 declare global {
@@ -69,15 +72,20 @@ export async function executerPython(code: string, onProgres?: (etape: string) =
   const morceaux: string[] = [];
   py.setStdout({ batched: (s) => morceaux.push(s) });
   py.setStderr({ batched: (s) => morceaux.push(s) });
+  // « pip install … » tapé dans la console : traduit vers micropip (installateur de Pyodide).
+  const { code: codeExec, paquets } = transformerPip(code);
   try {
     onProgres?.("Installation des dépendances…");
-    await py.loadPackagesFromImports(code).catch(() => {});
+    if (paquets.length) await py.loadPackage("micropip").catch(() => {});
+    await py.loadPackagesFromImports(codeExec).catch(() => {});
     onProgres?.("Exécution…");
-    const valeur = await py.runPythonAsync(code);
+    const valeur = await py.runPythonAsync(codeExec);
     const sortie = morceaux.join("");
     const rendu = valeur === undefined || valeur === null ? "" : String(valeur);
     return { sortie: [sortie, rendu && !sortie.endsWith(rendu) ? rendu : ""].filter(Boolean).join(sortie && rendu ? "\n" : "") };
   } catch (e) {
-    return { sortie: morceaux.join(""), erreur: e instanceof Error ? e.message : String(e) };
+    const message = e instanceof Error ? e.message : String(e);
+    const indice = indiceShell(code, message);
+    return { sortie: morceaux.join(""), erreur: indice ? `${indice}\n\n${message}` : message };
   }
 }

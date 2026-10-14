@@ -1,20 +1,22 @@
 "use client";
 
-import { AppWindow, CornerDownLeft, Loader2, Terminal, Trash2, Upload, X } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type KeyboardEvent } from "react";
+import { AppWindow, CornerDownLeft, Loader2, Square, Terminal, Trash2, Upload, X } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { executerPython, importerFichiersConsole, type Morceau } from "@/lib/execution/python-navigateur";
+import { lignesAnsi, texteLigne, tronquerLignes } from "@/lib/execution/ansi";
+import { avecMorceau, grouperMorceaux } from "@/lib/execution/morceaux";
+import { abonnerEtatExecution, arreterExecution, etatExecution, executerPython, importerFichiersConsole, type Morceau } from "@/lib/execution/python-navigateur";
 import { abonnerProjetConsole, projetConsole } from "@/lib/execution/projet-console";
 import { abonnerFenetres, fermerToutesFenetres, nombreFenetres } from "@/lib/execution/ui/fenetres";
-import { tronquerSortie } from "@/lib/execution/langues";
 import { cn } from "@/lib/utils";
 
 interface Cellule {
   id: number;
   code: string;
-  sortie: string;
-  erreur?: string;
-  images: string[];
+  /** Sortie dans l'ordre exact du programme (textes, erreurs, images), y compris l'affichage tardif. */
+  morceaux: Morceau[];
+  /** Programme encore en cours (fenêtre ouverte, boucle, input) : sa sortie s'affiche en direct. */
+  enCours?: boolean;
 }
 
 /** Commande envoyée à la console depuis l'extérieur (bouton « Lancer » de l'explorateur). */
@@ -27,19 +29,67 @@ export function envoyerALaConsole(commande: string): void {
   window.dispatchEvent(new CustomEvent(EVENEMENT_COMMANDE));
 }
 
-/** Sortie d'une cellule : les lignes d'échec de pip (« ÉCHEC : », « ERREUR : ») ressortent en rouge. */
-function Sortie({ texte }: { texte: string }) {
+/**
+ * Texte d'un flux (sortie ou erreur) : couleurs ANSI et retours chariot « \r » interprétés (barres de
+ * progression), lignes d'échec de pip (« ÉCHEC : », « ERREUR : ») en rouge, longueur limitée.
+ */
+function TexteFlux({ texte, erreur }: { texte: string; erreur?: boolean }) {
+  const { lignes, avertissement } = useMemo(() => tronquerLignes(lignesAnsi(texte), erreur ? 60 : 400, erreur ? 4000 : 40_000), [texte, erreur]);
   return (
-    <pre className="whitespace-pre-wrap break-words pl-6 text-foreground/90">
-      {texte.split("\n").map((l, i, tout) => (
-        <span key={i} className={/^(ÉCHEC|ERREUR) :/.test(l) ? "text-destructive" : undefined}>
-          {l}
-          {i < tout.length - 1 ? "\n" : ""}
+    <span className={erreur ? "text-destructive" : undefined}>
+      {lignes.map((ligne, i) => (
+        <span key={i} className={!erreur && /^(ÉCHEC|ERREUR) :/.test(texteLigne(ligne)) ? "text-destructive" : undefined}>
+          {ligne.map((s, j) => (
+            <span key={j} style={s.couleur ? { color: s.couleur } : undefined} className={s.gras ? "font-bold" : undefined}>
+              {s.texte}
+            </span>
+          ))}
+          {i < lignes.length - 1 ? "\n" : ""}
         </span>
       ))}
-    </pre>
+      {avertissement ? <span className="text-muted-foreground">{`\n${avertissement}\n`}</span> : null}
+    </span>
   );
 }
+
+/**
+ * Sortie d'un programme dans l'ordre exact où il l'a produite : textes (sortie et erreurs mêlées,
+ * comme dans un terminal) et graphiques matplotlib à leur place. Partagée avec le bouton « Exécuter ».
+ */
+export function SortieOrdonnee({ morceaux, classeTexte, classeImage }: { morceaux: Morceau[]; classeTexte?: string; classeImage?: string }) {
+  const { groupes, tronque } = grouperMorceaux(morceaux);
+  return (
+    <>
+      {groupes.map((g, i) =>
+        "image" in g ? (
+          // Graphique matplotlib produit dans le navigateur (data: URL PNG).
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={i} src={g.image} alt="Graphique" className={cn("rounded border bg-white", classeImage)} />
+        ) : (
+          <pre key={i} className={cn("whitespace-pre-wrap break-words", classeTexte)}>
+            {g.textes.map((t, j) => (
+              <TexteFlux key={j} texte={t.texte} erreur={t.erreur} />
+            ))}
+          </pre>
+        ),
+      )}
+      {tronque && <pre className={cn("text-muted-foreground", classeTexte)}>[… sortie tronquée]</pre>}
+    </>
+  );
+}
+
+/** Une cellule de la console (mémorisée : taper du code ne la redessine pas). */
+const BlocCellule = memo(function BlocCellule({ cellule }: { cellule: Cellule }) {
+  return (
+    <div className="mb-2">
+      <div className="flex gap-2">
+        <span className="shrink-0 select-none text-primary">&gt;&gt;&gt;</span>
+        <pre className="whitespace-pre-wrap break-words">{cellule.code}</pre>
+      </div>
+      <SortieOrdonnee morceaux={cellule.morceaux} classeTexte="pl-6 text-foreground/90" classeImage="my-1 ml-6 max-h-96 max-w-[calc(100%-1.5rem)]" />
+    </div>
+  );
+});
 
 let prochainId = 1;
 
@@ -61,8 +111,14 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
   const bas = useRef<HTMLDivElement>(null);
   const entreeFichiers = useRef<HTMLInputElement>(null);
   const occupeRef = useRef(false);
+  const enCours = useRef<Promise<void> | null>(null);
   const nbFichiersProjet = useSyncExternalStore(abonnerProjetConsole, () => projetConsole().length, () => 0);
   const nbFenetres = useSyncExternalStore(abonnerFenetres, nombreFenetres, () => 0);
+  const enAttente = useSyncExternalStore(abonnerEtatExecution, () => etatExecution().attentes > 0, () => false);
+  // input() : le programme attend une réponse tapée dans la console (avec JSPI ; sinon boîte du navigateur).
+  const [saisie, setSaisie] = useState<{ invite: string } | null>(null);
+  const [reponse, setReponse] = useState("");
+  const repondre = useRef<((v: string | null) => void) | null>(null);
 
   useEffect(() => {
     bas.current?.scrollIntoView({ behavior: "smooth" });
@@ -70,39 +126,66 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
 
   useEffect(() => {
     zone.current?.focus();
+    // Console fermée pendant un input() : la saisie est annulée (sinon le programme attendrait sans fin).
+    return () => repondre.current?.(null);
   }, []);
 
   const historique = cellules.map((c) => c.code);
 
-  /** Ajoute à une cellule ce que le programme affiche après la fin de son exécution. */
+  /** Ajoute à une cellule, à la suite, ce que le programme affiche après la fin de son exécution. */
   function ajouterTardif(id: number, m: Morceau) {
-    setCellules((liste) =>
-      liste.map((c) => {
-        if (c.id !== id) return c;
-        if ("image" in m) return { ...c, images: [...c.images, m.image] };
-        return m.erreur ? { ...c, erreur: (c.erreur ?? "") + m.texte } : { ...c, sortie: c.sortie + m.texte };
-      }),
-    );
+    setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: avecMorceau(c.morceaux, m) } : c)));
   }
 
-  async function executer(source: string) {
-    if (!source.trim() || occupeRef.current) return;
+  async function executer(source: string, remplacer = false) {
+    if (!source.trim()) return;
+    if (occupeRef.current) {
+      // « ▶ Lancer » pendant qu'un programme tourne encore (fenêtre ouverte) : on l'arrête d'abord.
+      if (!remplacer || !enCours.current) return;
+      arreterExecution();
+      await enCours.current.catch(() => undefined);
+      if (occupeRef.current) return;
+    }
     occupeRef.current = true;
     setOccupe(true);
     setHistIndex(-1);
     const id = prochainId++;
+    // La cellule apparaît tout de suite : un programme peut rester actif (fenêtre ouverte, boucle, input).
+    setCellules((liste) => [...liste, { id, code: source, morceaux: [], enCours: true }]);
+    setCode((actuel) => (actuel === source ? "" : actuel));
+    let fin: () => void = () => undefined;
+    enCours.current = new Promise<void>((ok) => (fin = ok));
     try {
-      const r = await executerPython(source, setEtape, { sortieTardive: (m) => ajouterTardif(id, m) });
-      setCellules((liste) => [...liste, { id, code: source, sortie: r.sortie, erreur: r.erreur, images: r.images }]);
-      setCode((actuel) => (actuel === source ? "" : actuel));
+      const r = await executerPython(source, setEtape, {
+        sortieTardive: (m) => ajouterTardif(id, m),
+        enDirect: (m) => ajouterTardif(id, m),
+        saisie: (invite) =>
+          new Promise((ok) => {
+            repondre.current = ok;
+            setReponse("");
+            setSaisie({ invite });
+          }),
+      });
+      setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: r.morceaux, enCours: false } : c)));
     } catch (e) {
-      setCellules((liste) => [...liste, { id, code: source, sortie: "", erreur: e instanceof Error ? e.message : "Exécution impossible.", images: [] }]);
+      const erreur: Morceau = { texte: e instanceof Error ? e.message : "Exécution impossible.", erreur: true };
+      setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: [...c.morceaux, erreur], enCours: false } : c)));
     } finally {
       occupeRef.current = false;
+      fin();
+      repondre.current = null;
+      setSaisie(null);
       setOccupe(false);
       setEtape("");
       zone.current?.focus();
     }
+  }
+
+  function envoyerReponse(v: string | null) {
+    const f = repondre.current;
+    repondre.current = null;
+    setSaisie(null);
+    f?.(v);
   }
   const executerRef = useRef(executer);
   executerRef.current = executer;
@@ -112,7 +195,7 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
     const prendre = () => {
       const c = commandeEnAttente;
       commandeEnAttente = null;
-      if (c) void executerRef.current(c);
+      if (c) void executerRef.current(c, true);
     };
     const t = setTimeout(prendre, 0); // console ouverte par la commande elle-même
     window.addEventListener(EVENEMENT_COMMANDE, prendre);
@@ -130,9 +213,9 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
     const id = prochainId++;
     try {
       const noms = await importerFichiersConsole(liste, setEtape);
-      setCellules((l) => [...l, { id, code: "# fichiers importés", sortie: noms.length ? `Importé dans le dossier courant : ${noms.join(", ")}` : "", erreur: noms.length ? undefined : "Aucun fichier importé.", images: [] }]);
+      setCellules((l) => [...l, { id, code: "# fichiers importés", morceaux: [noms.length ? { texte: `Importé dans le dossier courant : ${noms.join(", ")}` } : { texte: "Aucun fichier importé.", erreur: true }] }]);
     } catch (err) {
-      setCellules((l) => [...l, { id, code: "# fichiers importés", sortie: "", erreur: err instanceof Error ? err.message : "Import impossible.", images: [] }]);
+      setCellules((l) => [...l, { id, code: "# fichiers importés", morceaux: [{ texte: err instanceof Error ? err.message : "Import impossible.", erreur: true }] }]);
     } finally {
       e.target.value = "";
       occupeRef.current = false;
@@ -197,28 +280,40 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
       <div className="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-[12.5px] leading-relaxed">
         {cellules.length === 0 && (
           <p className="text-muted-foreground">
-            Tapez du Python et appuyez sur Entrée (Maj+Entrée pour une nouvelle ligne). Lancez un fichier avec <code>python main.py</code> : les fichiers du projet de la conversation et ceux importés avec le bouton ↑ sont dans le dossier courant. Les programmes tkinter et turtle ouvrent des fenêtres, <code>input()</code> ouvre une boîte de saisie, les graphiques matplotlib s&apos;affichent ici. Paquets : <code>pip install nom</code> ou <code>pip install -r requirements.txt</code>.
+            Tapez du Python et appuyez sur Entrée (Maj+Entrée pour une nouvelle ligne). Lancez un fichier avec <code>python main.py</code> : les fichiers du projet de la conversation et ceux importés avec le bouton ↑ sont dans le dossier courant. Les programmes tkinter et turtle ouvrent des fenêtres (la commande se termine quand on les ferme, ou avec « Arrêter »), <code>input()</code> se répond ici, les graphiques matplotlib s&apos;affichent ici. Paquets : <code>pip install nom</code> ou <code>pip install -r requirements.txt</code>.
           </p>
         )}
         {cellules.map((c) => (
-          <div key={c.id} className="mb-2">
-            <div className="flex gap-2">
-              <span className="shrink-0 select-none text-primary">&gt;&gt;&gt;</span>
-              <pre className="whitespace-pre-wrap break-words">{c.code}</pre>
-            </div>
-            {c.sortie && <Sortie texte={tronquerSortie(c.sortie)} />}
-            {c.erreur && <pre className="whitespace-pre-wrap break-words pl-6 text-destructive">{tronquerSortie(c.erreur, 60, 4000)}</pre>}
-            {c.images.map((src, i) => (
-              // Graphique matplotlib produit dans le navigateur (data: URL PNG).
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={i} src={src} alt={`Graphique ${i + 1}`} className="my-1 ml-6 max-h-96 max-w-[calc(100%-1.5rem)] rounded border bg-white" />
-            ))}
-          </div>
+          <BlocCellule key={c.id} cellule={c} />
         ))}
-        {occupe && (
-          <p className="flex items-center gap-2 pl-6 text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" /> {etape || "Exécution…"}
-          </p>
+        {saisie ? (
+          <div className="flex items-center gap-2 pl-6">
+            <span className="select-none text-primary">↳</span>
+            <input
+              autoFocus
+              value={reponse}
+              onChange={(e) => setReponse(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  envoyerReponse(reponse);
+                } else if (e.key === "Escape") envoyerReponse(null);
+              }}
+              aria-label={saisie.invite || "Réponse au programme"}
+              placeholder="Réponse au programme (Entrée pour valider, Échap pour annuler)"
+              className="min-w-0 flex-1 rounded border bg-transparent px-2 py-0.5 font-mono text-[12.5px] outline-none focus-visible:border-ring"
+            />
+          </div>
+        ) : (
+          occupe && (
+            <p className="flex items-center gap-2 pl-6 text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              {enAttente ? "Programme en cours : il attend la fermeture de sa fenêtre." : etape || "Exécution…"}
+              <Button variant="outline" size="xs" className="ml-1" title="Arrête le programme (ses fenêtres se ferment)" onClick={() => arreterExecution()}>
+                <Square /> Arrêter
+              </Button>
+            </p>
+          )
         )}
         <div ref={bas} />
       </div>

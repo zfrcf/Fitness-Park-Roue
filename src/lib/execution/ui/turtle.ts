@@ -1,6 +1,7 @@
 /**
  * Module Python `turtle` de la console du navigateur : la tortue dessine sur un Canvas du tkinter de la
- * console, dans une fenêtre, avec une animation qui suit speed() et tracer().
+ * console — sa propre fenêtre (Screen) ou le Canvas d'un programme tkinter (TurtleScreen(cv),
+ * RawTurtle(cv)) — avec une animation qui suit speed() et tracer(), le mode « logo » et undo().
  */
 export const TURTLE = String.raw`
 """turtle pour la console Python du navigateur."""
@@ -9,7 +10,7 @@ import math
 import tkinter
 from tkinter import _couleur, _js, _ui
 
-__all__ = ["ScrolledCanvas", "TurtleScreen", "Screen", "RawTurtle", "Turtle", "RawPen", "Pen", "Shape", "Vec2D", "Terminator", "TurtleGraphicsError"]
+__all__ = ["ScrolledCanvas", "TurtleScreen", "Screen", "RawTurtle", "Turtle", "RawPen", "Pen", "Shape", "Vec2D", "Terminator", "TurtleGraphicsError", "write_docstringdict"]
 
 
 class Terminator(Exception):
@@ -101,24 +102,63 @@ def _vers_css(args, mode):
     raise TurtleGraphicsError(f"bad color arguments: {args}")
 
 
-class _Screen:
-    def __init__(self):
-        self._root = tkinter.Tk()
-        self._root.title("Python Turtle Graphics")
-        l, h = (int(x) for x in _ui.ecran().to_py())
-        self._l = max(240, min(720, int(l * 0.7)))
-        self._h = max(200, min(540, int(h * 0.65)))
-        self.cv = tkinter.Canvas(self._root, width=self._l, height=self._h, bg="white", highlightthickness=0)
-        self.cv.pack(fill="both", expand=True)
-        self._root._ecran_tortue = self
+def _px(v, defaut):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        try:
+            return int(tkinter._pixels(v, defaut))
+        except Exception:
+            return defaut
+
+
+class ScrolledCanvas(tkinter.Canvas):
+    """Zone de dessin de turtle. Dans le navigateur, c'est un Canvas simple (sans barres de défilement) :
+    l'origine de la tortue est au centre de la zone visible."""
+
+    def __init__(self, master, width=500, height=350, canvwidth=600, canvheight=500):
+        super().__init__(master, width=width, height=height, bg="white", highlightthickness=0)
+        self.width, self.height = width, height
+        self.canvwidth, self.canvheight = canvwidth, canvheight
+        self.bg = "white"
+        self._rootwindow = self.winfo_toplevel()
+        self._canvas = self
+
+    def reset(self, canvwidth=None, canvheight=None, bg=None):
+        if canvwidth:
+            self.canvwidth = canvwidth
+        if canvheight:
+            self.canvheight = canvheight
+        if bg:
+            self.bg = bg
+            self.configure(bg=_couleur(bg))
+
+    def adjustScrolls(self):
+        pass
+
+    def onResize(self, event):
+        pass
+
+
+class TurtleScreen:
+    """Écran de la tortue dessiné dans un Canvas tkinter donné (la fenêtre de Screen() ou celle du programme)."""
+
+    def __init__(self, cv, mode="standard", colormode=1.0, delay=10):
+        if mode not in ("standard", "logo", "world"):
+            raise TurtleGraphicsError(f"No turtle-graphics-mode {mode}")
+        self.cv = cv
+        self._root = cv.winfo_toplevel()
+        self._l = max(1, _px(cv.cget("width"), 378))
+        self._h = max(1, _px(cv.cget("height"), 265))
+        cv._ecran_tortue = self
         self._tracer = 1
-        self._delai = 10
-        self._mode = "standard"
-        self._colormode = 1.0
+        self._delai = delay
+        self._mode = mode
+        self._colormode = 1.0 if float(colormode) == 1.0 else 255
         self._monde = None
         self._tortues = []
         self._formes = dict(_FORMES)
-        self._bg = "white"
+        self._bg = cv.cget("background") or "white"
         self._image_fond = None
         self._anime = None
         self._regler_animation()
@@ -149,16 +189,6 @@ class _Screen:
         return self._anime != 0
 
     # — fenêtre —
-    def title(self, titlestring):
-        self._root.title(titlestring)
-
-    def setup(self, width=0.5, height=0.75, startx=None, starty=None):
-        ecran = [int(x) for x in _ui.ecran().to_py()]
-        l = int(width * ecran[0]) if isinstance(width, float) and width <= 1 else int(width)
-        h = int(height * ecran[1]) if isinstance(height, float) and height <= 1 else int(height)
-        self._l, self._h = max(100, min(l, ecran[0] - 30)), max(80, min(h, ecran[1] - 80))
-        self.cv.configure(width=self._l, height=self._h)
-
     def screensize(self, canvwidth=None, canvheight=None, bg=None):
         if canvwidth is None and canvheight is None and bg is None:
             return (self._l, self._h)
@@ -233,6 +263,9 @@ class _Screen:
     def update(self):
         for t in self._tortues:
             t._dessiner_curseur(force=True)
+        # Boucle de jeu « while True: écran.update() » : la page se redessine et reçoit le clavier (JSPI).
+        if tkinter._peut_attendre():
+            tkinter._ceder(0)
 
     def turtles(self):
         return list(self._tortues)
@@ -313,23 +346,53 @@ class _Screen:
         return simpledialog.askfloat(title, prompt, initialvalue=default, minvalue=minval, maxvalue=maxval)
 
     def mainloop(self):
-        pass
+        tkinter.mainloop()  # attend la fermeture de la fenêtre quand le navigateur le permet (JSPI)
 
     done = mainloop
+
+
+class _Screen(TurtleScreen):
+    """L'écran unique de Screen() : une fenêtre « Python Turtle Graphics » avec son propre Canvas."""
+
+    def __init__(self):
+        root = tkinter.Tk()
+        root.title("Python Turtle Graphics")
+        l, h = (int(x) for x in _ui.ecran().to_py())
+        cv = ScrolledCanvas(root, max(240, min(720, int(l * 0.7))), max(200, min(540, int(h * 0.65))))
+        cv.pack(fill="both", expand=True)
+        root._ecran_tortue = self
+        TurtleScreen.__init__(self, cv)
+
+    def title(self, titlestring):
+        self._root.title(titlestring)
+
+    def setup(self, width=0.5, height=0.75, startx=None, starty=None):
+        ecran = [int(x) for x in _ui.ecran().to_py()]
+        l = int(width * ecran[0]) if isinstance(width, float) and width <= 1 else int(width)
+        h = int(height * ecran[1]) if isinstance(height, float) and height <= 1 else int(height)
+        self._l, self._h = max(100, min(l, ecran[0] - 30)), max(80, min(h, ecran[1] - 80))
+        self.cv.configure(width=self._l, height=self._h)
 
     def bye(self):
         try:
             self._root.destroy()
         except Exception:
             pass
-        _ecran[0] = None
-        _tortue[0] = None
+        if _ecran[0] is self:
+            _ecran[0] = None
+            _tortue[0] = None
 
     def exitonclick(self):
         self.onclick(lambda x, y: self.bye())
+        self.mainloop()
 
 
-TurtleScreen = _Screen
+def _ecran_du_canvas(cv):
+    """Écran de la tortue d'un Canvas tkinter : créé une fois, puis réutilisé (RawTurtle(cv) plusieurs fois)."""
+    e = getattr(cv, "_ecran_tortue", None)
+    if isinstance(e, TurtleScreen) and e.cv is cv:
+        return e
+    return TurtleScreen(cv)
 
 
 def Screen():
@@ -339,9 +402,40 @@ def Screen():
     return e
 
 
+def _annulable(methode):
+    """Méthode de la tortue annulable par undo() : l'état d'avant et les dessins créés sont notés.
+    Les appels imbriqués (circle → forward…) ne forment qu'une seule annulation, comme dans CPython."""
+
+    def f(self, *args, **kw):
+        self._niveau_annul += 1
+        if self._niveau_annul == 1:
+            avant, n = self._etat_annul(), len(self._items)
+        try:
+            return methode(self, *args, **kw)
+        finally:
+            self._niveau_annul -= 1
+            if self._niveau_annul == 0:
+                self._noter_annul(avant, n)
+
+    f.__name__ = methode.__name__
+    f.__doc__ = methode.__doc__
+    return f
+
+
+_ETAT_ANNUL = ("_x", "_y", "_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_visible", "_remplit", "_rempl_premier")
+
+
 class RawTurtle:
     def __init__(self, canvas=None, shape="classic", undobuffersize=1000, visible=True):
-        self.screen = canvas if isinstance(canvas, _Screen) else Screen()
+        if isinstance(canvas, TurtleScreen):
+            self.screen = canvas
+        elif isinstance(canvas, tkinter.Canvas):
+            self.screen = _ecran_du_canvas(canvas)
+        else:
+            self.screen = Screen()
+        self._annulations = []
+        self._annul_max = int(undobuffersize) if undobuffersize else 0
+        self._niveau_annul = 0
         self._items = []
         self._tampons = {}
         self._curseur = None
@@ -374,6 +468,24 @@ class RawTurtle:
     @property
     def _cv(self):
         return self.screen.cv
+
+    def _etat_annul(self):
+        e = {k: getattr(self, k) for k in _ETAT_ANNUL}
+        # Ces listes ne font que s'allonger : on note la liste et sa longueur (pas de copie, coût constant
+        # même pour un long remplissage) ; undo() la retronque.
+        e["_rempl_points"] = (self._rempl_points, len(self._rempl_points))
+        e["_poly"] = None if self._poly is None else (self._poly, len(self._poly))
+        return e
+
+    def _noter_annul(self, avant, n):
+        if not self._annul_max:
+            return
+        crees = self._items[n:]
+        if not crees and avant == self._etat_annul():
+            return  # simple lecture (pencolor() sans argument…) : rien à annuler
+        self._annulations.append((avant, crees))
+        if len(self._annulations) > self._annul_max:
+            del self._annulations[0]
 
     def _c(self, x, y):
         return self.screen._vers_canvas(x, y)
@@ -471,6 +583,7 @@ class RawTurtle:
             self._cap = (self._cap + angle) % 360
             self._dessiner_curseur()
 
+    @_annulable
     def forward(self, distance):
         a = math.radians(self._cap)
         self._aller(self._x + float(distance) * math.cos(a), self._y + float(distance) * math.sin(a))
@@ -482,16 +595,21 @@ class RawTurtle:
 
     bk = back = backward
 
+    @_annulable
     def left(self, angle):
-        self._tourner(self._angle_utilisateur(angle) * (-1 if self.screen._mode == "logo" else 1))
+        # Même en mode « logo », left tourne à gauche : seule la numérotation du cap change (0 = nord,
+        # sens horaire), gérée par heading() / setheading() / towards().
+        self._tourner(self._angle_utilisateur(angle))
 
     lt = left
 
+    @_annulable
     def right(self, angle):
-        self._tourner(-self._angle_utilisateur(angle) * (-1 if self.screen._mode == "logo" else 1))
+        self._tourner(-self._angle_utilisateur(angle))
 
     rt = right
 
+    @_annulable
     def goto(self, x, y=None):
         if y is None:
             x, y = x
@@ -499,15 +617,19 @@ class RawTurtle:
 
     setpos = setposition = goto
 
+    @_annulable
     def teleport(self, x=None, y=None, *, fill_gap=False):
         self._aller(self._x if x is None else x, self._y if y is None else y, tracer_ligne=False)
 
+    @_annulable
     def setx(self, x):
         self._aller(x, self._y)
 
+    @_annulable
     def sety(self, y):
         self._aller(self._x, y)
 
+    @_annulable
     def setheading(self, to_angle):
         a = self._angle_utilisateur(to_angle)
         cible = (90 - a) if self.screen._mode == "logo" else a
@@ -516,10 +638,12 @@ class RawTurtle:
 
     seth = setheading
 
+    @_annulable
     def home(self):
         self.goto(0, 0)
         self.setheading(0)
 
+    @_annulable
     def circle(self, radius, extent=None, steps=None):
         radius = float(radius)
         extent = self._unite if extent is None else float(extent)
@@ -541,6 +665,7 @@ class RawTurtle:
             self._tourner(w, animer=False)
         self._tourner(-w2, animer=False)
 
+    @_annulable
     def dot(self, size=None, *color):
         if size is not None and not isinstance(size, (int, float)):
             color = (size,) + color
@@ -552,6 +677,7 @@ class RawTurtle:
         self._items.append(i)
         self._dessiner_curseur()
 
+    @_annulable
     def stamp(self):
         pts = self._poly_curseur()
         if not pts:
@@ -574,6 +700,7 @@ class RawTurtle:
         for i in ids:
             self.clearstamp(i)
 
+    @_annulable
     def write(self, arg, move=False, align="left", font=("Arial", 8, "normal")):
         x, y = self._c(self._x, self._y)
         ancre = {"left": "sw", "center": "s", "right": "se"}.get(align, "sw")
@@ -586,11 +713,13 @@ class RawTurtle:
         self._dessiner_curseur()
 
     # — remplissage —
+    @_annulable
     def begin_fill(self):
         self._remplit = True
         self._rempl_points = [(self._x, self._y)]
         self._rempl_premier = None
 
+    @_annulable
     def end_fill(self):
         if self._remplit and len(self._rempl_points) > 2:
             pts = []
@@ -617,11 +746,13 @@ class RawTurtle:
         return tuple(self._poly or ())
 
     # — crayon —
+    @_annulable
     def pendown(self):
         self._baisse = True
 
     pd = down = pendown
 
+    @_annulable
     def penup(self):
         self._baisse = False
 
@@ -630,6 +761,7 @@ class RawTurtle:
     def isdown(self):
         return self._baisse
 
+    @_annulable
     def pensize(self, width=None):
         if width is None:
             return self._epaisseur
@@ -646,6 +778,7 @@ class RawTurtle:
         self._vitesse = 0 if speed > 10 or speed < 0.5 else int(round(speed))
         self.screen._regler_animation()
 
+    @_annulable
     def pencolor(self, *args):
         if not args:
             return self._crayon
@@ -653,6 +786,7 @@ class RawTurtle:
         self._crayon_css = _couleur(_vers_css(args, self.screen._colormode))
         self._dessiner_curseur()
 
+    @_annulable
     def fillcolor(self, *args):
         if not args:
             return self._remplissage
@@ -660,6 +794,7 @@ class RawTurtle:
         self._remplissage_css = _couleur(_vers_css(args, self.screen._colormode))
         self._dessiner_curseur()
 
+    @_annulable
     def color(self, *args):
         if not args:
             return (self._crayon, self._remplissage)
@@ -670,6 +805,7 @@ class RawTurtle:
             self.pencolor(args[0])
             self.fillcolor(args[1])
 
+    @_annulable
     def pen(self, pen=None, **pendict):
         etat = {"shown": self._visible, "pendown": self._baisse, "pencolor": self._crayon, "fillcolor": self._remplissage, "pensize": self._epaisseur, "speed": self._vitesse, "resizemode": "noresize", "stretchfactor": self._etirement[:2], "outline": self._etirement[2], "tilt": 0.0}
         if pen is None and not pendict:
@@ -689,12 +825,14 @@ class RawTurtle:
             self.speed(o["speed"])
 
     # — état —
+    @_annulable
     def showturtle(self):
         self._visible = True
         self._dessiner_curseur(force=True)
 
     st = showturtle
 
+    @_annulable
     def hideturtle(self):
         self._visible = False
         self._effacer_curseur()
@@ -780,6 +918,7 @@ class RawTurtle:
             self._cv.delete(i)
         self._items = []
         self._tampons = {}
+        self._annulations = []
 
     def reset(self):
         self.clear()
@@ -797,20 +936,44 @@ class RawTurtle:
 
     def clone(self):
         t = type(self).__new__(type(self))
-        RawTurtle.__init__(t, self.screen, self._forme, visible=self._visible)
+        RawTurtle.__init__(t, self.screen, self._forme, self._annul_max, visible=self._visible)
         for k in ("_x", "_y", "_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_vitesse", "_etirement", "_unite"):
             setattr(t, k, getattr(self, k))
         t._dessiner_curseur(force=True)
         return t
 
     def undo(self):
-        pass
+        """Annule la dernière action (déplacement, rotation, cercle, tampon, remplissage, crayon…)."""
+        if not self._annulations:
+            return
+        avant, crees = self._annulations.pop()
+        for i in crees:
+            self._cv.delete(i)
+            self._tampons.pop(i, None)
+        if crees:
+            supprimes = set(crees)
+            self._items = [i for i in self._items if i not in supprimes]
+        for k, v in avant.items():
+            if k in ("_rempl_points", "_poly") and v is not None:
+                liste, n = v
+                del liste[n:]
+                v = liste
+            setattr(self, k, v)
+        self._dessiner_curseur(force=True)
 
     def setundobuffer(self, size):
-        pass
+        self._annul_max = int(size) if size else 0
+        self._annulations = []
 
     def undobufferentries(self):
-        return 0
+        return len(self._annulations)
+
+    def get_shapepoly(self):
+        forme = self.screen._formes.get(self._forme, ())
+        if not forme or forme[0] == "image":
+            return None
+        sw, sl, _ = self._etirement
+        return tuple((x * sw, y * sl) for x, y in forme)
 
     # — événements de la tortue —
     def onclick(self, fun, btn=1, add=None):
@@ -858,7 +1021,7 @@ _METHODES_TORTUE = [
     "isvisible", "left", "lt", "onclick", "ondrag", "onrelease", "pd", "pen", "pencolor", "pendown", "pensize",
     "penup", "pos", "position", "pu", "radians", "right", "reset", "resizemode", "rt", "seth", "setheading", "setpos",
     "setposition", "settiltangle", "setundobuffer", "setx", "sety", "shape", "shapesize", "shapetransform",
-    "shearfactor", "showturtle", "speed", "st", "stamp", "teleport", "tilt", "tiltangle", "towards", "turtlesize",
+    "shearfactor", "showturtle", "speed", "st", "stamp", "teleport", "tilt", "tiltangle", "towards", "turtlesize", "get_shapepoly",
     "undo", "undobufferentries", "up", "width", "write", "xcor", "ycor",
 ]
 

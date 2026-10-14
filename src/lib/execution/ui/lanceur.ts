@@ -1,8 +1,9 @@
 /**
  * Modules Python de lancement de la console du navigateur :
- *  - `atelier_run` : `python fichier.py` / `-c` / `-m` / `%run`, input() par boîte de saisie, installation
- *    automatique des modules manquants, garde-fou contre les attentes sans fin ;
- *  - `atelier_mpl` : backend matplotlib (plt.show() → image dans le terminal) ;
+ *  - `atelier_run` : `python fichier.py` / `-c` / `-m` / `%run`, cellules de la console (sys.exit() propre),
+ *    input() par boîte de saisie, installation automatique des modules manquants, garde-fou contre les
+ *    attentes sans fin ;
+ *  - `atelier_mpl` : backend matplotlib (plt.show() → image dans le terminal, plt.pause() sans fermer) ;
  *  - cales : `PIL.ImageTk` et `matplotlib.backends.backend_tkagg` pour le tkinter de la console ;
  *  - `_tkinter` : module natif factice.
  */
@@ -14,6 +15,7 @@ import importlib
 import importlib.abc
 import importlib.util
 import os
+import re
 import runpy
 import shlex
 import sys
@@ -42,13 +44,35 @@ PAQUETS = {
 # ─── input() : boîte de saisie du navigateur, avec les dernières lignes affichées ───
 
 
+def _peut_attendre():
+    """JSPI : Python peut attendre une promesse sans figer la page (sinon : boîte de saisie, attente active)."""
+    try:
+        from pyodide.ffi import can_run_sync
+
+        import js
+
+        return bool(can_run_sync()) and not getattr(js, "__atelierSansJSPI", False)
+    except Exception:
+        return False
+
+
+def _attendre(promesse_ou_coroutine):
+    from pyodide.ffi import run_sync
+
+    r = run_sync(promesse_ou_coroutine)
+    if _ui.arretDemande():
+        raise KeyboardInterrupt("arrêt demandé")
+    return r
+
+
 def _input(prompt=""):
     texte = "" if prompt is None else str(prompt)
     if texte:
         sys.stdout.write(texte)
     sys.stdout.flush()
     sys.stderr.flush()
-    reponse = _ui.saisie(texte)
+    # Avec JSPI, la saisie se fait dans la console elle-même (la page reste utilisable) ; sinon, boîte du navigateur.
+    reponse = _attendre(_ui.saisieAsync(texte)) if _peut_attendre() else _ui.saisie(texte)
     if reponse is None:
         sys.stdout.write("\n")
         raise KeyboardInterrupt("saisie annulée")
@@ -71,6 +95,12 @@ def _debut_execution():
 
 def _sleep(secondes):
     s = max(0.0, float(secondes))
+    if _peut_attendre():
+        # La page continue de vivre pendant l'attente (dessin, clics, animations turtle / tkinter).
+        import asyncio
+
+        _attendre(asyncio.sleep(s))
+        return
     if time.monotonic() - _debut[0] + s > LIMITE:
         raise RuntimeError(
             f"Programme arrêté après {LIMITE} s d'attente : dans le navigateur, un programme qui attend (time.sleep) "
@@ -88,7 +118,21 @@ try:
     import asyncio
 
     def _run(main, *, debug=None, loop_factory=None):
-        asyncio.ensure_future(main)
+        async def _garde():
+            # Une exception (ou sys.exit) dans la tâche ne doit pas arrêter la boucle de la page.
+            try:
+                return await main
+            except SystemExit as e:
+                _signaler_sortie(e)
+            except KeyboardInterrupt:
+                print("[programme interrompu]", file=sys.stderr)
+            except BaseException:
+                traceback.print_exc()
+            finally:
+                sys.stdout.flush()
+                sys.stderr.flush()
+
+        asyncio.ensure_future(_garde())
         return None
 
     asyncio.run = _run
@@ -186,10 +230,28 @@ async def preparer_imports(*sources):
         paquet = PAQUETS.get(n, n)
         try:
             await micropip.install(paquet)
+        except Exception as e:
+            print(f"(module « {n} » : installation automatique de « {paquet} » impossible — {_raison_echec(e)})", file=sys.stderr)
+            continue
+        importlib.invalidate_caches()
+        # « installé » seulement si le module s'importe vraiment (un paquet peut s'installer sans fournir ce nom).
+        try:
+            importlib.import_module(n)
+        except (Exception, SystemExit) as e:
+            detail = f"{type(e).__name__}: {e}".strip().splitlines()[0][:200]
+            print(f"(module « {n} » : le paquet « {paquet} » s'est installé mais « import {n} » échoue — {detail})", file=sys.stderr)
+        else:
             print(f"(module « {n} » installé automatiquement : {paquet})")
-        except Exception:
-            pass
     importlib.invalidate_caches()
+
+
+def _raison_echec(e):
+    texte = str(e).strip()
+    if "pure Python 3 wheel" in texte or "pure python 3 wheel" in texte.lower():
+        return "il contient du code compilé (C, Rust…) sans version pour le navigateur"
+    if "Can't fetch metadata" in texte or "No matching distribution" in texte or "404" in texte:
+        return "paquet introuvable sur PyPI (ou réseau indisponible)"
+    return (texte.splitlines()[0] if texte else type(e).__name__)[:200]
 
 
 # ─── Lancement ───
@@ -243,6 +305,64 @@ def _fermer_fenetres_precedentes():
             sys.modules["tkinter"]._tout_detruire()
         except Exception:
             pass
+
+
+def _repartir_a_neuf():
+    """Bouton « Exécuter » d'un bloc de code : repart d'un état propre (fenêtres, tortue, figures)."""
+    _fermer_fenetres_precedentes()
+    plt = sys.modules.get("matplotlib.pyplot")
+    if plt is not None:
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+
+
+def _signaler_sortie(e):
+    """sys.exit() / exit() / raise SystemExit : fin propre, sans traceback, comme l'interpréteur."""
+    code = e.code
+    if code is None or (isinstance(code, int) and int(code) == 0):
+        return
+    if isinstance(code, int):
+        print(f"[programme terminé avec le code {int(code)}]", file=sys.stderr)
+    else:
+        print(str(code), file=sys.stderr)
+
+
+async def cellule(code):
+    """Exécute une cellule de la console (comme runPythonAsync). SystemExit et KeyboardInterrupt sont
+    traités ici : sortis de la cellule, ils arrêteraient la boucle d'événements de la page."""
+    from pyodide.code import eval_code_async
+
+    import __main__
+
+    try:
+        return await eval_code_async(code, __main__.__dict__, filename="<exec>")
+    except SystemExit as e:
+        _signaler_sortie(e)
+        if e.code is None and re.fullmatch(r"\s*(exit|quit)\(\s*\)\s*", code):
+            print("(la console reste ouverte : les variables sont conservées)")
+    except KeyboardInterrupt as e:
+        print(f"[programme interrompu{' : ' + str(e) if str(e) else ''}]", file=sys.stderr)
+    return None
+
+
+def _fin_execution():
+    """Fin d'une exécution de la console : figures matplotlib modifiées affichées, flux vidés."""
+    tk = sys.modules.get("tkinter")
+    if tk is not None and hasattr(tk, "_apres_execution"):
+        try:
+            tk._apres_execution()
+        except Exception:
+            pass
+    mpl = sys.modules.get("atelier_mpl")
+    if mpl is not None:
+        try:
+            mpl.vider()
+        except Exception:
+            pass
+    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 def _afficher_erreur():
@@ -326,8 +446,7 @@ async def lancer(ligne=""):
             sys.path.insert(0, os.path.dirname(chemin))
             runpy.run_path(script if os.path.isfile(script) else chemin, run_name="__main__")
     except SystemExit as e:
-        if e.code not in (None, 0):
-            print(f"[programme terminé avec le code {e.code}]" if isinstance(e.code, int) else str(e.code), file=sys.stderr)
+        _signaler_sortie(e)
     except KeyboardInterrupt:
         print("[programme interrompu]", file=sys.stderr)
     except BaseException:
@@ -340,35 +459,89 @@ async def lancer(ligne=""):
 `;
 
 export const MPL = String.raw`
-"""Backend matplotlib de la console : plt.show() affiche les figures comme images dans le terminal."""
+"""Backend matplotlib de la console : les figures s'affichent comme images dans le terminal.
+
+plt.show() affiche les figures puis les ferme ; plt.show(block=False) et plt.pause() les affichent sans
+les fermer ; en fin d'exécution, vider() affiche celles qui ont changé depuis leur dernier affichage.
+Une figure inchangée déjà affichée n'est jamais renvoyée."""
 import base64
+import hashlib
 import io
+import itertools
+import sys
 
 import atelier_ui as _ui
 from matplotlib._pylab_helpers import Gcf
 from matplotlib.backend_bases import _Backend
 from matplotlib.backends.backend_agg import FigureCanvasAgg, _BackendAgg
 
+_numeros = itertools.count(1)
+
 
 def envoyer_figure(fig):
+    """Affiche la figure comme image PNG, sauf si elle est identique à son dernier affichage."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=fig.get_facecolor())
-    _ui.image("data:image/png;base64," + base64.b64encode(buf.getvalue()).decode())
+    fig.stale = False  # savefig peut la marquer « modifiée » (dpi, cadrage) : seul un vrai changement compte
+    png = buf.getvalue()
+    empreinte = hashlib.sha1(png).hexdigest()
+    if getattr(fig, "_atelier_empreinte", None) == empreinte:
+        return False
+    fig._atelier_empreinte = empreinte
+    if getattr(fig, "_atelier_numero", None) is None:
+        fig._atelier_numero = next(_numeros)
+    sys.stdout.flush()  # l'image s'affiche après le texte déjà écrit
+    sys.stderr.flush()
+    _ui.image("data:image/png;base64," + base64.b64encode(png).decode(), fig._atelier_numero)
+    return True
+
+
+def _figures(fenetres_fermees=False):
+    """Figures de pyplot à afficher dans le terminal : pas celles intégrées à une fenêtre tkinter
+    (FigureCanvasTkAgg), sauf, si demandé, quand cette fenêtre a été fermée."""
+    for manager in Gcf.get_all_fig_managers():
+        fig = manager.canvas.figure
+        widget = getattr(fig.canvas, "get_tk_widget", None)
+        if widget is None or (fenetres_fermees and not widget().winfo_exists()):
+            yield fig
+
+
+def vider():
+    """Fin d'exécution : affiche les figures encore ouvertes modifiées depuis leur dernier affichage."""
+    for fig in list(_figures()):
+        if not fig.axes or (getattr(fig, "_atelier_empreinte", None) and not fig.stale):
+            continue
+        try:
+            envoyer_figure(fig)
+        except Exception:
+            pass
+
+
+class FigureCanvasAtelier(FigureCanvasAgg):
+    def draw_idle(self, *args, **kwargs):
+        """Rien à redessiner « plus tard » : l'image est rendue au moment où elle s'affiche (show, pause, fin)."""
+
+    def start_event_loop(self, timeout=0):
+        """plt.pause() : la page ne se redessine pas pendant que Python tourne, attendre ne servirait à rien."""
+        self.flush_events()
 
 
 @_Backend.export
 class _BackendAtelier(_BackendAgg):
-    FigureCanvas = FigureCanvasAgg
+    FigureCanvas = FigureCanvasAtelier
 
     @classmethod
     def show(cls, *args, block=None, **kwargs):
-        for manager in Gcf.get_all_fig_managers():
-            envoyer_figure(manager.canvas.figure)
+        for fig in list(_figures(fenetres_fermees=True)):
+            envoyer_figure(fig)
+        if block is False:
+            return  # plt.show(block=False), plt.pause() : les figures restent ouvertes
         Gcf.destroy_all()
 `;
 
 export const CALE_TKAGG = String.raw`
-"""matplotlib.backends.backend_tkagg pour le tkinter de la console : la figure s'affiche dans la fenêtre."""
+"""matplotlib.backends.backend_tkagg pour le tkinter de la console : la figure s'affiche dans la fenêtre
+(un Canvas, comme le vrai TkAgg) et suit la taille du widget quand la fenêtre est redimensionnée."""
 import io
 import os
 import tkinter
@@ -383,15 +556,45 @@ class FigureCanvasTkAgg(FigureCanvasAgg):
     def __init__(self, figure=None, master=None, resize_callback=None):
         super().__init__(figure)
         self._master = master
-        self._widget = tkinter.Label(master, bd=0)
+        self._rappel_taille = resize_callback
+        l, h = (max(1, int(round(v))) for v in self.figure.bbox.size)
+        self._widget = tkinter.Canvas(master, width=l, height=h, bg="white", bd=0, highlightthickness=0)
+        self._tkcanvas = self._widget
+        self._taille = (l, h)
+        self._item = None
         self._image = None
+        self._attente = None
+        self._widget.bind("<Configure>", self._redimensionner, "+")
         self._rendu()
 
     def _rendu(self):
         buf = io.BytesIO()
         self.figure.savefig(buf, format="png", dpi=self.figure.dpi, facecolor=self.figure.get_facecolor())
-        self._image = tkinter.PhotoImage(data=buf.getvalue())
-        self._widget.configure(image=self._image)
+        image = tkinter.PhotoImage(data=buf.getvalue())
+        if self._item is None:
+            self._item = self._widget.create_image(0, 0, anchor="nw", image=image)
+        else:
+            self._widget.itemconfigure(self._item, image=image)
+        self._image = image
+
+    def _redimensionner(self, event):
+        l, h = int(event.width), int(event.height)
+        if l < 10 or h < 10 or (l, h) == self._taille:
+            return
+        self._taille = (l, h)
+        if self._attente is not None:
+            self._widget.after_cancel(self._attente)
+        self._attente = self._widget.after(80, lambda: self._appliquer_taille(event))
+
+    def _appliquer_taille(self, event):
+        """Comme le vrai TkAgg : la figure prend la taille du widget, puis est redessinée."""
+        self._attente = None
+        l, h = self._taille
+        dpi = self.figure.dpi
+        self.figure.set_size_inches(l / dpi, h / dpi, forward=False)
+        if self._rappel_taille is not None:
+            self._rappel_taille(event)
+        self.draw()
 
     def draw(self):
         super().draw()
@@ -407,6 +610,9 @@ class FigureCanvasTkAgg(FigureCanvasAgg):
         return self._widget
 
     def flush_events(self):
+        pass
+
+    def start_event_loop(self, timeout=0):
         pass
 
 

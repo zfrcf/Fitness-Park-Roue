@@ -84,14 +84,24 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   Testé en CPython avec un faux micropip (`pip-console.test.ts`). Fichiers : `projet-console.ts` — la fenêtre de
   chat publie les fichiers du projet, copiés dans `/home/pyodide` (+ bouton « Importer des fichiers »).
   **Programmes et interfaces** (`src/lib/execution/ui/`) : `python fichier.py` / `-c` / `-m` / `%run` → `atelier_run.lancer`
-  (`lanceur.ts` : input() par prompt() avec les dernières lignes affichées, modules manquants chargés/installés,
-  time.sleep plafonné à 60 s pour ne pas figer la page, asyncio.run planifié). **tkinter n'existe pas dans Pyodide** :
+  (`lanceur.ts` : cellules via `atelier_run.cellule` — sys.exit() propre —, modules manquants chargés/installés,
+  asyncio.run planifié). **Mode JSPI** (Chrome ≥ 137, `can_run_sync()`) : `mainloop()` attend vraiment la
+  fermeture des fenêtres (ou `quit()`), `update()` / `time.sleep()` / `turtle.update()` rendent la main au navigateur
+  (`run_sync`), les rappels (événements, `after`) sont lancés en appel « promettant » (`callPromising`, résultat
+  synchrone déposé par `moteurFenetres.retour`), `wait_window` / `wait_variable` / `simpledialog.Dialog` bloquent,
+  input() se répond dans la console, sortie diffusée en direct (`enDirect`), bouton « Arrêter » (`arreterExecution`
+  → KeyboardInterrupt à la prochaine attente). Sans JSPI (Firefox, Safari… ou `window.__atelierSansJSPI`) :
+  mainloop() rend la main, input() par prompt(), time.sleep plafonné à 60 s, boucle update() arrêtée après 3 s.
+  Sortie : `morceaux.ts` (ordre exact textes / images, pur, testé), couleurs ANSI et `\r` : `ansi.ts` (pur, testé).
+  **tkinter n'existe pas dans Pyodide** :
   il est réimplémenté en Python (`tk-noyau.ts`, `tk-annexes.ts` : ttk, Treeview, Notebook, messagebox, dialogues…) et
   dessiné en HTML par `fenetres.ts` (fenêtres flottantes ; pack = cavité de Tk en flex imbriqués, grid = grille CSS,
   place = absolu ; Canvas en SVG ; événements renvoyés au Python par un rappel unique). `turtle.ts` dessine sur ce
   Canvas (animation selon speed/tracer). matplotlib : backend `atelier_mpl` (plt.show → image dans la console), cale
-  `backend_tkagg` (FigureCanvasTkAgg) et `PIL.ImageTk`. mainloop() rend la main (fenêtres actives ensuite) ; la sortie
-  tardive (clics, minuteries) s'ajoute sous la commande. Sorties exactes via `setStdout({write})` (pas `batched`).
+  `backend_tkagg` (FigureCanvasTkAgg) et `PIL.ImageTk`. La sortie tardive (clics, minuteries après la fin) s'ajoute
+  sous la commande. Sorties exactes via `setStdout({write})` (pas `batched`). Text : le modèle Python garde le « \n »
+  final de Tk (affiché dans la page) ; curseur / sélection lus dans la page seulement s'ils ont changé depuis le
+  dernier envoi.
   Fichiers .py : bouton « ▶ Lancer » de l'explorateur → événement `atelier:lancer-python` → console.
 - Bons/mauvais points + mémoire de leçons (`src/lib/comptes/lecons.ts` pur/testé, table `lecons`,
   `src/lib/db/lecons.ts`, API `/api/retours`, UI `bouton-retour.tsx` + store `retours.ts`) : 👍/👎 avec note sur

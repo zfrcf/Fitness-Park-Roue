@@ -1,75 +1,70 @@
 "use client";
 
-import { Loader2, Play, X } from "lucide-react";
+import { Loader2, Play, Square, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { executerPython, type Morceau } from "@/lib/execution/python-navigateur";
-import { tronquerSortie } from "@/lib/execution/langues";
-import { cn } from "@/lib/utils";
+import { SortieOrdonnee } from "@/components/chat/console-python";
+import { avecMorceau } from "@/lib/execution/morceaux";
+import { arreterExecution, executerPython, type Morceau } from "@/lib/execution/python-navigateur";
 
 /**
  * Bouton « Exécuter » d'un bloc Python : lance le code dans le navigateur de l'utilisateur
- * (Pyodide/WebAssembly), sans jamais toucher le serveur. Affiche la sortie sous le bloc, les
- * graphiques matplotlib, et ce que le programme affiche ensuite (fenêtres tkinter, minuteries).
+ * (Pyodide/WebAssembly), sans jamais toucher le serveur. Chaque clic repart d'un état propre
+ * (fenêtres tkinter/turtle et figures du clic précédent fermées). Affiche sous le bloc la sortie dans
+ * l'ordre exact du programme (textes, erreurs, graphiques matplotlib), en direct tant qu'il tourne
+ * (fenêtre ouverte, boucle avec time.sleep), puis ce qu'il affiche ensuite (clics, minuteries).
  */
 export function ExecuterPython({ code }: { code: string }) {
   const [etat, setEtat] = useState<"repos" | "charge" | "fait">("repos");
   const [etape, setEtape] = useState("");
-  const [sortie, setSortie] = useState("");
-  const [erreur, setErreur] = useState<string | null>(null);
-  const [images, setImages] = useState<string[]>([]);
+  const [morceaux, setMorceaux] = useState<Morceau[]>([]);
 
-  function tardif(m: Morceau) {
-    if ("image" in m) setImages((l) => [...l, m.image]);
-    else if (m.erreur) setErreur((e) => (e ?? "") + m.texte);
-    else setSortie((s) => s + m.texte);
-    setEtat("fait");
+  function ajouter(m: Morceau) {
+    setMorceaux((l) => avecMorceau(l, m));
   }
 
   async function lancer() {
     setEtat("charge");
-    setErreur(null);
-    setSortie("");
-    setImages([]);
+    setMorceaux([]);
     try {
-      const r = await executerPython(code, setEtape, { sortieTardive: tardif });
-      setSortie(r.sortie);
-      setErreur(r.erreur ?? null);
-      setImages(r.images);
+      const r = await executerPython(code, setEtape, { sortieTardive: ajouter, enDirect: ajouter, neuf: true });
+      setMorceaux(r.morceaux);
     } catch (e) {
-      setErreur(e instanceof Error ? e.message : "Exécution impossible.");
+      setMorceaux((l) => [...l, { texte: e instanceof Error ? e.message : "Exécution impossible.", erreur: true }]);
     } finally {
       setEtat("fait");
       setEtape("");
     }
   }
 
-  const aResultat = etat === "fait" && (sortie || erreur || images.length);
+  const aErreur = morceaux.some((m) => "texte" in m && m.erreur);
   return (
     <>
       <Button type="button" variant="ghost" size="xs" onClick={() => void lancer()} disabled={etat === "charge"} aria-label="Exécuter ce code Python dans le navigateur">
         {etat === "charge" ? <Loader2 className="animate-spin" /> : <Play />}
         <span className="hidden sm:inline">{etat === "charge" ? etape || "Exécution…" : "Exécuter"}</span>
       </Button>
-      {aResultat ? (
+      {etat === "charge" && (
+        <Button type="button" variant="ghost" size="xs" onClick={() => arreterExecution()} aria-label="Arrêter le programme" title="Arrête le programme (ses fenêtres se ferment)">
+          <Square />
+          <span className="hidden sm:inline">Arrêter</span>
+        </Button>
+      )}
+      {etat !== "repos" && morceaux.length ? (
         <div className="border-t bg-background/60">
           <div className="flex items-center justify-between px-3 py-1 text-[11px] text-muted-foreground">
-            <span>Sortie{erreur ? " (erreur)" : ""} · exécuté dans votre navigateur</span>
-            <Button type="button" variant="ghost" size="icon-sm" aria-label="Effacer la sortie" onClick={() => setEtat("repos")}>
-              <X />
-            </Button>
+            <span>
+              Sortie{aErreur ? " (erreur)" : ""} · exécuté dans votre navigateur{etat === "charge" ? " · en cours" : ""}
+            </span>
+            {etat === "fait" && (
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Effacer la sortie" onClick={() => setEtat("repos")}>
+                <X />
+              </Button>
+            )}
           </div>
-          {(sortie || erreur) && (
-            <pre className={cn("max-h-80 overflow-auto px-3 pb-3 text-[12px] leading-relaxed whitespace-pre-wrap")}>
-              {tronquerSortie(sortie)}
-              {erreur ? <span className="text-destructive">{tronquerSortie(erreur, 60, 4000)}</span> : null}
-            </pre>
-          )}
-          {images.map((src, i) => (
-            // Graphique matplotlib produit dans le navigateur (data: URL PNG).
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={src} alt={`Graphique ${i + 1}`} className="mx-3 mb-3 max-h-96 max-w-[calc(100%-1.5rem)] rounded border bg-white" />
-          ))}
+          <div className="max-h-[32rem] overflow-auto px-3 pb-3">
+            <SortieOrdonnee morceaux={morceaux} classeTexte="text-[12px] leading-relaxed" classeImage="my-2 max-h-96 max-w-full" />
+          </div>
         </div>
       ) : null}
     </>

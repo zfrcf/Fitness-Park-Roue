@@ -10,10 +10,11 @@
  * NEXT_PUBLIC_PYODIDE_URL). Les programmes à interface (tkinter, turtle) ouvrent des fenêtres dans
  * la page ; matplotlib affiche ses figures comme images ; input() ouvre une boîte de saisie.
  */
+import { ajouterMorceau, dernierTexte, imagesDe, texteDuFlux, type Morceau } from "./morceaux";
 import { codeChargementPip } from "./pip-console";
 import { cheminConsole, projetConsole } from "./projet-console";
 import { indiceShell, transformerCommandes } from "./python-shell";
-import { moteurFenetres } from "./ui/fenetres";
+import { fermerToutesFenetres, moteurFenetres } from "./ui/fenetres";
 import { DOSSIER_MODULES, MODULES_PYTHON } from "./ui/modules";
 
 const VERSION = "0.26.4";
@@ -29,12 +30,18 @@ interface Pyodide {
   loadPackagesFromImports(code: string): Promise<void>;
   loadPackage(nom: string): Promise<void>;
   registerJsModule(nom: string, module: object): void;
+  pyimport(nom: string): ModuleAtelierRun;
   FS: {
     writeFile(chemin: string, donnees: string | Uint8Array): void;
     readFile(chemin: string, opts: { encoding: "utf8" }): string;
     unlink(chemin: string): void;
     mkdirTree(chemin: string): void;
   };
+}
+
+/** Module Python `atelier_run` vu depuis JavaScript (PyProxy). */
+interface ModuleAtelierRun {
+  cellule(code: string): Promise<unknown>;
 }
 
 declare global {
@@ -44,18 +51,67 @@ declare global {
   }
 }
 
-/** Morceau de sortie d'un programme : texte (sortie standard ou d'erreur) ou image (matplotlib). */
-export type Morceau = { texte: string; erreur?: boolean } | { image: string };
+export type { Morceau } from "./morceaux";
 
-/* Routage de la sortie : pendant une exécution, vers son résultat ; ensuite (rappels de boutons,
-   minuteries, fenêtres), vers le dernier lanceur qui s'est inscrit. */
-let sortieCourante: ((m: Morceau) => void) | null = null;
+/* Routage de la sortie : vers l'exécution en cours la plus récente (avec JSPI, un programme reste actif
+   pendant mainloop() et une autre exécution peut démarrer) ; hors exécution (rappels de boutons,
+   minuteries après la fin), vers le dernier lanceur qui s'est inscrit. */
+interface ExecutionActive {
+  recevoir: (m: Morceau) => void;
+  saisie?: (invite: string) => Promise<string | null>;
+}
+const pileSorties: ExecutionActive[] = [];
 let sortieTardive: ((m: Morceau) => void) | null = null;
 let recente = "";
 
 function emettre(m: Morceau) {
   if ("texte" in m) recente = (recente + m.texte).slice(-6000);
-  (sortieCourante ?? sortieTardive)?.(m);
+  (pileSorties[pileSorties.length - 1]?.recevoir ?? sortieTardive)?.(m);
+}
+
+/* Arrêt demandé (bouton « Arrêter ») : le Python le voit à sa prochaine attente (update, sleep, mainloop, input). */
+let arret = false;
+/** Programmes en attente dans mainloop() / wait_window() (le programme tourne mais attend l'utilisateur). */
+let attentes = 0;
+const ecouteursEtat = new Set<() => void>();
+
+function signalerEtat() {
+  for (const f of ecouteursEtat) f();
+}
+
+/** Arrête les programmes en cours : fenêtres fermées, attentes interrompues (KeyboardInterrupt). */
+export function arreterExecution(): void {
+  arret = true;
+  saisieEnCours?.(null);
+  fermerToutesFenetres();
+}
+
+/** Nombre d'exécutions en cours et d'attentes (mainloop) : pour l'interface et le banc d'essai. */
+export function etatExecution(): { enCours: number; attentes: number } {
+  return { enCours: pileSorties.length, attentes };
+}
+
+export function abonnerEtatExecution(f: () => void): () => void {
+  ecouteursEtat.add(f);
+  return () => ecouteursEtat.delete(f);
+}
+
+/* input() avec JSPI : saisie dans l'interface qui a lancé l'exécution (ligne de la console), sinon boîte du navigateur. */
+let saisieEnCours: ((v: string | null) => void) | null = null;
+
+function demanderSaisieAsync(invite: string): Promise<string | null> {
+  if (arret) return Promise.resolve(null);
+  const gestionnaire = pileSorties[pileSorties.length - 1]?.saisie;
+  if (!gestionnaire) return Promise.resolve(demanderSaisie());
+  const demande = gestionnaire(invite);
+  recente = "";
+  return new Promise((ok) => {
+    saisieEnCours = (v) => {
+      saisieEnCours = null;
+      ok(v);
+    };
+    demande.then((v) => saisieEnCours?.(v), () => saisieEnCours?.(null));
+  });
 }
 
 /** input() : boîte de saisie du navigateur, avec les dernières lignes affichées par le programme. */
@@ -96,8 +152,14 @@ function preparer(py: Pyodide) {
   });
   py.registerJsModule("atelier_ui", {
     ...moteurFenetres,
-    image: (src: string) => emettre({ image: src }),
+    image: (src: string, figure?: number) => emettre(typeof figure === "number" ? { image: src, figure } : { image: src }),
     saisie: () => demanderSaisie(),
+    saisieAsync: (invite: string) => demanderSaisieAsync(String(invite ?? "")),
+    arretDemande: () => arret,
+    attente: (delta: number) => {
+      attentes = Math.max(0, attentes + delta);
+      signalerEtat();
+    },
   });
   for (const [chemin, source] of Object.entries(MODULES_PYTHON)) {
     const complet = `${DOSSIER_MODULES}/${chemin}`;
@@ -191,14 +253,44 @@ function preparerPip(py: Pyodide): Promise<void> {
 }
 
 export interface ResultatExecution {
+  /** Toute la sortie, dans l'ordre exact où le programme l'a produite (textes, erreurs, images). */
+  morceaux: Morceau[];
+  /** Sortie standard seule (compatibilité). */
   sortie: string;
+  /** Sortie d'erreur et traceback (compatibilité). */
   erreur?: string;
+  /** Images seules (compatibilité). */
   images: string[];
 }
 
 export interface OptionsExecution {
   /** Reçoit ce que le programme affiche APRÈS la fin de l'exécution (clics, minuteries, fenêtres). */
   sortieTardive?: (m: Morceau) => void;
+  /** Reçoit chaque morceau dès qu'il est affiché (programme encore en cours : mainloop, boucle avec sleep…). */
+  enDirect?: (m: Morceau) => void;
+  /** input() (avec JSPI) : demande la saisie à l'interface ; null = annulé. Sinon, boîte du navigateur. */
+  saisie?: (invite: string) => Promise<string | null>;
+  /**
+   * Repartir d'un état propre : fenêtres tkinter/turtle et figures des exécutions précédentes fermées.
+   * Pour le bouton « Exécuter » d'un bloc de code ; la console garde volontairement son état.
+   */
+  neuf?: boolean;
+}
+
+function resultat(morceaux: Morceau[]): ResultatExecution {
+  return { morceaux, sortie: texteDuFlux(morceaux), erreur: texteDuFlux(morceaux, true) || undefined, images: imagesDe(morceaux) };
+}
+
+/** Module `atelier_run` (PyProxy gardé pour toute la page, comme Pyodide). */
+let atelierRun: ModuleAtelierRun | null = null;
+
+/** Fin d'exécution côté Python : figures matplotlib modifiées affichées, flux vidés. */
+function finirExecution(py: Pyodide): void {
+  try {
+    py.runPython("import atelier_run\natelier_run._fin_execution()");
+  } catch {
+    /* rien */
+  }
 }
 
 /**
@@ -208,17 +300,23 @@ export interface OptionsExecution {
  */
 export async function executerPython(code: string, onProgres?: (etape: string) => void, options: OptionsExecution = {}): Promise<ResultatExecution> {
   const py = await chargerPyodide(onProgres);
-  const res = { sortie: "", erreur: "", images: [] as string[] };
-  sortieCourante = (m) => {
-    if ("image" in m) res.images.push(m.image);
-    else if (m.erreur) res.erreur += m.texte;
-    else res.sortie += m.texte;
+  const morceaux: Morceau[] = [];
+  const active: ExecutionActive = {
+    recevoir: (m) => {
+      ajouterMorceau(morceaux, m);
+      options.enDirect?.(m);
+    },
+    saisie: options.saisie,
   };
+  pileSorties.push(active);
+  arret = false;
+  signalerEtat();
   if (options.sortieTardive) sortieTardive = options.sortieTardive;
   recente = "";
   synchroniserProjet(py);
   const { code: codeExec, pip } = transformerCommandes(code);
   try {
+    if (options.neuf) py.runPython("import atelier_run\natelier_run._repartir_a_neuf()");
     if (pip) {
       onProgres?.("Installation des paquets…");
       await preparerPip(py);
@@ -229,37 +327,42 @@ export async function executerPython(code: string, onProgres?: (etape: string) =
     py.runPython("import atelier_run\natelier_run._debut_execution()");
     await (py.runPythonAsync(`import atelier_run\nawait atelier_run.preparer_imports(${JSON.stringify(code)})`) as Promise<unknown>).catch(() => {});
     onProgres?.("Exécution…");
-    const valeur = await py.runPythonAsync(codeExec);
-    py.runPython("import sys\nsys.stdout.flush()\nsys.stderr.flush()");
+    // Via atelier_run.cellule : sys.exit() / exit() s'affichent proprement au lieu d'un traceback.
+    atelierRun ??= py.pyimport("atelier_run");
+    const valeur = await atelierRun.cellule(codeExec);
+    finirExecution(py);
     const rendu = valeur === undefined || valeur === null ? "" : String(valeur);
-    const sortie = res.sortie;
-    return {
-      sortie: rendu && !sortie.endsWith(`${rendu}\n`) ? `${sortie}${sortie && !sortie.endsWith("\n") ? "\n" : ""}${rendu}` : sortie,
-      erreur: res.erreur || undefined,
-      images: res.images,
-    };
-  } catch (e) {
-    try {
-      py.runPython("import sys\nsys.stdout.flush()\nsys.stderr.flush()");
-    } catch {
-      /* rien */
+    if (rendu && !texteDuFlux(morceaux).endsWith(`${rendu}\n`)) {
+      const precedent = dernierTexte(morceaux);
+      ajouterMorceau(morceaux, { texte: `${precedent && !precedent.endsWith("\n") ? "\n" : ""}${rendu}` });
     }
+    return resultat(morceaux);
+  } catch (e) {
+    finirExecution(py);
     const message = e instanceof Error ? e.message : String(e);
     // Commande shell / outil de build tapé par réflexe : on montre l'aide seule, sans le traceback.
     const indice = indiceShell(code, message);
-    return { sortie: res.sortie, erreur: indice ?? (res.erreur + nettoyerTraceback(message)), images: res.images };
+    const texte = indice ?? nettoyerTraceback(message);
+    const precedent = dernierTexte(morceaux);
+    ajouterMorceau(morceaux, { texte: `${precedent && !precedent.endsWith("\n") ? "\n" : ""}${texte}`, erreur: true });
+    return resultat(morceaux);
   } finally {
-    sortieCourante = null;
+    const i = pileSorties.lastIndexOf(active);
+    if (i >= 0) pileSorties.splice(i, 1);
+    signalerEtat();
   }
 }
 
-/** Retire du traceback les cadres internes de Pyodide (« File "/lib/python312.zip/_pyodide/… »). */
+/**
+ * Retire du traceback les cadres internes : Pyodide (« File "/lib/python312.zip/_pyodide/… ») et
+ * l'exécuteur de cellules de la console (atelier_run.cellule).
+ */
 export function nettoyerTraceback(message: string): string {
   const lignes = message.split("\n");
   const sortie: string[] = [];
   for (let i = 0; i < lignes.length; i++) {
     const l = lignes[i];
-    if (/^\s+File "\/lib\/python3\d+\.zip\/(_pyodide|pyodide)\//.test(l)) {
+    if (/^\s+File "\/lib\/python3\d+\.zip\/(_pyodide|pyodide)\//.test(l) || /^\s+File "[^"]*\/atelier_run\.py", line \d+, in cellule$/.test(l)) {
       if (lignes[i + 1] && /^\s{4,}\S/.test(lignes[i + 1]) && !/^\s+File /.test(lignes[i + 1])) i++;
       while (lignes[i + 1] && /^\s+[\^~]+\s*$/.test(lignes[i + 1])) i++;
       continue;

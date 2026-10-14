@@ -156,7 +156,7 @@ def names(root=None):
 export const TK_TTK = String.raw`
 """tkinter.ttk : widgets « thémés », dessinés par le même moteur que tkinter."""
 import tkinter
-from tkinter import TclError, _appeler, _choisir, _js, _pixels, _tout, _ui
+from tkinter import TclError, _appeler, _choisir, _js, _pixels, _py, _tout, _ui, _virtuel
 
 __all__ = ["Button", "Checkbutton", "Combobox", "Entry", "Frame", "Label", "Labelframe", "LabelFrame", "Menubutton", "Notebook", "Panedwindow", "PanedWindow", "Progressbar", "Radiobutton", "Scale", "Scrollbar", "Separator", "Sizegrip", "Spinbox", "Style", "Treeview", "LabeledScale", "OptionMenu", "tclobjs_to_py", "setup_master"]
 
@@ -173,14 +173,30 @@ def setup_master(master=None):
     return master or tkinter._racine_defaut()
 
 
-def _virtuel(w, nom):
-    e = tkinter.Event(type=tkinter.EventType.VirtualEvent, widget=w)
-    niveaux = [w._liaisons, w.winfo_toplevel()._liaisons if w.winfo_toplevel() is not w else None, _tout]
-    for liaisons in niveaux:
-        if liaisons:
-            for fn in list(_choisir(liaisons, {"type": "Virtual", "detail": nom, "mods": set()})):
-                if _appeler(fn, e) == "break":
-                    return
+def _vrai(v):
+    try:
+        return tkinter.getboolean(v)
+    except TclError:
+        return bool(v)
+
+
+def _liste_tcl(v):
+    """Valeurs d'un élément : un tuple / une liste, ou une chaîne lue comme une liste Tcl (« a {b c} d »)."""
+    if isinstance(v, (list, tuple)):
+        return [tkinter._chaine_tcl(x) for x in v]
+    if v in (None, ""):
+        return []
+    import re
+
+    return [g[0] if g[0] else g[1] for g in re.findall(r"\{([^}]*)\}|(\S+)", str(v))]
+
+
+def _convertir(v):
+    """Comme ttk : une valeur lue en dictionnaire devient un entier si elle en a l'air (« 007 » → 7)."""
+    try:
+        return int(str(v))
+    except (TypeError, ValueError):
+        return v
 
 
 class Style:
@@ -289,25 +305,38 @@ class _Theme:
 
     config = configure
 
+    def _etats_effectifs(self):
+        """États ttk ; « selected » d'une case / d'un bouton radio suit sa variable."""
+        e = set(self._etats)
+        if hasattr(self, "_coche") and hasattr(self, "_var"):
+            e.discard("selected")
+            if self._coche():
+                e.add("selected")
+        return e
+
     def state(self, statespec=None):
         if statespec is None:
-            return tuple(self._etats)
-        avant = tuple(self._etats)
+            return tuple(self._etats_effectifs())
+        avant = tuple(self._etats_effectifs())
         for s in ([statespec] if isinstance(statespec, str) else statespec):
             for x in str(s).split():
-                if x.startswith("!"):
-                    self._etats.discard(x[1:])
+                nom = x.lstrip("!")
+                if nom == "selected" and hasattr(self, "_coche") and hasattr(self, "_var"):
+                    (self.deselect if x.startswith("!") else self.select)()
+                elif x.startswith("!"):
+                    self._etats.discard(nom)
                 else:
-                    self._etats.add(x)
+                    self._etats.add(nom)
         etat = "disabled" if "disabled" in self._etats else "readonly" if "readonly" in self._etats else "normal"
         tkinter._Base._appliquer(self, {"state": etat})
         return avant
 
     def instate(self, statespec, callback=None, *args, **kw):
         ok = True
+        etats = self._etats_effectifs()
         for s in ([statespec] if isinstance(statespec, str) else statespec):
             for x in str(s).split():
-                ok = ok and ((x[1:] not in self._etats) if x.startswith("!") else (x in self._etats))
+                ok = ok and ((x[1:] not in etats) if x.startswith("!") else (x in etats))
         if ok and callback:
             return callback(*args, **kw)
         return ok
@@ -539,6 +568,11 @@ class Combobox(_Theme, tkinter.Entry):
             if v in self._liste():
                 _virtuel(self, "<<ComboboxSelected>>")
             return None
+        if type_ == "ouvrir":
+            pc = self._o.get("postcommand")
+            if pc:
+                _appeler(pc)  # peut changer « values » avant l'affichage de la liste
+            return None
         return super()._recevoir(type_, d)
 
 
@@ -568,6 +602,8 @@ class Notebook(_Theme, tkinter.Widget):
     def add(self, child, **kw):
         for t in self._onglets:
             if t["w"] is child:
+                if t.get("state") == "hidden" and "state" not in kw:
+                    t["state"] = "normal"  # comme Tk : add() réaffiche un onglet masqué
                 t.update(kw)
                 self._envoyer()
                 return
@@ -588,6 +624,9 @@ class Notebook(_Theme, tkinter.Widget):
         if tab_id is None:
             return str(self._actif) if self._actif is not None else ""
         w = self._w(tab_id)
+        for t in self._onglets:
+            if t["w"] is w and t.get("state") == "hidden":
+                t["state"] = "normal"
         if w is not self._actif:
             self._actif = w
             self._envoyer()
@@ -622,7 +661,14 @@ class Notebook(_Theme, tkinter.Widget):
         self._envoyer()
 
     def hide(self, tab_id):
+        w = self._w(tab_id)
         self.tab(tab_id, state="hidden")
+        if self._actif is w:
+            visibles = [t["w"] for t in self._onglets if t.get("state") != "hidden"]
+            self._actif = visibles[0] if visibles else None
+            self._envoyer()
+            if self._actif is not None:
+                _virtuel(self, "<<NotebookTabChanged>>")
 
     def enable_traversal(self):
         pass
@@ -656,10 +702,13 @@ class Treeview(_Theme, tkinter.Widget):
         self._cols = {}
         self._sel = []
         self._focus = ""
+        self._ancre = ""
         self._styles_tags = {}
+        self._opts_tags = {}
+        self._liaisons_items = {}
         self._planifie = False
         self._affiche = []
-        self._dernier_clic = (None, None)
+        self._a_voir = None
 
     def _traduire(self, o):
         j = super()._traduire(o)
@@ -669,6 +718,12 @@ class Treeview(_Theme, tkinter.Widget):
         if "columns" in o or "show" in o or "displaycolumns" in o:
             self._planifier()
         return j
+
+    def _it(self, item):
+        iid = str(item)
+        if iid not in self._items:
+            raise TclError(f"Item {item} not found")
+        return self._items[iid]
 
     def _colonnes(self):
         c = self._o.get("columns") or ()
@@ -688,22 +743,54 @@ class Treeview(_Theme, tkinter.Widget):
         s = self._o.get("show", "tree headings")
         return s if isinstance(s, str) else " ".join(s)
 
+    def _nom_colonne(self, column):
+        """« #0 », « #n » (n-ième colonne affichée), indice ou identifiant → identifiant de colonne."""
+        c = str(column)
+        if c == "#0":
+            return "#0"
+        if c.startswith("#") and c[1:].isdigit():
+            aff = self._affichees()
+            n = int(c[1:])
+            if 1 <= n <= len(aff):
+                return aff[n - 1]
+        elif isinstance(column, int) and 0 <= column < len(self._colonnes()):
+            return self._colonnes()[column]
+        if c in self._colonnes():
+            return c
+        raise TclError(f"Invalid column index {column}")
+
     def _planifier(self):
         if self._planifie:
             return
         self._planifie = True
         js.queueMicrotask(create_once_callable(self._envoyer))
 
+    def _vider(self):
+        """Dessine tout de suite ce qui attend (avant une mesure dans la page)."""
+        if self._planifie:
+            self._envoyer()
+
+    def _hauteur_ligne(self):
+        h = None
+        for st in self._chaine_style():
+            if "rowheight" in _styles.get(st, {}):
+                h = _styles[st]["rowheight"]
+        return int(_pixels(h)) if h else 22
+
     def _envoyer(self):
+        if not self._planifie:
+            return
         self._planifie = False
         if self._detruit:
             return
         arbre = "tree" in self._show()
-        cols = []
-        if arbre:
-            cols.append({"id": "#0", "titre": str(self._entetes.get("#0", {}).get("text", "")), "largeur": self._cols.get("#0", {}).get("width", 200), "ancre": self._cols.get("#0", {}).get("anchor", "w")})
-        for c in self._affichees():
-            cols.append({"id": c, "titre": str(self._entetes.get(c, {}).get("text", "")), "largeur": self._cols.get(c, {}).get("width"), "ancre": str(self._cols.get(c, {}).get("anchor", "w"))})
+
+        def desc(c):
+            co, en = self._cols.get(c, {}), self._entetes.get(c, {})
+            return {"id": c, "titre": str(en.get("text", "")), "largeur": int(_pixels(co.get("width", 200))), "ancre": str(co.get("anchor", "w")),
+                    "ancreTitre": str(en.get("anchor", "center")), "etire": _vrai(co.get("stretch", True))}
+
+        cols = ([desc("#0")] if arbre else []) + [desc(c) for c in self._affichees()]
         tous = self._colonnes()
         affichees = self._affichees()
         lignes = []
@@ -719,18 +806,18 @@ class Treeview(_Theme, tkinter.Widget):
                 for t in it["tags"]:
                     ligne.update(self._styles_tags.get(t, {}))
                 lignes.append(ligne)
-                if it["open"] or not arbre:
-                    if it["open"]:
-                        parcourir(enfant, niveau + 1)
+                if it["open"] and arbre:
+                    parcourir(enfant, niveau + 1)
 
         parcourir("", 0)
         self._affiche = [l["iid"] for l in lignes]
-        _ui.configurer(self._id, _js({"arbre": {"colonnes": cols, "lignes": lignes, "selection": list(self._sel), "arbre": arbre, "entetes": "headings" in self._show()}}))
+        _ui.configurer(self._id, _js({"arbre": {"colonnes": cols, "lignes": lignes, "selection": list(self._sel), "focus": self._focus, "arbre": arbre,
+                                                "entetes": "headings" in self._show(), "hauteurLigne": self._hauteur_ligne(), "voir": self._a_voir}}))
+        self._a_voir = None
 
     def insert(self, parent, index, iid=None, **kw):
         parent = str(parent)
-        if parent not in self._items:
-            raise TclError(f"Item {parent} not found")
+        self._it(parent)
         if iid is None or iid == "":
             self._n += 1
             iid = f"I{self._n:03X}"
@@ -740,43 +827,52 @@ class Treeview(_Theme, tkinter.Widget):
         iid = str(iid)
         if iid in self._items:
             raise TclError(f"Item {iid} already exists")
-        v = kw.get("values", ())
-        valeurs = list(v) if isinstance(v, (list, tuple)) else ([] if v in ("", None) else [v])
-        self._items[iid] = {"text": str(kw.get("text", "")), "values": valeurs, "open": bool(kw.get("open", False)), "tags": _tags(kw.get("tags")), "children": [], "parent": parent, "image": kw.get("image", "")}
+        self._items[iid] = {"text": str(kw.get("text", "")), "values": _liste_tcl(kw.get("values", ())), "open": _vrai(kw.get("open", False)),
+                            "tags": _tags(kw.get("tags")), "children": [], "parent": parent, "image": kw.get("image", "")}
         enfants = self._items[parent]["children"]
-        pos = len(enfants) if index in ("end",) else max(0, min(len(enfants), int(index)))
+        pos = len(enfants) if str(index) == "end" else max(0, min(len(enfants), int(index)))
         enfants.insert(pos, iid)
         self._planifier()
         return iid
 
     def item(self, item, option=None, **kw):
-        it = self._items[str(item)]
-        if option is None and not kw:
-            return {"text": it["text"], "image": it["image"], "values": list(it["values"]) if it["values"] else "", "open": int(it["open"]), "tags": list(it["tags"]) if it["tags"] else ""}
-        if option is not None:
-            v = it.get({"values": "values"}.get(option, option), "")
-            return (list(v) if v else "") if option in ("values", "tags") else v
+        it = self._it(item)
+        if option is not None and not kw:
+            option = str(option).lstrip("-")
+            if option in ("values", "tags"):
+                return tuple(it[option]) if it[option] else ""
+            if option == "open":
+                return int(it["open"])
+            if option in ("text", "image"):
+                return it[option] or ""
+            raise TclError(f'unknown option "-{option}"')
+        if not kw:
+            return {"text": it["text"], "image": it["image"] or "", "values": [_convertir(x) for x in it["values"]] if it["values"] else "",
+                    "open": int(it["open"]), "tags": [_convertir(x) for x in it["tags"]] if it["tags"] else ""}
         for k, v in kw.items():
             if k == "values":
-                it["values"] = list(v) if isinstance(v, (list, tuple)) else ([] if v in ("", None) else [v])
+                it["values"] = _liste_tcl(v)
             elif k == "tags":
                 it["tags"] = _tags(v)
             elif k == "open":
-                it["open"] = bool(v)
+                it["open"] = _vrai(v)
             elif k in ("text", "image"):
                 it[k] = str(v) if k == "text" else v
         self._planifier()
 
     def get_children(self, item=None):
-        return tuple(self._items[str(item or "")]["children"])
+        return tuple(self._it(item or "")["children"])
 
     def set_children(self, item, *newchildren):
-        it = self._items[str(item or "")]
+        it = self._it(item or "")
+        nouveaux = [str(c) for c in newchildren]
         for c in it["children"]:
             self._items[c]["parent"] = None
-        it["children"] = [str(c) for c in newchildren]
-        for c in it["children"]:
+        for c in nouveaux:
+            self._it(c)
+            self._retirer(c)
             self._items[c]["parent"] = str(item or "")
+        it["children"] = nouveaux
         self._planifier()
 
     def _retirer(self, iid):
@@ -785,11 +881,13 @@ class Treeview(_Theme, tkinter.Widget):
             self._items[p]["children"].remove(iid)
 
     def delete(self, *items):
+        avant = list(self._sel)
         for item in items:
             for iid in (item if isinstance(item, (list, tuple)) else [item]):
                 iid = str(iid)
-                if iid not in self._items or iid == "":
+                if iid == "":
                     continue
+                self._it(iid)
                 self._retirer(iid)
                 pile = [iid]
                 while pile:
@@ -798,19 +896,25 @@ class Treeview(_Theme, tkinter.Widget):
                     self._items.pop(x, None)
                     if x in self._sel:
                         self._sel.remove(x)
+        if self._focus not in self._items:
+            self._focus = ""
         self._planifier()
+        if self._sel != avant:
+            _virtuel(self, "<<TreeviewSelect>>")
 
     def detach(self, *items):
-        for iid in items:
-            self._retirer(str(iid))
-            self._items[str(iid)]["parent"] = None
+        for iid in self._aplatir(items):
+            self._retirer(iid)
+            self._items[iid]["parent"] = None
         self._planifier()
 
     def move(self, item, parent, index):
         item, parent = str(item), str(parent)
+        self._it(item)
+        self._it(parent)
         self._retirer(item)
         enfants = self._items[parent]["children"]
-        pos = len(enfants) if index in ("end",) else max(0, min(len(enfants), int(index)))
+        pos = len(enfants) if str(index) == "end" else max(0, min(len(enfants), int(index)))
         enfants.insert(pos, item)
         self._items[item]["parent"] = parent
         self._planifier()
@@ -818,7 +922,7 @@ class Treeview(_Theme, tkinter.Widget):
     reattach = move
 
     def parent(self, item):
-        return self._items[str(item)]["parent"] or ""
+        return self._it(item)["parent"] or ""
 
     def index(self, item):
         p = self.parent(item)
@@ -840,144 +944,205 @@ class Treeview(_Theme, tkinter.Widget):
     def focus(self, item=None):
         if item is None:
             return self._focus
+        self._it(item)
         self._focus = str(item)
+        self._planifier()
 
     def selection(self, selop=None, items=None):
-        if selop is not None and items is not None:
+        if selop is not None:
             getattr(self, f"selection_{selop}")(items)
+            return None
         return tuple(self._sel)
 
     def _aplatir(self, items):
         out = []
         for x in items:
-            out.extend(self._aplatir(x) if isinstance(x, (list, tuple)) else [str(x)])
-        return [x for x in out if x in self._items]
+            if isinstance(x, (list, tuple)):
+                out.extend(self._aplatir(x))
+            elif str(x) in self._items or " " not in str(x):
+                out.append(str(x))
+            else:
+                out.extend(str(x).split())
+        for x in out:
+            self._it(x)
+        return out
+
+    def _changer_selection(self, sel):
+        if sel != self._sel:
+            self._sel = sel
+            self._planifier()
+            _virtuel(self, "<<TreeviewSelect>>")
 
     def selection_set(self, *items):
-        self._sel = self._aplatir(items)
-        if self._sel:
-            self._focus = self._sel[-1]
-        self._planifier()
-        _virtuel(self, "<<TreeviewSelect>>")
+        sel = self._aplatir(items)
+        if sel:
+            self._focus = self._ancre = sel[-1]
+        self._changer_selection(sel)
 
     def selection_add(self, *items):
-        for x in self._aplatir(items):
-            if x not in self._sel:
-                self._sel.append(x)
-        self._planifier()
-        _virtuel(self, "<<TreeviewSelect>>")
+        self._changer_selection(self._sel + [x for x in self._aplatir(items) if x not in self._sel])
 
     def selection_remove(self, *items):
-        for x in self._aplatir(items):
-            if x in self._sel:
-                self._sel.remove(x)
-        self._planifier()
-        _virtuel(self, "<<TreeviewSelect>>")
+        retires = set(self._aplatir(items))
+        self._changer_selection([x for x in self._sel if x not in retires])
 
     def selection_toggle(self, *items):
+        sel = list(self._sel)
         for x in self._aplatir(items):
-            if x in self._sel:
-                self._sel.remove(x)
-            else:
-                self._sel.append(x)
-        self._planifier()
-        _virtuel(self, "<<TreeviewSelect>>")
+            sel.remove(x) if x in sel else sel.append(x)
+        self._changer_selection(sel)
 
     def see(self, item):
         p = self.parent(item)
         while p:
             self._items[p]["open"] = True
             p = self.parent(p)
+        self._a_voir = str(item)
         self._planifier()
 
     def set(self, item, column=None, value=None):
-        it = self._items[str(item)]
-        cols = self._colonnes()
+        it = self._it(item)
         if column is None:
-            return {c: (it["values"][k] if k < len(it["values"]) else "") for k, c in enumerate(cols)}
-        k = cols.index(str(column)) if str(column) in cols else int(str(column).lstrip("#")) - 1
+            return {c: (_convertir(it["values"][k]) if k < len(it["values"]) else "") for k, c in enumerate(self._colonnes())}
+        nom = self._nom_colonne(column)
+        if nom == "#0":
+            raise TclError("Display column #0 cannot be set")
+        k = self._colonnes().index(nom)
         if value is None:
             return it["values"][k] if k < len(it["values"]) else ""
         while len(it["values"]) <= k:
             it["values"].append("")
-        it["values"][k] = value
+        it["values"][k] = tkinter._chaine_tcl(value)
         self._planifier()
 
     def heading(self, column, option=None, **kw):
-        h = self._entetes.setdefault(str(column), {})
-        if option is not None:
-            return h.get(option, "")
+        h = self._entetes.setdefault(self._nom_colonne(column), {})
+        defauts = {"text": "", "image": "", "anchor": "center", "command": "", "state": ""}
+        if option is not None and not kw:
+            return h.get(str(option).lstrip("-"), defauts.get(str(option).lstrip("-"), ""))
         if not kw:
-            return {"text": h.get("text", ""), "image": "", "anchor": h.get("anchor", "w"), "command": h.get("command", "")}
+            return {**defauts, **h}
         h.update(kw)
-        if "anchor" in kw:
-            self._cols.setdefault(str(column), {}).setdefault("anchor", kw["anchor"])
         self._planifier()
 
     def column(self, column, option=None, **kw):
-        c = self._cols.setdefault(str(column), {})
-        if option is not None:
-            return c.get(option, {"width": 200, "minwidth": 20, "anchor": "w", "stretch": 1, "id": column}.get(option, ""))
+        nom = self._nom_colonne(column)
+        c = self._cols.setdefault(nom, {})
+        defauts = {"width": 200, "minwidth": 20, "anchor": "w", "stretch": 1, "id": nom}
+        if option is not None and not kw:
+            return c.get(str(option).lstrip("-"), defauts.get(str(option).lstrip("-"), ""))
         if not kw:
-            return {"width": c.get("width", 200), "minwidth": c.get("minwidth", 20), "anchor": c.get("anchor", "w"), "stretch": c.get("stretch", 1), "id": column}
+            return {**defauts, **c}
         c.update(kw)
         self._planifier()
 
     def tag_configure(self, tagname, option=None, **kw):
-        st = self._styles_tags.setdefault(str(tagname), {})
+        tag = str(tagname)
+        brut = self._opts_tags.setdefault(tag, {})
+        if option is not None and not kw:
+            return brut.get(str(option).lstrip("-"), "")
+        if not kw:
+            return dict(brut)
+        st = self._styles_tags.setdefault(tag, {})
         for k, v in kw.items():
+            brut[k] = v
             if k == "background":
                 st["fond"] = tkinter._couleur(v)
             elif k == "foreground":
                 st["couleur"] = tkinter._couleur(v)
+            elif k == "font":
+                st["police"] = tkinter._police(v)
         self._planifier()
-        return None
+
+    tag_config = tag_configure
 
     def tag_bind(self, tagname, sequence=None, callback=None):
-        return ""
+        liaisons = self._liaisons_items.setdefault(str(tagname), {})
+        if sequence is None:
+            return tuple(liaisons)
+        lst = liaisons.setdefault(tkinter._analyser(sequence), [])
+        lst.clear()
+        if callback is not None:
+            lst.append(callback)
+        tkinter._maj_ecoute(self)
+        return f"{id(callback)}"
 
     def tag_unbind(self, tagname, sequence, funcid=None):
-        pass
+        self._liaisons_items.get(str(tagname), {}).pop(tkinter._analyser(sequence), None)
 
     def tag_has(self, tagname, item=None):
         if item is not None:
-            return str(tagname) in self._items[str(item)]["tags"]
+            return str(tagname) in self._it(item)["tags"]
         return tuple(i for i, it in self._items.items() if i and str(tagname) in it["tags"])
 
+    def _evenement_item(self, d, ev, e):
+        """Liaisons de tags (tag_bind) : déclenchées sur la ligne sous la souris."""
+        iid = d.get("ligne")
+        if iid is None or str(iid) not in self._items:
+            return
+        for t in self._items[str(iid)]["tags"]:
+            liaisons = self._liaisons_items.get(t)
+            if liaisons:
+                for fn in list(_choisir(liaisons, ev)):
+                    e.widget = self
+                    _appeler(fn, e)
+
     def identify_row(self, y):
-        if self._dernier_clic[0] == int(y) and self._dernier_clic[1] is not None:
-            return self._dernier_clic[1]
-        haut = 28 if "headings" in self._show() else 2
-        i = (int(y) - haut) // 22
-        return self._affiche[i] if 0 <= i < len(self._affiche) else ""
+        self._vider()
+        return str(_ui.lire(self._id, "ligneA", int(y)) or "")
 
     def identify_column(self, x):
-        cols = (["#0"] if "tree" in self._show() else []) + self._affichees()
-        pos = 0
-        for k, c in enumerate(cols):
-            pos += int(self._cols.get(c, {}).get("width", 200) or 200)
-            if int(x) < pos:
-                return f"#{k if 'tree' in self._show() else k + 1}"
-        return ""
+        self._vider()
+        i = _ui.lire(self._id, "colonneA", int(x))
+        i = -1 if i is None else int(i)
+        if i < 0:
+            return ""
+        return f"#{i}" if "tree" in self._show() else f"#{i + 1}"
 
     def identify_region(self, x, y):
-        if "headings" in self._show() and int(y) < 28:
-            return "heading"
-        return "cell" if self.identify_row(y) else "nothing"
+        self._vider()
+        return str(_ui.lire(self._id, "regionA", _js([int(x), int(y)])) or "nothing")
 
     def identify(self, component, x, y):
-        return {"row": self.identify_row, "item": self.identify_row}.get(component, lambda *a: "")(y) if component in ("row", "item") else self.identify_column(x) if component == "column" else self.identify_region(x, y)
+        if component in ("row", "item"):
+            return self.identify_row(y)
+        if component == "column":
+            return self.identify_column(x)
+        return self.identify_region(x, y)
 
     def identify_element(self, x, y):
         return ""
 
     def bbox(self, item, column=None):
-        return ""
+        self._vider()
+        col = None
+        if column is not None:
+            nom = self._nom_colonne(column)
+            col = 0 if nom == "#0" else self._affichees().index(nom) + (1 if "tree" in self._show() else 0)
+        b = _py(_ui.lire(self._id, "boiteLigne", _js([str(item), col])))
+        return tuple(int(x) for x in b) if b else ""
 
     def xview(self, *args):
-        pass
+        return (0.0, 1.0)
 
-    yview = xview
+    def yview(self, *args):
+        self._vider()
+        if not args:
+            return tuple(float(x) for x in (_py(_ui.lire(self._id, "vue")) or [0.0, 1.0]))
+        if args[0] == "moveto":
+            _ui.ecrire(self._id, "defiler", float(args[1]))
+
+    def yview_moveto(self, fraction):
+        self._vider()
+        _ui.ecrire(self._id, "defiler", float(fraction))
+
+    def yview_scroll(self, number, what):
+        debut, fin = self.yview()
+        n = max(1, len(self._affiche))
+        pas = (fin - debut) if str(what).startswith("p") else 1 / n
+        _ui.ecrire(self._id, "defiler", max(0.0, debut + int(number) * pas))
+
+    xview_moveto = xview_scroll = xview
 
     def configure(self, cnf=None, **kw):
         r = super().configure(cnf, **kw)
@@ -990,18 +1155,22 @@ class Treeview(_Theme, tkinter.Widget):
         if type_ == "selection":
             iid = str(d.get("iid", ""))
             mode = str(self._o.get("selectmode", "extended"))
-            if mode == "none" or iid not in self._items:
+            if iid not in self._items:
                 return None
-            if d.get("ajouter") and mode == "extended":
-                if iid in self._sel:
-                    self._sel.remove(iid)
-                else:
-                    self._sel.append(iid)
-            else:
-                self._sel = [iid]
             self._focus = iid
+            if mode == "none":
+                sel = list(self._sel)
+            elif mode == "browse" or not (d.get("etendre") or d.get("ajouter")):
+                sel = [iid]
+                self._ancre = iid
+            elif d.get("etendre") and self._ancre in self._affiche and iid in self._affiche:
+                a, b = sorted((self._affiche.index(self._ancre), self._affiche.index(iid)))
+                sel = self._affiche[a:b + 1]
+            else:
+                sel = [x for x in self._sel if x != iid] if iid in self._sel else self._sel + [iid]
+                self._ancre = iid
             self._planifier()
-            _virtuel(self, "<<TreeviewSelect>>")
+            self._changer_selection(sel)
             return None
         if type_ == "entete":
             cmd = self._entetes.get(str(d.get("colonne", "")), {}).get("command")
@@ -1011,13 +1180,14 @@ class Treeview(_Theme, tkinter.Widget):
         if type_ == "ouvrir":
             iid = str(d.get("iid", ""))
             if iid in self._items:
-                self._items[iid]["open"] = not self._items[iid]["open"]
                 self._focus = iid
+                ouvrir = not self._items[iid]["open"]
+                # Comme ttk : l'événement part AVANT l'ouverture (chargement des enfants à la demande).
+                _virtuel(self, "<<TreeviewOpen>>" if ouvrir else "<<TreeviewClose>>", differe=False)
+                if iid in self._items:
+                    self._items[iid]["open"] = ouvrir
                 self._planifier()
-                _virtuel(self, "<<TreeviewOpen>>" if self._items[iid]["open"] else "<<TreeviewClose>>")
             return None
-        if type_ in ("mousedown", "mouseup", "dblclick"):
-            self._dernier_clic = (int(d.get("y", -1)), d.get("ligne"))
         return super()._recevoir(type_, d)
 
 
@@ -1107,6 +1277,9 @@ def showerror(title=None, message=None, **options):
 
 
 def askquestion(title=None, message=None, **options):
+    if options.get("type") == YESNOCANCEL:
+        r = askyesnocancel(title, message, **options)
+        return YES if r else CANCEL if r is None else NO
     return YES if _ui.confirmer(*_texte(title, message, options.get("detail"))) else NO
 
 
@@ -1119,7 +1292,13 @@ def askyesno(title=None, message=None, **options):
 
 
 def askyesnocancel(title=None, message=None, **options):
-    return bool(_ui.confirmer(*_texte(title, message, options.get("detail"))))
+    """Oui → True, Non → False, Annuler → None (le navigateur n'a que OK / Annuler : deux questions)."""
+    t, m = _texte(title, message, options.get("detail"))
+    if _ui.confirmer(t, m + "\n\n[OK = Oui · Annuler = autres choix]"):
+        return True
+    if _ui.confirmer(t, "Répondre « Non » ?\n\n[OK = Non · Annuler = Annuler]"):
+        return False
+    return None
 
 
 def askretrycancel(title=None, message=None, **options):
@@ -1135,6 +1314,12 @@ class Message:
         t = o.get("type", OK)
         if t in (OK,):
             return showinfo(o.get("title"), o.get("message"))
+        if t == YESNOCANCEL:
+            r = askyesnocancel(o.get("title"), o.get("message"))
+            return YES if r else CANCEL if r is None else NO
+        if t in (OKCANCEL, RETRYCANCEL):
+            ok = askokcancel(o.get("title"), o.get("message"))
+            return (OK if t == OKCANCEL else RETRY) if ok else CANCEL
         return YES if askyesno(o.get("title"), o.get("message")) else NO
 `;
 
@@ -1183,7 +1368,7 @@ def askfloat(title, prompt, initialvalue=None, minvalue=None, maxvalue=None, par
 
 
 class Dialog(tkinter.Toplevel):
-    """Boîte personnalisée : affichée comme une fenêtre (non bloquante dans le navigateur)."""
+    """Boîte personnalisée : comme Tk, le constructeur attend sa fermeture (avec JSPI ; sinon il rend la main)."""
 
     def __init__(self, parent=None, title=None):
         super().__init__(parent)
@@ -1195,6 +1380,11 @@ class Dialog(tkinter.Toplevel):
         self.initial_focus = self.body(corps)
         corps.pack(padx=5, pady=5)
         self.buttonbox()
+        self.bind("<Return>", self.ok)
+        self.bind("<Escape>", self.cancel)
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        (self.initial_focus or self).focus_set()
+        self.wait_window(self)
 
     def body(self, master):
         return None
@@ -1207,7 +1397,9 @@ class Dialog(tkinter.Toplevel):
 
     def ok(self, event=None):
         if not self.validate():
+            (self.initial_focus or self).focus_set()
             return
+        self.withdraw()
         self.apply()
         self.cancel()
 

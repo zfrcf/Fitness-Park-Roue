@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modererTexte, texteDernierUtilisateur } from "./appliquer";
+import { modererTexte, texteDernierUtilisateur, textesUtilisateurs } from "./appliquer";
 import { estIpBannie, bannirIp, debannirIpDe } from "./banip";
 import { ADMIN, type UtilisateurCourant } from "@/lib/auth/utilisateur";
 import { creerUtilisateur, lireUtilisateur } from "@/lib/db/utilisateurs";
@@ -92,5 +92,18 @@ describe("banlist IP", () => {
   it("une IP inconnue n'est jamais bannie", async () => {
     expect(await estIpBannie("inconnue")).toBe(false);
     expect(await estIpBannie("")).toBe(false);
+  });
+});
+
+describe("textesUtilisateurs", () => {
+  it("renvoie le texte de chaque message user (pas seulement le dernier)", () => {
+    const msgs = [
+      { role: "user", parts: [{ type: "text", text: "premier" }] },
+      { role: "assistant", parts: [{ type: "text", text: "réponse" }] },
+      { role: "user", parts: [{ type: "text", text: "second" }] },
+      { role: "user", parts: [] },
+    ];
+    expect(textesUtilisateurs(msgs)).toEqual(["premier", "second"]);
+    expect(textesUtilisateurs(null)).toEqual([]);
   });
 });

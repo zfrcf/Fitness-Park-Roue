@@ -41,5 +41,8 @@ export const DELETE = avecAcces(async (req: Request) => {
   await supprimerConversationsDe(id);
   const ok = await supprimerUtilisateur(id);
   await oublierCompte(id);
+  // Sinon le bannissement IP lié au compte resterait orphelin, sans plus aucun moyen de le lever.
+  const { debannirIpDe } = await import("@/lib/moderation/banip");
+  await debannirIpDe(id).catch(() => 0);
   return ok ? NextResponse.json({ ok: true }) : NextResponse.json({ erreur: "Compte introuvable." }, { status: 404 });
 });

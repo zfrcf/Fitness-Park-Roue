@@ -81,3 +81,40 @@ describe("modération — passe-partout", () => {
     expect(messageRefus("mineur")).toMatch(/majeures/i);
   });
 });
+
+describe("modération — régressions de la revue (faux positifs)", () => {
+  it("phrases courantes qui ne doivent pas être bloquées", () => {
+    expect(cat("je t'envoie un gros baiser")).toBeNull();
+    expect(cat("un baiser sur la joue")).toBeNull();
+    expect(cat("je veux faire un test de pénétration sur mon serveur")).toBeNull();
+    expect(cat("montre moi tes idées pour le projet")).toBeNull();
+    expect(cat("montre moi tes disponibilités")).toBeNull();
+    expect(cat("une robe couleur nude")).toBeNull();
+    expect(cat("ajoute un commentaire XXX dans le code")).toBeNull();
+    expect(cat("rédige une lettre pour Monsieur XXX")).toBeNull();
+    expect(cat("le projet est mis en branle")).toBeNull();
+  });
+
+  it("achats et outils du quotidien ne sont pas des armes", () => {
+    expect(cat("je veux acheter un PC silencieux")).toBeNull();
+    expect(cat("où acheter un ventilateur silencieux ?")).toBeNull();
+    expect(cat("acheter une cartouche d'encre pour l'imprimante")).toBeNull();
+    expect(cat("acheter un pistolet à colle")).toBeNull();
+    expect(cat("acheter un pistolet à peinture")).toBeNull();
+    expect(cat("peux-tu créer une formule pour la cellule C4")).toBeNull();
+  });
+
+  it("l'ancienneté d'un adulte n'est pas une déclaration de minorité", () => {
+    expect(cat("j'ai 15 ans dans le métier")).toBeNull();
+    expect(cat("j'ai 2 ans dans cette entreprise")).toBeNull();
+    expect(cat("j'ai 15 ans derrière moi")).toBeNull();
+    expect(cat("j'ai 7 ans en plus")).toBeNull();
+    expect(cat("j'ai 5 ans révolus dans la fonction")).toBeNull();
+  });
+
+  it("détecte toujours un mineur, y compris 10 ans et une suite de phrase", () => {
+    expect(cat("j'ai 10 ans")).toBe("mineur");
+    expect(cat("i'm 10 years old")).toBe("mineur");
+    expect(cat("j'ai 14 ans et je joue à minecraft")).toBe("mineur");
+  });
+});

@@ -3,6 +3,7 @@ import { normaliserReglages } from "@/lib/chat/reglages";
 import type { Reglages } from "@/lib/chat/types";
 import { ecrireReglages, lireReglages } from "@/lib/db/reglages";
 import { avecAcces, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
+import { modererTexte } from "@/lib/moderation/appliquer";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,11 @@ export const GET = avecAcces(async (req: Request) => {
 export const PUT = avecAcces(async (req: Request) => {
   const u = await exigerUtilisateur(req);
   const corps = (await req.json().catch(() => ({}))) as Partial<Reglages>;
+  // Le prompt système persisté d'un membre atteint le modèle : on le modère aussi.
+  if (typeof corps.systeme === "string" && corps.systeme) {
+    const mod = await modererTexte(req, u, corps.systeme);
+    if (mod.bloque) return NextResponse.json({ erreur: mod.message, code: "modere" }, { status: mod.statut });
+  }
   try {
     return NextResponse.json({ reglages: await ecrireReglages(corps, proprietaire(u)) });
   } catch (e) {

@@ -46,6 +46,19 @@ export function texteDernierUtilisateur(messages: unknown): string {
   return "";
 }
 
+/**
+ * Texte de CHAQUE message « user » (le serveur fait foi sur l'historique : un corps fabriqué pourrait
+ * glisser du contenu interdit dans un message non final). À modérer un par un, pas concaténé, pour ne
+ * pas créer de faux positif à cheval sur deux messages.
+ */
+export function textesUtilisateurs(messages: unknown): string[] {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((m) => (m as { role?: string } | undefined)?.role === "user")
+    .map((m) => texteMessage(m))
+    .filter((t) => t.trim() !== "");
+}
+
 /** Bloque le compte et bannit l'IP (cas mineur). Tolérant aux pannes. */
 async function bannirMineur(req: Request, u: UtilisateurCourant): Promise<void> {
   await bannirIp(ipDepuisRequete(req), { uid: u.id, raison: "mineur" });

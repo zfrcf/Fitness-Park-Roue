@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spidey Bot — Dashboard</title>
+<style>
+  :root {
+    --bg:        #1e1f22;
+    --surface:   #2b2d31;
+    --surface2:  #313338;
+    --border:    #3f4147;
+    --text:      #dbdee1;
+    --muted:     #949ba4;
+    --green:     #23a55a;
+    --red:       #f23f43;
+    --yellow:    #f0b232;
+    --blue:      #5865f2;
+    --mono:      'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .bot-icon {
+    width: 44px; height: 44px;
+    background: var(--blue);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .bot-info { flex: 1; }
+  .bot-name { font-size: 16px; font-weight: 700; }
+  .bot-sub  { font-size: 12px; color: var(--muted); }
+  .status-badge {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background .3s;
+  }
+  .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  /* ── Layout ─────────────────────────────────────────── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ────────────────────────────────────────── */
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .stat-val { font-size: 22px; font-weight: 700; }
+  .stat-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .stat-val.green  { color: var(--green); }
+  .stat-val.yellow { color: var(--yellow); }
+  .stat-val.blue   { color: var(--blue); }
+
+  .pending-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .pending-item .uid   { color: var(--muted); font-size: 11px; }
+  .pending-item .code  {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--yellow);
+    letter-spacing: .1em;
+  }
+  .pending-item .info  { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .empty-msg {
+    color: var(--muted);
+    font-size: 13px;
+    font-style: italic;
+    padding: 8px 0;
+  }
+
+  /* ── Logs panel ─────────────────────────────────────── */
+  .logs-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .logs-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .logs-header h2 { font-size: 14px; font-weight: 700; }
+  .logs-controls { display: flex; gap: 8px; }
+  .btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .btn:hover { background: var(--border); }
+  .btn.active { background: var(--blue); border-color: var(--blue); }
+
+  .logs-filter {
+    display: flex;
+    gap: 4px;
+  }
+  .filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .filter-btn.active { color: var(--text); border-color: var(--blue); background: rgba(88,101,242,.15); }
+
+  .logs-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 20px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    background: var(--bg);
+  }
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-line .ts   { color: var(--muted); margin-right: 8px; }
+  .log-line .lvl  { font-weight: 700; margin-right: 8px; display: inline-block; min-width: 52px; }
+  .log-line .src  { color: var(--muted); margin-right: 8px; }
+  .log-line .msg  { color: var(--text); }
+
+  .lvl-DEBUG    .lvl { color: var(--muted); }
+  .lvl-INFO     .lvl { color: var(--green); }
+  .lvl-WARNING  .lvl { color: var(--yellow); }
+  .lvl-ERROR    .lvl { color: var(--red); }
+  .lvl-CRITICAL .lvl { color: var(--red); }
+
+  .lvl-DEBUG    { opacity: .55; }
+  .lvl-WARNING  { background: rgba(240,178,50,.06); border-radius: 4px; }
+  .lvl-ERROR    { background: rgba(242,63,67,.08);  border-radius: 4px; }
+  .lvl-CRITICAL { background: rgba(242,63,67,.15);  border-radius: 4px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { max-height: 200px; border-right: none; border-bottom: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────── -->
+<header>
+  <div class="bot-icon">🕷️</div>
+  <div class="bot-info">
+    <div class="bot-name">Spidey Bot</div>
+    <div class="bot-sub" id="bot-sub">Connexion…</div>
+  </div>
+  <div class="status-badge">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-text">Hors ligne</span>
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────── -->
+<main>
+
+  <!-- Sidebar -->
+  <aside>
+    <div>
+      <div class="section-title">📊 Statistiques</div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-val blue" id="stat-verified">0</div>
+          <div class="stat-lbl">Vérifiés</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val yellow" id="stat-pending">0</div>
+          <div class="stat-lbl">En attente</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val green" id="stat-logs">0</div>
+          <div class="stat-lbl">Logs</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-uptime">—</div>
+          <div class="stat-lbl">Uptime</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">⏳ Vérifications en attente</div>
+      <div id="pending-list">
+        <div class="empty-msg">Aucune demande en cours.</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Logs -->
+  <div class="logs-panel">
+    <div class="logs-header">
+      <h2>📋 Logs en temps réel</h2>
+      <div class="logs-controls">
+        <div class="logs-filter">
+          <button class="filter-btn active" data-level="ALL">ALL</button>
+          <button class="filter-btn" data-level="DEBUG">DEBUG</button>
+          <button class="filter-btn" data-level="INFO">INFO</button>
+          <button class="filter-btn" data-level="WARNING">WARN</button>
+          <button class="filter-btn" data-level="ERROR">ERROR</button>
+        </div>
+        <button class="btn" id="btn-autoscroll" title="Auto-scroll">⬇ Auto</button>
+        <button class="btn" id="btn-clear">🗑 Clear</button>
+      </div>
+    </div>
+    <div class="logs-body" id="logs-body"></div>
+  </div>
+
+</main>
+
+<script>
+// ── État ────────────────────────────────────────────────
+let autoScroll  = true;
+let currentFilter = "ALL";
+const LEVEL_ORDER = { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4 };
+
+const logsBody   = document.getElementById("logs-body");
+const statusDot  = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+const botSub     = document.getElementById("bot-sub");
+
+// ── SSE : flux de logs ──────────────────────────────────
+const es = new EventSource("/logs");
+
+es.onmessage = (e) => {
+  try {
+    const entry = JSON.parse(e.data);
+    add

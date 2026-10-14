@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BarreLaterale } from "./barre-laterale";
 import { Entete } from "./entete";
-import { ConsolePython } from "@/components/chat/console-python";
+import { ConsolePython, envoyerALaConsole } from "@/components/chat/console-python";
 
 const CLE = "chat:barre-ouverte";
 const ecouteurs = new Set<() => void>();
@@ -69,6 +69,18 @@ export function Coque({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [routeur]);
+
+  // Bouton « Lancer » d'un fichier .py (explorateur) : ouvre la console et y exécute « python fichier ».
+  useEffect(() => {
+    const lancer = (e: Event) => {
+      const chemin = String((e as CustomEvent).detail ?? "");
+      if (!chemin) return;
+      envoyerALaConsole(`python ${/\s/.test(chemin) ? JSON.stringify(chemin) : chemin}`);
+      setConsole(true);
+    };
+    window.addEventListener("atelier:lancer-python", lancer);
+    return () => window.removeEventListener("atelier:lancer-python", lancer);
+  }, []);
 
   const bouton = (
     <Tooltip>

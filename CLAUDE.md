@@ -83,6 +83,16 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   list, freeze, show, check ; échecs isolés et expliqués, dépendances manquantes des paquets Pyodide complétées.
   Testé en CPython avec un faux micropip (`pip-console.test.ts`). Fichiers : `projet-console.ts` — la fenêtre de
   chat publie les fichiers du projet, copiés dans `/home/pyodide` (+ bouton « Importer des fichiers »).
+  **Programmes et interfaces** (`src/lib/execution/ui/`) : `python fichier.py` / `-c` / `-m` / `%run` → `atelier_run.lancer`
+  (`lanceur.ts` : input() par prompt() avec les dernières lignes affichées, modules manquants chargés/installés,
+  time.sleep plafonné à 60 s pour ne pas figer la page, asyncio.run planifié). **tkinter n'existe pas dans Pyodide** :
+  il est réimplémenté en Python (`tk-noyau.ts`, `tk-annexes.ts` : ttk, Treeview, Notebook, messagebox, dialogues…) et
+  dessiné en HTML par `fenetres.ts` (fenêtres flottantes ; pack = cavité de Tk en flex imbriqués, grid = grille CSS,
+  place = absolu ; Canvas en SVG ; événements renvoyés au Python par un rappel unique). `turtle.ts` dessine sur ce
+  Canvas (animation selon speed/tracer). matplotlib : backend `atelier_mpl` (plt.show → image dans la console), cale
+  `backend_tkagg` (FigureCanvasTkAgg) et `PIL.ImageTk`. mainloop() rend la main (fenêtres actives ensuite) ; la sortie
+  tardive (clics, minuteries) s'ajoute sous la commande. Sorties exactes via `setStdout({write})` (pas `batched`).
+  Fichiers .py : bouton « ▶ Lancer » de l'explorateur → événement `atelier:lancer-python` → console.
 - Bons/mauvais points + mémoire de leçons (`src/lib/comptes/lecons.ts` pur/testé, table `lecons`,
   `src/lib/db/lecons.ts`, API `/api/retours`, UI `bouton-retour.tsx` + store `retours.ts`) : 👍/👎 avec note sur
   chaque réponse → leçons « à refaire / à éviter » par compte, réinjectées dans le prompt système (`tour.ts`,

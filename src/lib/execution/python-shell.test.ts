@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indiceShell, transformerPip } from "./python-shell";
+import { indiceShell, transformerCommandes, transformerPip } from "./python-shell";
 
 const APPEL = 'await __import__("atelier_pip").pip(';
 
@@ -50,5 +50,34 @@ describe("console Python : aide terminal", () => {
     expect(indiceShell("ls -la", "SyntaxError")).toMatch(/commande système/);
     expect(indiceShell("print('ok')")).toBeNull();
     expect(indiceShell("x = 1", "NameError")).toBeNull();
+  });
+});
+
+describe("console Python : lancement de programmes", () => {
+  const LANCER = 'await __import__("atelier_run").lancer(';
+  it("python fichier.py, -c, -m, %run et ! deviennent un lancement", () => {
+    for (const [ligne, args] of [
+      ["python main.py", "main.py"],
+      ["python3 jeu.py --niveau 2", "jeu.py --niveau 2"],
+      ["!python outils/script.py", "outils/script.py"],
+      ["%run analyse.py", "analyse.py"],
+      ['python -c "print(1)"', '-c "print(1)"'],
+      ["py -m calendar", "-m calendar"],
+      ["python3.12 app.pyw", "app.pyw"],
+      ["python", ""],
+    ]) {
+      const r = transformerCommandes(ligne);
+      expect(r.python, ligne).toBe(true);
+      expect(r.code, ligne).toBe(`${LANCER}${JSON.stringify(args)})`);
+    }
+  });
+  it("ne touche pas au Python qui ressemble à une commande", () => {
+    for (const py of ["python = 3", "py = 2", "run = True", "python.version", "print('python main.py')", "pythonista = 1", "run(x)"]) {
+      expect(transformerCommandes(py), py).toEqual({ code: py, pip: false, python: false });
+    }
+  });
+  it("mélange pip et lancement dans la même cellule, avec l'indentation", () => {
+    const r = transformerCommandes("pip install six\nif True:\n    python main.py");
+    expect(r).toEqual({ code: `await __import__("atelier_pip").pip("install six")\nif True:\n    ${LANCER}"main.py")`, pip: true, python: true });
   });
 });

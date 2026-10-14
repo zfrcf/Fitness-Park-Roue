@@ -84,19 +84,60 @@ function chaineTripleOuverte(ligne: string, ouverte: string | null): string | nu
   return ouverte;
 }
 
-/** Remplace chaque ligne de commande pip par un appel au module pip de la console (micropip). */
-export function transformerPip(code: string): PipResultat {
+// [indentation][! ou %](python | python3 | python3.12 | py | %run)[reste]
+const RE_PYTHON = /^(\s*)(?:([!%])\s*)?(python3?(?:\.\d+)?|py|run)(?=\s|$)(.*)$/;
+
+/**
+ * Reconnaît « python fichier.py args », « python -c "…" », « python -m module », « %run fichier.py ».
+ * Sans « ! »/« % », il faut un fichier .py ou une option : « python = 3 » reste du Python.
+ */
+export function ligneCommandePython(ligne: string): { indent: string; args: string } | null {
+  const m = RE_PYTHON.exec(ligne);
+  if (!m) return null;
+  const [, indent, prefixe, commande, reste] = m;
+  const args = reste.trim();
+  if (commande === "run" && prefixe !== "%") return null;
+  const premier = args.split(/\s+/)[0] ?? "";
+  if (!prefixe && commande !== "run" && args && !/\.pyw?$/i.test(premier.replace(/^["']|["']$/g, "")) && !/^-[a-zA-Z-]/.test(premier)) return null;
+  return { indent, args };
+}
+
+export interface CommandesResultat extends PipResultat {
+  /** Vrai si une ligne lance un programme (« python fichier.py »…). */
+  python: boolean;
+}
+
+/**
+ * Remplace les lignes de commande de la console par des appels Python : pip (micropip) et lancement
+ * de programmes (`atelier_run.lancer`). Le reste du code est laissé intact.
+ */
+export function transformerCommandes(code: string): CommandesResultat {
   let pip = false;
+  let python = false;
   let ouverte: string | null = null;
   const lignes = code.split("\n").map((ligne) => {
     const dansTexte = ouverte !== null;
     ouverte = chaineTripleOuverte(ligne, ouverte);
-    const c = dansTexte ? null : ligneCommandePip(ligne);
-    if (!c) return ligne;
-    pip = true;
-    return `${c.indent}await __import__("atelier_pip").pip(${JSON.stringify(c.args)})`;
+    if (dansTexte) return ligne;
+    const p = ligneCommandePip(ligne);
+    if (p) {
+      pip = true;
+      return `${p.indent}await __import__("atelier_pip").pip(${JSON.stringify(p.args)})`;
+    }
+    const l = ligneCommandePython(ligne);
+    if (l) {
+      python = true;
+      return `${l.indent}await __import__("atelier_run").lancer(${JSON.stringify(l.args)})`;
+    }
+    return ligne;
   });
-  return { code: lignes.join("\n"), pip };
+  return { code: lignes.join("\n"), pip, python };
+}
+
+/** Commandes pip seulement (compatibilité). */
+export function transformerPip(code: string): PipResultat {
+  const r = transformerCommandes(code);
+  return { code: r.code, pip: r.pip };
 }
 
 /**

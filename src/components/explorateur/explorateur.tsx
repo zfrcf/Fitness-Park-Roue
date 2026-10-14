@@ -21,6 +21,7 @@ import {
   Loader2,
   PanelRightClose,
   Pencil,
+  Play,
   X,
 } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -440,6 +441,17 @@ function Editeur({
           <span className="flex shrink-0 items-center gap-1 text-primary">
             <Pencil className="size-3 animate-pulse" /> {modification ? "modification en cours…" : "écriture en cours…"}
           </span>
+        )}
+        {/\.pyw?$/i.test(fichier.chemin) && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-emerald-600 dark:text-emerald-400"
+            title="Lancer ce fichier dans la console Python (dans votre navigateur)"
+            onClick={() => window.dispatchEvent(new CustomEvent("atelier:lancer-python", { detail: fichier.chemin }))}
+          >
+            <Play /> Lancer
+          </Button>
         )}
         <Button variant="ghost" size="icon-xs" aria-label={`Télécharger ${fichier.chemin}`} onClick={() => telechargerFichier(fichier)}>
           <Download />

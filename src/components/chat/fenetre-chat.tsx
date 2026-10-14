@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import type { MessageUI } from "@/lib/chat/types";
 import { Message } from "./message";
 import { fusionnerProjetDetaille } from "@/lib/fichiers/projet";
+import { publierProjetConsole } from "@/lib/execution/projet-console";
 import { estimerTokens } from "@/lib/chat/contexte";
 import { formatNombre } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -306,6 +307,9 @@ export function FenetreChat({
   // État du projet (fusion des fichiers de toutes les réponses) et taille estimée du contexte.
   const messagesStables = occupe ? messages.slice(0, -1) : messages;
   const { fichiers: projet, echecs, instantanes } = useMemo(() => fusionnerProjetDetaille(messagesStables, { instantanes: true }), [messagesStables]);
+  // La console Python reçoit les fichiers du projet (pip install -r requirements.txt, open(), import…).
+  useEffect(() => publierProjetConsole(projet), [projet]);
+  useEffect(() => () => publierProjetConsole([]), []);
   // « +N −M » de chaque réponse qui a changé le projet.
   const modificationsParMessage = useMemo(() => {
     const out = new Map<string, StatsModifications>();

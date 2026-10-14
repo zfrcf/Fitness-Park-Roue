@@ -77,6 +77,12 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   pur, testé) — retrouve un détail d'un message ancien même après résumé/élagage du contexte.
 - Console Python interactive : panneau REPL (`src/components/chat/console-python.tsx`, bascule dans `coque.tsx`,
   Ctrl+`) ; variables/imports persistants entre cellules, exécuté dans le navigateur (Pyodide).
+  **pip** : `python-shell.ts` (`transformerPip`) réécrit toute ligne pip (`pip`, `pip3`, `!pip`, `%pip`,
+  `python -m pip`) en appel au module Python `atelier_pip` (`pip-console.ts`, chargé dans Pyodide) qui traduit
+  vers micropip 0.6 : install (`-r` imbriqués, marqueurs, `-U`, `--pre`, `--no-deps`, `-i`, wheels), uninstall,
+  list, freeze, show, check ; échecs isolés et expliqués, dépendances manquantes des paquets Pyodide complétées.
+  Testé en CPython avec un faux micropip (`pip-console.test.ts`). Fichiers : `projet-console.ts` — la fenêtre de
+  chat publie les fichiers du projet, copiés dans `/home/pyodide` (+ bouton « Importer des fichiers »).
 - Bons/mauvais points + mémoire de leçons (`src/lib/comptes/lecons.ts` pur/testé, table `lecons`,
   `src/lib/db/lecons.ts`, API `/api/retours`, UI `bouton-retour.tsx` + store `retours.ts`) : 👍/👎 avec note sur
   chaque réponse → leçons « à refaire / à éviter » par compte, réinjectées dans le prompt système (`tour.ts`,

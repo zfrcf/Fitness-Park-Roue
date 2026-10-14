@@ -1,9 +1,10 @@
 "use client";
 
-import { CornerDownLeft, Loader2, Terminal, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { CornerDownLeft, Loader2, Terminal, Trash2, Upload, X } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { executerPython } from "@/lib/execution/python-navigateur";
+import { executerPython, importerFichiersConsole } from "@/lib/execution/python-navigateur";
+import { abonnerProjetConsole, projetConsole } from "@/lib/execution/projet-console";
 import { tronquerSortie } from "@/lib/execution/langues";
 import { cn } from "@/lib/utils";
 
@@ -13,10 +14,25 @@ interface Cellule {
   erreur?: string;
 }
 
+/** Sortie d'une cellule : les lignes d'échec de pip (« ÉCHEC : », « ERREUR : ») ressortent en rouge. */
+function Sortie({ texte }: { texte: string }) {
+  return (
+    <pre className="whitespace-pre-wrap break-words pl-6 text-foreground/90">
+      {texte.split("\n").map((l, i) => (
+        <span key={i} className={/^(ÉCHEC|ERREUR) :/.test(l) ? "text-destructive" : undefined}>
+          {l}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
 /**
  * Console Python interactive (REPL) tournant DANS LE NAVIGATEUR via Pyodide : les variables et les
  * imports persistent d'une cellule à l'autre (même interpréteur). Aucun code n'est exécuté sur le
- * serveur. Historique des commandes avec les flèches haut/bas.
+ * serveur. Historique des commandes avec les flèches haut/bas. Les fichiers du projet de la
+ * conversation et ceux importés sont dans le dossier courant (pip install -r requirements.txt).
  */
 export function ConsolePython({ onFermer }: { onFermer: () => void }) {
   const [code, setCode] = useState("");
@@ -26,6 +42,8 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
   const [histIndex, setHistIndex] = useState(-1);
   const zone = useRef<HTMLTextAreaElement>(null);
   const bas = useRef<HTMLDivElement>(null);
+  const entreeFichiers = useRef<HTMLInputElement>(null);
+  const nbFichiersProjet = useSyncExternalStore(abonnerProjetConsole, () => projetConsole().length, () => 0);
 
   useEffect(() => {
     bas.current?.scrollIntoView({ behavior: "smooth" });
@@ -49,6 +67,23 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
     } catch (e) {
       setCellules((liste) => [...liste, { code, sortie: "", erreur: e instanceof Error ? e.message : "Exécution impossible." }]);
     } finally {
+      setOccupe(false);
+      setEtape("");
+      zone.current?.focus();
+    }
+  }
+
+  async function importer(e: ChangeEvent<HTMLInputElement>) {
+    const liste = e.target.files;
+    if (!liste?.length || occupe) return;
+    setOccupe(true);
+    try {
+      const noms = await importerFichiersConsole(liste, setEtape);
+      setCellules((l) => [...l, { code: "# fichiers importés", sortie: noms.length ? `Importé dans le dossier courant : ${noms.join(", ")}` : "", erreur: noms.length ? undefined : "Aucun fichier importé." }]);
+    } catch (err) {
+      setCellules((l) => [...l, { code: "# fichiers importés", sortie: "", erreur: err instanceof Error ? err.message : "Import impossible." }]);
+    } finally {
+      e.target.value = "";
       setOccupe(false);
       setEtape("");
       zone.current?.focus();
@@ -84,7 +119,16 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
         <Terminal className="size-4 text-muted-foreground" />
         <span className="text-xs font-medium">Console Python</span>
         <span className="text-[11px] text-muted-foreground">· exécutée dans votre navigateur</span>
+        {nbFichiersProjet > 0 && (
+          <span className="hidden text-[11px] text-muted-foreground sm:inline" title="Copiés dans le dossier courant de la console">
+            · {nbFichiersProjet} fichier{nbFichiersProjet > 1 ? "s" : ""} du projet
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1">
+          <input ref={entreeFichiers} type="file" multiple hidden onChange={(e) => void importer(e)} />
+          <Button variant="ghost" size="icon-sm" aria-label="Importer des fichiers" title="Importer des fichiers dans la console (ex. requirements.txt)" onClick={() => entreeFichiers.current?.click()} disabled={occupe}>
+            <Upload />
+          </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Vider la console" title="Vider l'affichage (les variables restent)" onClick={() => setCellules([])} disabled={!cellules.length}>
             <Trash2 />
           </Button>
@@ -96,7 +140,7 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
       <div className="min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-[12.5px] leading-relaxed">
         {cellules.length === 0 && (
           <p className="text-muted-foreground">
-            Tapez du Python et appuyez sur Entrée. Installez un paquet avec <code>pip install nom</code>. Les variables et les imports restent d&apos;une commande à l&apos;autre. Maj+Entrée pour une nouvelle ligne.
+            Tapez du Python et appuyez sur Entrée. Installez des paquets avec <code>pip install nom</code> ou <code>pip install -r requirements.txt</code> (les fichiers du projet de la conversation et ceux importés avec le bouton ↑ sont dans le dossier courant). <code>pip help</code> liste les commandes. Les variables et les imports restent d&apos;une commande à l&apos;autre. Maj+Entrée pour une nouvelle ligne.
           </p>
         )}
         {cellules.map((c, i) => (
@@ -105,7 +149,7 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
               <span className="shrink-0 select-none text-primary">&gt;&gt;&gt;</span>
               <pre className="whitespace-pre-wrap break-words">{c.code}</pre>
             </div>
-            {c.sortie && <pre className="whitespace-pre-wrap break-words pl-6 text-foreground/90">{c.sortie}</pre>}
+            {c.sortie && <Sortie texte={c.sortie} />}
             {c.erreur && <pre className="whitespace-pre-wrap break-words pl-6 text-destructive">{c.erreur}</pre>}
           </div>
         ))}

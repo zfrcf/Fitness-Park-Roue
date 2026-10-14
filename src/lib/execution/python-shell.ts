@@ -1,8 +1,8 @@
 /**
  * Aide à l'usage « terminal » de la console Python (Pyodide) : la console exécute du Python, pas un
- * shell, et ne compile pas de projets. On traduit `pip install …` vers micropip quand c'est un vrai
- * paquet Python, et on explique clairement les commandes système (ls, cd…), les outils de
- * compilation (gradle, make…) et les paquets qui ne tournent pas dans le navigateur.
+ * shell, et ne compile pas de projets. Toutes les commandes pip sont traduites vers le module pip de
+ * la console (`pip-console.ts`, via micropip), et on explique clairement les commandes système
+ * (ls, cd…) et les outils de compilation (gradle, make…).
  */
 
 /** Outils de compilation / build : ni des paquets Python, ni exécutables dans le navigateur. */
@@ -10,13 +10,6 @@ const OUTILS_BUILD = new Set([
   "gradle", "gradlew", "mvn", "maven", "make", "cmake", "ninja", "gcc", "g++", "clang",
   "cargo", "rustc", "go", "dotnet", "msbuild", "javac", "java", "kotlin", "kotlinc",
   "npm", "npx", "node", "yarn", "pnpm", "bun", "deno", "docker", "podman",
-]);
-
-/** Paquets qui n'ont aucun sens dans Pyodide (outils natifs, construction d'exécutables, systèmes). */
-const PAQUETS_IMPOSSIBLES = new Set([
-  "pyinstaller", "cx_freeze", "cx-freeze", "py2exe", "py2app", "nuitka",
-  "tensorflow", "torch", "pytorch", "playwright", "selenium", "psycopg2",
-  "pyaudio", "opencv-python",
 ]);
 
 /** Commandes système fréquemment tapées par réflexe dans la console. */
@@ -30,46 +23,80 @@ const CONSEIL_BUILD =
   "Pour compiler et tester un projet (Gradle, Node, Rust, Go, C…), utilise le bouton « Construire et tester » sous les fichiers d'une réponse — pas cette console, qui n'exécute que du Python.";
 
 export interface PipResultat {
-  /** Code Python transformé (les lignes `pip install` deviennent des appels micropip). */
+  /** Code Python transformé : chaque commande pip devient un appel au module `atelier_pip`. */
   code: string;
-  /** Paquets demandés, utilisables par micropip. */
-  paquets: string[];
+  /** Vrai si au moins une commande pip a été trouvée (il faut alors charger micropip). */
+  pip: boolean;
 }
 
-const RE_PIP = /^(\s*)!?\s*pip[23]?\s+install\s+(.+?)\s*$/;
+/** Sous-commandes de pip : distinguent `pip install x` de code Python comme `pip = 3`. */
+const SOUS_COMMANDES_PIP = new Set([
+  "install", "uninstall", "remove", "list", "freeze", "show", "check", "help", "download", "wheel",
+  "cache", "config", "debug", "hash", "search", "index", "inspect", "completion", "lock",
+]);
 
-function echapper(p: string): string {
-  return `'${p.replace(/'/g, "\\'")}'`;
+// [indentation][! ou %][python -m | python3 -m | py -m]pip[3[.12]][reste]
+const RE_PIP = /^(\s*)([!%]\s*)?((?:python3?(?:\.\d+)?|py)\s+-m\s+)?pip(?:3(?:\.\d+)?)?(?=\s|$)(.*)$/;
+
+/** Reconnaît une ligne de commande pip (toutes les formes usuelles), sinon null. */
+export function ligneCommandePip(ligne: string): { indent: string; args: string } | null {
+  const m = RE_PIP.exec(ligne);
+  if (!m) return null;
+  const [, indent, prefixe, module, reste] = m;
+  const args = reste.trim();
+  const premier = args.split(/\s+/)[0] ?? "";
+  // Sans « ! », « % » ni « python -m », on exige une vraie sous-commande ou option pour ne pas
+  // détourner du Python (« pip = 3 », « pip -= 1 », « pip.x »).
+  const explicite = Boolean(prefixe || module);
+  if (!explicite && args && !SOUS_COMMANDES_PIP.has(premier.toLowerCase()) && !/^--?[a-zA-Z]/.test(premier)) return null;
+  return { indent, args };
 }
 
-function ligneMessage(indent: string, texte: string): string {
-  return `${indent}print(${echapper(texte).replace(/\n/g, " ")})`;
+/**
+ * Délimiteur de chaîne triple (""" ou ''') encore ouvert à la fin de la ligne : une ligne
+ * « pip install … » écrite DANS un texte (docstring, README…) ne doit pas être réécrite.
+ */
+function chaineTripleOuverte(ligne: string, ouverte: string | null): string | null {
+  let i = 0;
+  while (i < ligne.length) {
+    if (ouverte) {
+      const j = ligne.indexOf(ouverte, i);
+      if (j < 0) return ouverte;
+      i = j + 3;
+      ouverte = null;
+      continue;
+    }
+    const c = ligne[i];
+    if (c === "#") return null;
+    if (ligne.startsWith('"""', i) || ligne.startsWith("'''", i)) {
+      ouverte = ligne.slice(i, i + 3);
+      i += 3;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      let k = i + 1;
+      while (k < ligne.length && ligne[k] !== c) k += ligne[k] === "\\" ? 2 : 1;
+      i = k + 1;
+      continue;
+    }
+    i++;
+  }
+  return ouverte;
 }
 
-/** Remplace les lignes `pip install …` par un appel micropip, en écartant ce qui n'est pas installable. */
+/** Remplace chaque ligne de commande pip par un appel au module pip de la console (micropip). */
 export function transformerPip(code: string): PipResultat {
-  const paquets: string[] = [];
+  let pip = false;
+  let ouverte: string | null = null;
   const lignes = code.split("\n").map((ligne) => {
-    const m = RE_PIP.exec(ligne);
-    if (!m) return ligne;
-    const [indent, reste] = [m[1], m[2]];
-    if (/(^|\s)-r(\s|$)/.test(reste)) {
-      return ligneMessage(indent, "Dans le navigateur, « pip install -r » n'est pas géré : installez les paquets un par un avec pip install nom_du_paquet.");
-    }
-    const demandes = reste.split(/\s+/).filter((t) => t && !t.startsWith("-"));
-    const ok: string[] = [];
-    const sortie: string[] = [];
-    for (const d of demandes) {
-      const nom = d.split(/[=<>!~]/)[0].toLowerCase();
-      if (OUTILS_BUILD.has(nom)) sortie.push(ligneMessage(indent, `« ${nom} » n'est pas un paquet Python : c'est un outil de compilation. ${CONSEIL_BUILD}`));
-      else if (PAQUETS_IMPOSSIBLES.has(nom)) sortie.push(ligneMessage(indent, `« ${nom} » ne peut pas s'installer ni s'exécuter dans le navigateur (outil natif / trop lourd). Utilisez-le sur votre ordinateur.`));
-      else ok.push(d);
-    }
-    paquets.push(...ok);
-    if (ok.length) sortie.push(`${indent}import micropip as __mp; await __mp.install([${ok.map(echapper).join(", ")}]); print("Installé : ${ok.join(", ")}")`);
-    return sortie.join("\n") || `${indent}pass`;
+    const dansTexte = ouverte !== null;
+    ouverte = chaineTripleOuverte(ligne, ouverte);
+    const c = dansTexte ? null : ligneCommandePip(ligne);
+    if (!c) return ligne;
+    pip = true;
+    return `${c.indent}await __import__("atelier_pip").pip(${JSON.stringify(c.args)})`;
   });
-  return { code: lignes.join("\n"), paquets };
+  return { code: lignes.join("\n"), pip };
 }
 
 /**
@@ -84,18 +111,5 @@ export function indiceShell(code: string, erreur?: string): string | null {
   if (!mot) return null;
   if (OUTILS_BUILD.has(mot)) return `« ${mot} » est un outil de compilation, pas du Python. ${CONSEIL_BUILD}`;
   if (COMMANDES_SHELL.has(mot)) return `« ${mot} » est une commande système (shell), mais ceci est une console Python, pas un terminal. Pour installer un paquet Python : pip install nom_du_paquet. Pour exécuter du code, écris du Python (ex. print("bonjour")).`;
-  return null;
-}
-
-/**
- * Transforme une erreur micropip (paquet introuvable, pas de version compatible navigateur) en
- * message clair nommant le(s) paquet(s), au lieu d'un long traceback.
- */
-export function messageMicropip(erreur: string, paquets: string[]): string | null {
-  if (!paquets.length) return null;
-  if (/Unsupported content type|Can't find a pure Python|Can'?t fetch metadata|No matching distribution|Couldn'?t find a pure Python|CompatibilityNotFound/i.test(erreur)) {
-    const liste = paquets.join(", ");
-    return `Installation impossible : « ${liste} » n'est pas disponible pour le navigateur. Soit ce n'est pas un paquet Python (ex. un outil de build), soit il n'a pas de version compatible WebAssembly. Les paquets Python purs et les plus courants (numpy, pandas, requests…) fonctionnent.`;
-  }
   return null;
 }

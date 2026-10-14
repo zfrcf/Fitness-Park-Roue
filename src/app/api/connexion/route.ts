@@ -53,6 +53,11 @@ export async function POST(req: Request) {
 
   // Compte inscrit (adresse e-mail + mot de passe).
   if (email) {
+    // IP bannie (ex. mineur détecté) : connexion membre refusée. L'administrateur (mot de passe seul) reste exempté.
+    const { estIpBannie } = await import("@/lib/moderation/banip");
+    if (await estIpBannie(ip)) {
+      return NextResponse.json({ erreur: "Cet accès a été bloqué.", code: "bloque" }, { status: 403 });
+    }
     const u = await utilisateurParEmail(normaliserEmail(email)).catch(() => null);
     // Hachage calculé même sans compte : le temps de réponse ne révèle pas si l'adresse existe.
     const bon = await verifierMotDePasse(motDePasse, u?.hash ?? HACHAGE_LEURRE);

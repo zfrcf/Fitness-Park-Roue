@@ -4,6 +4,7 @@ import { creerTache, listerTaches, versPublic } from "@/lib/db/taches";
 import { reveillerTaches } from "@/lib/taches";
 import { planificateurHTTP } from "@/lib/taches/planificateur";
 import { avecAcces, exigerConversation, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
+import { modererTexte } from "@/lib/moderation/appliquer";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,6 +35,10 @@ export const POST = avecAcces(async (req: Request) => {
   const u = await exigerUtilisateur(req);
   const corps = ((await req.json().catch(() => null)) as Corps | null) ?? {};
   const objectif = typeof corps.objectif === "string" ? corps.objectif.trim() : "";
+  // Modération (membres seulement) : objectif + message initial de la tâche.
+  const messageInitial = typeof corps.messageInitial === "string" ? corps.messageInitial : "";
+  const mod = await modererTexte(req, u, `${objectif}\n${messageInitial}`);
+  if (mod.bloque) return NextResponse.json({ erreur: mod.message, code: "modere" }, { status: mod.statut });
   const compiler = corps.compiler !== false;
   const auto = corps.auto === true;
   const maxCycles = Math.min(20, Math.max(1, Math.round(Number(corps.maxCycles) || 8)));

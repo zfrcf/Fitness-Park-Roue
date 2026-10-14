@@ -25,6 +25,11 @@ export const PATCH = avecAcces(async (req: Request) => {
   if (!statut) return NextResponse.json({ erreur: "Action inconnue." }, { status: 400 });
   const u = await majUtilisateur(id, { statut });
   await oublierCompte(id);
+  // Débloquer lève aussi un éventuel bannissement IP (faux positif « mineur »).
+  if (action === "debloquer") {
+    const { debannirIpDe } = await import("@/lib/moderation/banip");
+    await debannirIpDe(id).catch(() => 0);
+  }
   return u ? NextResponse.json({ compte: versPublic(u) }) : NextResponse.json({ erreur: "Compte introuvable." }, { status: 404 });
 });
 

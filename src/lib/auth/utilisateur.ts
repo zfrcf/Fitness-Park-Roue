@@ -77,6 +77,11 @@ export class AccesRefuse extends Error {
 export async function exigerUtilisateur(req: Request): Promise<UtilisateurCourant> {
   const u = await utilisateurDepuisRequete(req);
   if (!u) throw new AccesRefuse(401, "Session expirée ou compte désactivé : reconnectez-vous.");
+  // IP bannie (ex. mineur détecté) : accès coupé, sauf pour l'administrateur.
+  if (!u.admin) {
+    const [{ estIpBannie }, { ipDepuisRequete }] = await Promise.all([import("@/lib/moderation/banip"), import("@/lib/auth/tentatives")]);
+    if (await estIpBannie(ipDepuisRequete(req))) throw new AccesRefuse(403, "Cet accès a été bloqué.");
+  }
   return u;
 }
 

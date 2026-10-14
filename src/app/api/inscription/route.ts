@@ -11,6 +11,11 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   if (process.env.INSCRIPTIONS_FERMEES === "1") return NextResponse.json({ erreur: "Les inscriptions sont fermées." }, { status: 403 });
   const ip = ipDepuisRequete(req);
+  // IP bannie (ex. mineur détecté) : pas de nouvelle inscription depuis cette connexion.
+  const { estIpBannie } = await import("@/lib/moderation/banip");
+  if (await estIpBannie(ip)) {
+    return NextResponse.json({ erreur: "Les inscriptions depuis cette connexion sont bloquées." }, { status: 403 });
+  }
   if ((await inscriptionsTentees(ip)) > 10) {
     return NextResponse.json({ erreur: "Trop de tentatives d'inscription : réessayez dans une heure." }, { status: 429 });
   }

@@ -127,7 +127,7 @@ export function TableauComptes() {
                       </Button>
                     )}
                     {c.statut === "bloque" && (
-                      <Button size="sm" variant="outline" onClick={() => void agir(c, "debloquer")}>
+                      <Button size="sm" variant="outline" title="Réactive le compte et lève un éventuel bannissement IP (ex. détection « mineur » à tort)" onClick={() => void agir(c, "debloquer")}>
                         <Undo2 /> Débloquer
                       </Button>
                     )}

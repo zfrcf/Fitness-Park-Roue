@@ -3,6 +3,7 @@ import { executerTour } from "@/lib/chat/tour";
 import type { CorpsRequeteChat } from "@/lib/chat/types";
 import { avecAcces, exigerConversation, exigerUtilisateur, proprietaire } from "@/lib/auth/utilisateur";
 import { ENTETE_ENCODAGE, gunzipVersTexte } from "@/lib/chat/compression";
+import { modererTexte, texteDernierUtilisateur } from "@/lib/moderation/appliquer";
 
 // Node.js + Fluid Compute : 300 s est le maximum du plan Hobby (800 s en Pro).
 export const maxDuration = 300;
@@ -24,6 +25,9 @@ export const POST = avecAcces(async (req: Request) => {
   if (!Array.isArray(corps.messages) || corps.messages.length === 0) {
     return Response.json({ erreur: "Aucun message." }, { status: 400 });
   }
+  // Modération (membres seulement) : contenu sexuel / armes réelles refusé ; mineur → compte et IP bannis.
+  const mod = await modererTexte(req, u, texteDernierUtilisateur(corps.messages));
+  if (mod.bloque) return Response.json({ erreur: mod.message, code: "modere" }, { status: mod.statut });
   const conversationId = typeof corps.conversationId === "string" && corps.conversationId ? corps.conversationId.slice(0, 64) : "sans-id";
   if (conversationId !== "sans-id") await exigerConversation(u, conversationId);
   const r = await executerTour({

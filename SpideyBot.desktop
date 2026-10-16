@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Spidey Bot
+Comment=Bot Discord de vérification Minecraft
+Exec=bash -c 'cd %h/SpideyBot && ./run.sh'
+Icon=utilities-terminal
+Terminal=true
+Categories=Network;Game;
+StartupNotify=true

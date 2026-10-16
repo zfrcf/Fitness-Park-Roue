@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Spidey Bot (Binaire)
+Comment=Bot Discord de vérification Minecraft — binaire standalone
+Exec=bash -c 'cd %h/Bureau/Bot && ./run.sh'
+Icon=utilities-terminal
+Terminal=true
+Categories=Network;Game;
+StartupNotify=true

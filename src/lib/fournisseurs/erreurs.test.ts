@@ -73,6 +73,22 @@ describe("classerErreur", () => {
     const retire = classerErreur(api(400, { error: { message: "The model `old-model` has been decommissioned" } }), T0);
     expect(retire).toMatchObject({ categorie: "requete", basculer: true });
   });
+  it("410 NVIDIA (modèle en fin de vie, corps Problem Details) → bascule, pas de réessai avant 6 h", () => {
+    const corps = {
+      type: "about:blank",
+      title: "Gone",
+      status: 410,
+      detail: "The model 'moonshotai/kimi-k3' has reached its end of life on 2026-10-15T08:00:00Z and is no longer available.",
+    };
+    const e = classerErreur(api(410, corps), T0);
+    expect(e).toMatchObject({ categorie: "requete", statut: 410, basculer: true });
+    expect(e.message).toMatch(/end of life/);
+    expect(e.reessaiA).toBe(T0 + 6 * 3_600_000);
+  });
+  it("404 NVIDIA (modèle non ouvert à ce compte) → bascule", () => {
+    const corps = { status: 404, title: "Not Found", detail: "Function 'abc': Not found for account 'xyz'" };
+    expect(classerErreur(api(404, corps), T0)).toMatchObject({ categorie: "requete", basculer: true });
+  });
   it("401 → auth, bascule", () => {
     expect(classerErreur(api(401, { error: { message: "Invalid API Key" } }), T0)).toMatchObject({ categorie: "auth", basculer: true });
   });

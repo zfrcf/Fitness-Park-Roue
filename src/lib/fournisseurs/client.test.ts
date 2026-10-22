@@ -6,9 +6,10 @@ const f = (famille: Fournisseur["famille"]): Fournisseur => ({ id: "x", rang: 1,
 
 describe("adapterCorps", () => {
   it("NVIDIA : réflexion coupée sans outils, gardée avec outils, effort high/max", () => {
-    expect(adapterCorps(f("nvidia"), { messages: [] }, { raisonnement: "aucun" })).toMatchObject({ chat_template_kwargs: { thinking: false } });
+    expect(adapterCorps(f("nvidia"), { messages: [] }, { raisonnement: "aucun" })).toMatchObject({ chat_template_kwargs: { thinking: false, enable_thinking: false } });
     const avecOutils = adapterCorps(f("nvidia"), { messages: [], tools: [{ type: "function" }] }, { raisonnement: "aucun" });
-    expect(avecOutils).toMatchObject({ chat_template_kwargs: { thinking: true } });
+    // Les deux noms : « thinking » (Kimi) et « enable_thinking » (Nemotron, GLM, Qwen).
+    expect(avecOutils).toMatchObject({ chat_template_kwargs: { thinking: true, enable_thinking: true } });
     expect(avecOutils).not.toHaveProperty("reasoning_effort");
     expect(adapterCorps(f("nvidia"), { messages: [] }, { raisonnement: "faible" })).toMatchObject({ chat_template_kwargs: { thinking: true } });
     expect(adapterCorps(f("nvidia"), { messages: [] }, { raisonnement: "moyen" })).toMatchObject({ chat_template_kwargs: { thinking: true }, reasoning_effort: "high" });

@@ -51,6 +51,8 @@ function lireCorps(corps: unknown): { message?: string; code?: string | number }
     const code = (err.code ?? err.type) as string | number | undefined;
     return { message: texte(err.message ?? err), code };
   }
+  // Problem Details (RFC 7807) : NVIDIA NIM répond {type, title: "Gone", status: 410, detail: "…"}.
+  if (typeof r.detail === "string") return { message: r.detail, code: typeof r.title === "string" ? r.title : undefined };
   const errors = r.errors as Array<Record<string, unknown>> | undefined; // Cloudflare natif
   if (Array.isArray(errors) && errors[0]) {
     return { message: texte(errors[0].message), code: errors[0].code as string | number | undefined };
@@ -64,7 +66,7 @@ const RE_CONTEXTE =
 
 /** 400 propres à un fournisseur (paramètre non supporté, modèle retiré) : basculer, ne pas arrêter la rotation. */
 const RE_REQUETE_FOURNISSEUR =
-  /reasoning_effort|unsupported|not supported|does not support|unknown (field|parameter|argument)|unrecognized|deprecated|decommission|retired|no longer (available|supported)|has been (removed|retired|decommissioned)|invalid model|model .*(not found|does not exist|unavailable)/i;
+  /reasoning_effort|unsupported|not supported|does not support|unknown (field|parameter|argument)|unrecognized|deprecated|decommission|retired|end of life|no longer (available|supported)|has been (removed|retired|decommissioned)|invalid model|model .*(not found|does not exist|unavailable)|not found for account/i;
 
 export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClassee {
   // Délai dépassé D'ABORD : AbortSignal.timeout() lève une erreur dont le message contient
@@ -140,6 +142,11 @@ export function classerErreur(err: unknown, maintenant = Date.now()): ErreurClas
   }
   if ((statut === 400 || statut === 413 || statut === 422) && RE_CONTEXTE.test(message)) {
     return { categorie: "contexte", statut, code, message, reessaiA: maintenant, basculer: false };
+  }
+  if (statut === 410) {
+    // Modèle retiré par l'hébergeur (NVIDIA : « has reached its end of life ») : définitif. On bascule
+    // (modèle de secours du même fournisseur, puis les suivants) et on ne réessaie pas avant 6 h.
+    return { categorie: "requete", statut, code, message, reessaiA: maintenant + 6 * 3_600_000, basculer: true };
   }
   if (statut !== undefined && statut >= 400 && statut < 500) {
     // Un 400 PROPRE À CE FOURNISSEUR (paramètre non supporté comme reasoning_effort, modèle retiré)

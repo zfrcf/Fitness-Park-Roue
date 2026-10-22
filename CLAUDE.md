@@ -31,8 +31,9 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
 ## Architecture (où est quoi)
 
 - `src/lib/fournisseurs/` — fournisseurs OpenAI-compatibles déclarés par `PROVIDER_n_*`
-  (auto-détectés, rang = ordre d'essai). Familles : `nvidia` (Kimi K3, rang 1), `cloudflare`,
-  `openrouter`, `groq`. `client.ts` adapte le corps par famille (raisonnement). `erreurs.ts`
+  (auto-détectés, rang = ordre d'essai). Familles : `nvidia` (rang 1 : Nemotron 3 Ultra, secours GLM 5.3 —
+  Kimi K3 retiré le 15/10/2026), `cloudflare`, `openrouter`, `groq`. `PROVIDER_n_MODEL` peut lister des modèles
+  de secours (« a, b ») : un fournisseur du même rang par modèle ; un modèle retiré (410) fait basculer. `client.ts` adapte le corps par famille (raisonnement). `erreurs.ts`
   classe les erreurs. `entetes.ts` calcule l'heure de réessai. `limites.ts` apprend les limites
   ITPM/OTPM des messages d'erreur. `debit.ts` limiteur de requêtes/min partagé (KV). `etat.ts`,
   `quota.ts`, `test.ts`, `registre.ts`.

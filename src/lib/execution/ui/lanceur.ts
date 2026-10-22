@@ -1,8 +1,9 @@
 /**
  * Modules Python de lancement de la console du navigateur :
  *  - `atelier_run` : `python fichier.py` / `-c` / `-m` / `%run`, cellules de la console (sys.exit() propre),
- *    input() par boîte de saisie, installation automatique des modules manquants, garde-fou contre les
- *    attentes sans fin ;
+ *    sorties routées vers l'exécution qui écrit, input() / sys.stdin / getpass dans la console, bouton
+ *    « Arrêter » (KeyboardInterrupt ponctuel, sleep et await interrompus), asyncio.run() bloquant,
+ *    installation automatique des modules manquants, garde-fou contre les attentes sans fin ;
  *  - `atelier_mpl` : backend matplotlib (plt.show() → image dans le terminal, plt.pause() sans fermer) ;
  *  - cales : `PIL.ImageTk` et `matplotlib.backends.backend_tkagg` pour le tkinter de la console ;
  *  - `_tkinter` : module natif factice.
@@ -10,10 +11,14 @@
 
 export const RUN = String.raw`
 """Lancement de programmes Python dans la console du navigateur."""
+import asyncio
 import builtins
+import codecs
+import contextvars
 import importlib
 import importlib.abc
 import importlib.util
+import io
 import os
 import re
 import runpy
@@ -21,6 +26,7 @@ import shlex
 import sys
 import time
 import traceback
+import weakref
 
 import atelier_ui as _ui
 
@@ -41,7 +47,128 @@ PAQUETS = {
     "google": "protobuf", "faker": "Faker", "telegram": "python-telegram-bot", "discord": "discord.py",
 }
 
-# ─── input() : boîte de saisie du navigateur, avec les dernières lignes affichées ───
+# ─── Exécution en cours : identifiant posé par cellule() dans le contexte asyncio de sa tâche ───
+# Hérité par les tâches que le programme crée (et par les rappels qui gardent ce contexte) : sa sortie, ses
+# images et ses saisies vont à l'exécution qui les produit, même si une autre a démarré entre-temps.
+
+_execution = contextvars.ContextVar("atelier_execution", default=None)
+_cellules = weakref.WeakSet()  # tâches asyncio des cellules (le code tapé ou lancé)
+
+
+def _ident():
+    """Identifiant de l'exécution du code en cours (None : rappel ou code hors exécution)."""
+    return _execution.get()
+
+
+# ─── sys.stdout / sys.stderr : chaque écriture part aussitôt vers l'exécution qui l'a produite ───
+
+
+class _SortieOctets(io.BufferedIOBase):
+    """sys.stdout.buffer : les octets sont décodés (UTF-8) et écrits comme du texte, dans le même ordre."""
+
+    def __init__(self, texte):
+        super().__init__()
+        self._texte = texte
+        self._decodeur = codecs.getincrementaldecoder("utf-8")("replace")
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        donnees = bytes(b)
+        self._texte.write(self._decodeur.decode(donnees))
+        return len(donnees)
+
+    def isatty(self):
+        return self._texte.isatty()
+
+    def fileno(self):
+        return self._texte.fileno()
+
+    def close(self):
+        """io.TextIOWrapper(sys.stdout.buffer) fermé par le programme : la console garde sa sortie."""
+
+
+class _Sortie(io.TextIOBase):
+    """sys.stdout / sys.stderr de la console. Rien n'est retenu en mémoire tampon : le texte s'affiche
+    tout de suite (avant une attente, une image, une saisie), dans l'ordre exact."""
+
+    encoding = "utf-8"
+    errors = "strict"
+    mode = "w"
+    line_buffering = True
+    write_through = True
+
+    def __init__(self, origine, erreur):
+        super().__init__()
+        self._origine = origine
+        self._erreur = erreur
+        self._octets = _SortieOctets(self)
+
+    @property
+    def name(self):
+        return "<stderr>" if self._erreur else "<stdout>"
+
+    @property
+    def buffer(self):
+        return self._octets
+
+    def writable(self):
+        return True
+
+    def isatty(self):
+        try:
+            return bool(self._origine.isatty())
+        except Exception:
+            return False
+
+    def fileno(self):
+        return self._origine.fileno()
+
+    def write(self, s):
+        if not isinstance(s, str):
+            raise TypeError(f"write() argument must be str, not {type(s).__name__}")
+        if s:
+            _ui.sortie(s, self._erreur, _execution.get())
+        return len(s)
+
+    def flush(self):
+        try:
+            self._origine.flush()  # écritures de bas niveau (os.write, modules en C)
+        except Exception:
+            pass
+
+    def reconfigure(self, **options):
+        """sys.stdout.reconfigure(encoding="utf-8") : sans objet ici, le texte part tel quel."""
+
+    def close(self):
+        """Fermer la sortie de la console la rendrait muette pour la suite : ignoré."""
+
+
+if type(sys.stdout).__name__ != "_Sortie":
+    sys.stdout = _Sortie(sys.stdout, False)
+if type(sys.stderr).__name__ != "_Sortie":
+    sys.stderr = _Sortie(sys.stderr, True)
+
+
+def _vider_flux():
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.flush()
+        except Exception:
+            pass
+
+
+# ─── Attentes et bouton « Arrêter » ───
+# Comme un Ctrl+C, « Arrêter » est un signal ponctuel : l'attente en cours au moment du clic (sleep, input,
+# asyncio.run…) lève l'interruption une fois et le signale (_ui.arretVu) ; le code de nettoyage (except,
+# finally) et les attentes suivantes fonctionnent normalement. Dans une cellule ou un rappel, c'est
+# KeyboardInterrupt (ArretDemande) ; dans une tâche asyncio du programme, CancelledError, comme CPython
+# (Ctrl+C annule la tâche principale d'asyncio.run, qui lève ensuite KeyboardInterrupt).
+
+
+class ArretDemande(KeyboardInterrupt):
+    """KeyboardInterrupt du bouton « Arrêter » (ou d'une saisie abandonnée à la fin du programme)."""
 
 
 def _peut_attendre():
@@ -56,32 +183,213 @@ def _peut_attendre():
         return False
 
 
+def _tache_du_programme():
+    """Tâche asyncio créée par le programme (create_task, asyncio.run), ou None (cellule, rappel, hors tâche)."""
+    try:
+        t = asyncio.current_task()
+    except RuntimeError:
+        return None
+    return None if t is None or t in _cellules else t
+
+
+def _exception_arret(message="arrêt demandé"):
+    if _tache_du_programme() is not None:
+        return asyncio.CancelledError(message)
+    return ArretDemande(message)
+
+
+def _verifier_arret(n0):
+    """« Arrêter » cliqué depuis le relevé n0 (donc pendant l'attente) : interruption, une seule fois."""
+    if _ui.numeroArret() != n0:
+        _ui.arretVu()
+        raise _exception_arret()
+
+
 def _attendre(promesse_ou_coroutine):
+    """Attend une promesse (ou coroutine) sans figer la page (JSPI) ; « Arrêter » pendant l'attente l'interrompt."""
     from pyodide.ffi import run_sync
 
-    r = run_sync(promesse_ou_coroutine)
-    if _ui.arretDemande():
-        raise KeyboardInterrupt("arrêt demandé")
+    _vider_flux()
+    n0 = _ui.numeroArret()
+    try:
+        r = run_sync(promesse_ou_coroutine)
+    except BaseException:
+        _verifier_arret(n0)
+        raise
+    _verifier_arret(n0)
     return r
+
+
+# ─── input(), sys.stdin, getpass : saisie dans la console (JSPI), sinon boîte du navigateur ───
+
+
+def _lire_ligne(invite="", masque=False, flux=False):
+    """Une ligne tapée par l'utilisateur. Renvoie (genre, texte) : genre « texte », « annule » (Échap),
+    « eof » (plus aucune saisie possible) ou « arret » (programme terminé pendant la saisie)."""
+    _vider_flux()
+    if _peut_attendre():
+        # L'invite est affichée par la page quand la demande passe (une à la fois, dans l'ordre).
+        try:
+            genre, texte = (str(x) for x in _attendre(_ui.lireLigne(invite, masque, flux, _execution.get())).to_py())
+        except BaseException:
+            if invite:
+                sys.stdout.write("\n")
+            raise
+    else:
+        if invite:
+            sys.stdout.write(invite)
+        r = _ui.saisie(invite)
+        genre, texte = ("annule", "") if r is None else ("texte", str(r))
+    if genre == "texte":
+        sys.stdout.write(("" if masque else texte) + "\n")
+    elif invite:
+        sys.stdout.write("\n")
+    return genre, texte
+
+
+def _ligne_ou_exception(genre, texte):
+    if genre == "texte":
+        return texte
+    if genre == "eof":
+        raise EOFError("EOF when reading a line")
+    if genre == "arret":
+        raise _exception_arret("fin du programme")
+    raise KeyboardInterrupt("saisie annulée")
 
 
 def _input(prompt=""):
     texte = "" if prompt is None else str(prompt)
-    if texte:
-        sys.stdout.write(texte)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    # Avec JSPI, la saisie se fait dans la console elle-même (la page reste utilisable) ; sinon, boîte du navigateur.
-    reponse = _attendre(_ui.saisieAsync(texte)) if _peut_attendre() else _ui.saisie(texte)
-    if reponse is None:
-        sys.stdout.write("\n")
-        raise KeyboardInterrupt("saisie annulée")
-    reponse = str(reponse)
-    sys.stdout.write(reponse + "\n")
-    return reponse
+    entree = sys.stdin
+    if entree is not None and not isinstance(entree, _EntreeConsole):
+        # sys.stdin remplacé par le programme (io.StringIO, fichier) : input() le lit, comme CPython.
+        if texte:
+            sys.stdout.write(texte)
+        _vider_flux()
+        ligne = entree.readline()
+        if not ligne:
+            raise EOFError("EOF when reading a line")
+        return ligne[:-1] if ligne.endswith("\n") else ligne
+    return _ligne_ou_exception(*_lire_ligne(texte))
+
+
+class _EntreeOctets(io.BufferedIOBase):
+    """sys.stdin.buffer : les lignes tapées, en octets (UTF-8)."""
+
+    def __init__(self, texte):
+        super().__init__()
+        self._texte = texte
+
+    def readable(self):
+        return True
+
+    def read(self, size=-1):
+        return self._texte.read(size).encode("utf-8")
+
+    read1 = read
+
+    def readline(self, size=-1):
+        return self._texte.readline(size).encode("utf-8")
+
+    def isatty(self):
+        return True
+
+    def fileno(self):
+        return 0
+
+    def close(self):
+        pass
+
+
+class _EntreeConsole(io.TextIOBase):
+    """sys.stdin de la console : chaque lecture demande une ligne à l'utilisateur, comme un terminal.
+    Échap = fin de fichier (Ctrl+D) : readline() renvoie « », read() et « for ligne in sys.stdin » s'arrêtent."""
+
+    encoding = "utf-8"
+    errors = "strict"
+    mode = "r"
+    newlines = None
+
+    def __init__(self):
+        super().__init__()
+        self._tampon = ""
+        self._octets = _EntreeOctets(self)
+
+    @property
+    def name(self):
+        return "<stdin>"
+
+    @property
+    def buffer(self):
+        return self._octets
+
+    def readable(self):
+        return True
+
+    def isatty(self):
+        return True
+
+    def fileno(self):
+        return 0
+
+    def _ligne(self):
+        genre, texte = _lire_ligne("", flux=True)
+        if genre == "texte":
+            return texte + "\n"
+        if genre == "arret":
+            raise _exception_arret("fin du programme")
+        return ""  # Échap, ou plus aucune saisie : fin de fichier
+
+    def readline(self, size=-1):
+        if size is not None and not isinstance(size, int):
+            raise TypeError(f"argument should be integer or None, not '{type(size).__name__}'")
+        if size is None or size < 0:
+            size = -1
+        if size == 0:
+            return ""
+        if not self._tampon:
+            self._tampon = self._ligne()
+        n = len(self._tampon) if size < 0 else min(size, len(self._tampon))
+        i = self._tampon.find("\n", 0, n)
+        if i >= 0:
+            n = i + 1
+        ligne, self._tampon = self._tampon[:n], self._tampon[n:]
+        return ligne
+
+    def read(self, size=-1):
+        if size is not None and not isinstance(size, int):
+            raise TypeError(f"argument should be integer or None, not '{type(size).__name__}'")
+        if size is None or size < 0:
+            size = -1
+        morceaux, total = [self._tampon], len(self._tampon)
+        self._tampon = ""
+        while size < 0 or total < size:
+            ligne = self._ligne()
+            if not ligne:
+                break
+            morceaux.append(ligne)
+            total += len(ligne)
+        tout = "".join(morceaux)
+        if size >= 0:
+            tout, self._tampon = tout[:size], tout[size:]
+        return tout
+
+    def close(self):
+        """Fermer l'entrée de la console : ignoré (les cellules suivantes en ont besoin)."""
+
+
+def _getpass(prompt="Password: ", stream=None):
+    """getpass.getpass : saisie masquée dans la console, la réponse n'est pas réécrite dans la sortie."""
+    return _ligne_ou_exception(*_lire_ligne("" if prompt is None else str(prompt), masque=True))
 
 
 builtins.input = _input
+sys.stdin = sys.__stdin__ = _EntreeConsole()  # le stdin d'origine de Pyodide ne sait pas lire (OSError 29)
+try:
+    import getpass as _module_getpass
+
+    _module_getpass.getpass = _getpass
+except Exception:
+    pass
 
 # ─── Garde-fou : un programme qui attend trop longtemps fige la page ───
 
@@ -96,10 +404,9 @@ def _debut_execution():
 def _sleep(secondes):
     s = max(0.0, float(secondes))
     if _peut_attendre():
-        # La page continue de vivre pendant l'attente (dessin, clics, animations turtle / tkinter).
-        import asyncio
-
-        _attendre(asyncio.sleep(s))
+        # La page continue de vivre pendant l'attente (dessin, clics, animations turtle / tkinter) ;
+        # « Arrêter » réveille la pause tout de suite (_ui.dormir) et lève KeyboardInterrupt.
+        _attendre(_ui.dormir(s * 1000))
         return
     if time.monotonic() - _debut[0] + s > LIMITE:
         raise RuntimeError(
@@ -112,32 +419,98 @@ def _sleep(secondes):
 
 time.sleep = _sleep
 
-# ─── asyncio.run() : la page a déjà une boucle d'événements ───
+# ─── asyncio : la page a déjà une boucle d'événements ───
 
-try:
-    import asyncio
+_jeton_run = contextvars.ContextVar("atelier_asyncio_run", default=None)
 
-    def _run(main, *, debug=None, loop_factory=None):
-        async def _garde():
-            # Une exception (ou sys.exit) dans la tâche ne doit pas arrêter la boucle de la page.
-            try:
-                return await main
-            except SystemExit as e:
-                _signaler_sortie(e)
-            except KeyboardInterrupt:
-                print("[programme interrompu]", file=sys.stderr)
-            except BaseException:
-                traceback.print_exc()
-            finally:
-                sys.stdout.flush()
-                sys.stderr.flush()
 
-        asyncio.ensure_future(_garde())
-        return None
+def _contexte(t):
+    try:
+        return t.get_context()
+    except Exception:
+        return {}
 
-    asyncio.run = _run
-except Exception:
-    pass
+
+def _annuler_taches(filtre):
+    try:
+        taches = list(asyncio.all_tasks())
+    except RuntimeError:
+        return
+    for t in taches:
+        if not t.done() and filtre(t):
+            t.cancel("arrêt demandé")
+
+
+def interrompre():
+    """« Arrêter » (appelé par la page) : annule les tâches asyncio des exécutions qui attendent un await
+    (asyncio.sleep, requête…). Une tâche suspendue dans une attente de la console (time.sleep, input,
+    mainloop : pas de _fut_waiter) n'est pas annulée : cette attente lève elle-même l'interruption."""
+    _annuler_taches(lambda t: getattr(t, "_fut_waiter", None) is not None and _contexte(t).get(_execution) is not None)
+
+
+def _run_bloquant(main):
+    """asyncio.run() avec JSPI : bloque jusqu'à la fin de main(), renvoie sa valeur ou propage son exception,
+    comme CPython. « Arrêter » annule main (CancelledError) puis lève KeyboardInterrupt ; les tâches créées
+    par main et encore en cours à la fin sont annulées."""
+    from pyodide.ffi import run_sync
+
+    jeton = object()
+    boite = {}
+
+    async def _principale():
+        # Valeur et exception restent côté Python : rien ne traverse la page (ni traceback affiché en double,
+        # ni BaseException qui casserait sa boucle d'événements) ; elles sont rendues à l'appelant.
+        _jeton_run.set(jeton)
+        try:
+            boite["valeur"] = await main
+        except BaseException as e:
+            boite["exc"] = e
+
+    _vider_flux()
+    n0 = _ui.numeroArret()
+    tache = asyncio.ensure_future(_principale())
+    try:
+        run_sync(tache)
+    except asyncio.CancelledError:  # tâche annulée avant même d'avoir démarré main
+        boite.setdefault("exc", asyncio.CancelledError())
+    finally:
+        _annuler_taches(lambda t: t is not tache and _contexte(t).get(_jeton_run) is jeton)
+    e = boite.pop("exc", None)
+    if e is None:
+        return boite.get("valeur")
+    if isinstance(e, asyncio.CancelledError) and _ui.numeroArret() != n0:
+        _ui.arretVu()
+        raise _exception_arret() from None
+    raise e
+
+
+def _run(main, *, debug=None, loop_factory=None):
+    if not asyncio.iscoroutine(main):
+        raise ValueError(f"a coroutine was expected, got {main!r}")
+    if _peut_attendre():
+        return _run_bloquant(main)
+
+    # Sans JSPI, impossible de bloquer : main() tourne en tâche (le code qui suit s'exécute avant elle).
+    async def _garde():
+        # Une exception (ou sys.exit) dans la tâche ne doit pas arrêter la boucle de la page.
+        try:
+            return await main
+        except SystemExit as e:
+            _signaler_sortie(e)
+        except KeyboardInterrupt:
+            print("[programme interrompu]", file=sys.stderr)
+        except asyncio.CancelledError:
+            print("[programme interrompu : arrêt demandé]", file=sys.stderr)
+        except BaseException:
+            traceback.print_exc()
+        finally:
+            _vider_flux()
+
+    asyncio.ensure_future(_garde())
+    return None
+
+
+asyncio.run = _run
 
 # ─── matplotlib : images dans le terminal ───
 
@@ -307,8 +680,31 @@ def _fermer_fenetres_precedentes():
             pass
 
 
+def _fenetres_ouvertes():
+    tk = sys.modules.get("tkinter")
+    try:
+        return bool(tk._fenetres_ouvertes()) if hasattr(tk, "_fenetres_ouvertes") else False
+    except Exception:
+        return False
+
+
+_cwd_a_retablir = [None]
+
+
+def _retablir_dossier():
+    """Un programme a changé de dossier (os.chdir) puis s'est terminé fenêtres ouvertes : le dossier de la
+    console est rétabli au lancement suivant (ses fenêtres sont alors fermées)."""
+    d, _cwd_a_retablir[0] = _cwd_a_retablir[0], None
+    if d:
+        try:
+            os.chdir(d)
+        except OSError:
+            pass
+
+
 def _repartir_a_neuf():
-    """Bouton « Exécuter » d'un bloc de code : repart d'un état propre (fenêtres, tortue, figures)."""
+    """Bouton « Exécuter » d'un bloc de code : repart d'un état propre (fenêtres, tortue, figures, dossier)."""
+    _retablir_dossier()
     _fermer_fenetres_precedentes()
     plt = sys.modules.get("matplotlib.pyplot")
     if plt is not None:
@@ -329,13 +725,20 @@ def _signaler_sortie(e):
         print(str(code), file=sys.stderr)
 
 
-async def cellule(code):
-    """Exécute une cellule de la console (comme runPythonAsync). SystemExit et KeyboardInterrupt sont
-    traités ici : sortis de la cellule, ils arrêteraient la boucle d'événements de la page."""
+async def cellule(code, ident=None):
+    """Exécute une cellule de la console (comme runPythonAsync), dans la tâche asyncio de l'exécution
+    « ident » (sa sortie et ses saisies lui reviennent). SystemExit et KeyboardInterrupt sont traités ici :
+    sortis de la cellule, ils arrêteraient la boucle d'événements de la page. « Arrêter » pendant un await
+    du code (asyncio.sleep…) annule la tâche : l'annulation est convertie en interruption."""
     from pyodide.code import eval_code_async
 
     import __main__
 
+    tache = asyncio.current_task()
+    if tache is not None:
+        _cellules.add(tache)
+    _execution.set(ident)
+    n0 = _ui.numeroArret()
     try:
         return await eval_code_async(code, __main__.__dict__, filename="<exec>")
     except SystemExit as e:
@@ -344,7 +747,18 @@ async def cellule(code):
             print("(la console reste ouverte : les variables sont conservées)")
     except KeyboardInterrupt as e:
         print(f"[programme interrompu{' : ' + str(e) if str(e) else ''}]", file=sys.stderr)
+    except asyncio.CancelledError:
+        if _ui.numeroArret() == n0:
+            raise  # annulation demandée par le programme lui-même
+        _ui.arretVu()
+        print("[programme interrompu : arrêt demandé]", file=sys.stderr)
     return None
+
+
+async def preparer(code, ident=None):
+    """Avant l'exécution « ident » : paquets importés par le code chargés ou installés (messages vers elle)."""
+    _execution.set(ident)
+    await preparer_imports(code)
 
 
 def _fin_execution():
@@ -363,6 +777,21 @@ def _fin_execution():
             pass
     sys.stdout.flush()
     sys.stderr.flush()
+
+
+# runpy.run_path(chemin absolu) donne __file__ absolu comme CPython ≥ 3.9, mais mettrait aussi le chemin
+# absolu dans sys.argv[0] : CPython y garde le chemin tapé (« python main.py » → « main.py »).
+_argv0 = contextvars.ContextVar("atelier_argv0", default=None)
+if hasattr(runpy, "_ModifiedArgv0") and not getattr(runpy._ModifiedArgv0, "_atelier", False):
+
+    class _Argv0(runpy._ModifiedArgv0):
+        _atelier = True
+
+        def __init__(self, valeur):
+            tape = _argv0.get()
+            super().__init__(valeur if tape is None else tape)
+
+    runpy._ModifiedArgv0 = _Argv0
 
 
 def _afficher_erreur():
@@ -412,6 +841,7 @@ async def lancer(ligne=""):
     if code is None and module is None and script is None:
         print("Vous êtes déjà dans Python : tapez votre code directement, ou « python fichier.py » pour lancer un fichier.")
         return
+    _retablir_dossier()  # le fichier se cherche dans le dossier de la console, pas dans celui d'un programme précédent
     chemin = None
     if script is not None:
         chemin = _trouver_script(script)
@@ -432,7 +862,10 @@ async def lancer(ligne=""):
             if len(sources) > 40:
                 break
     await preparer_imports(*sources)
+    # Comme un processus à part : argv, sys.path, flux standard et dossier courant rétablis à la fin.
     ancien_argv, ancien_path = sys.argv[:], sys.path[:]
+    anciens_flux = (sys.stdin, sys.stdout, sys.stderr)
+    ancien_cwd = os.getcwd()
     _debut_execution()
     try:
         if code is not None:
@@ -444,18 +877,34 @@ async def lancer(ligne=""):
         else:
             sys.argv = [script, *reste]
             sys.path.insert(0, os.path.dirname(chemin))
-            runpy.run_path(script if os.path.isfile(script) else chemin, run_name="__main__")
+            jeton = _argv0.set(script)
+            try:
+                runpy.run_path(chemin, run_name="__main__")  # __file__ absolu, comme CPython ≥ 3.9
+            finally:
+                _argv0.reset(jeton)
     except SystemExit as e:
         _signaler_sortie(e)
-    except KeyboardInterrupt:
-        print("[programme interrompu]", file=sys.stderr)
+    except KeyboardInterrupt as e:
+        print(f"[programme interrompu{' : ' + str(e) if str(e) else ''}]", file=sys.stderr)
     except BaseException:
         _afficher_erreur()
     finally:
         sys.argv = ancien_argv
         sys.path[:] = ancien_path
-        sys.stdout.flush()
-        sys.stderr.flush()
+        _vider_flux()
+        sys.stdin, sys.stdout, sys.stderr = anciens_flux
+        try:
+            change = os.getcwd() != ancien_cwd
+        except OSError:
+            change = True
+        if change:
+            if _fenetres_ouvertes():
+                _cwd_a_retablir[0] = ancien_cwd  # ses rappels lisent peut-être encore des chemins relatifs
+            else:
+                try:
+                    os.chdir(ancien_cwd)
+                except OSError:
+                    pass
 `;
 
 export const MPL = String.raw`
@@ -492,7 +941,9 @@ def envoyer_figure(fig):
         fig._atelier_numero = next(_numeros)
     sys.stdout.flush()  # l'image s'affiche après le texte déjà écrit
     sys.stderr.flush()
-    _ui.image("data:image/png;base64," + base64.b64encode(png).decode(), fig._atelier_numero)
+    lanceur = sys.modules.get("atelier_run")
+    ident = lanceur._ident() if hasattr(lanceur, "_ident") else None  # exécution qui affiche la figure
+    _ui.image("data:image/png;base64," + base64.b64encode(png).decode(), fig._atelier_numero, ident)
     return True
 
 

@@ -7,6 +7,7 @@ export const TK_INIT = String.raw`
 """tkinter pour la console Python du navigateur : les fenêtres sont dessinées en HTML dans la page."""
 
 import base64
+import bisect
 import enum
 import itertools
 import re
@@ -14,6 +15,7 @@ import struct
 import sys
 import time
 import traceback
+import weakref
 
 import asyncio
 
@@ -46,7 +48,7 @@ class TclError(Exception):
 _compteur = itertools.count(1)
 _widgets = {}
 _variables = {}
-_images = {}
+_images = weakref.WeakValueDictionary()  # comme Tk : une image que plus rien ne référence disparaît
 _commandes = {}
 _tout = {}
 _classes = {}
@@ -179,6 +181,9 @@ def _taille_police(f):
 
 def _taille_image(o):
     try:
+        if re.match(rb"P[2356]\s", o[:3]):
+            d = _deppm(o)
+            return (d[0], d[1]) if d else (0, 0)
         if o[:8] == b"\x89PNG\r\n\x1a\n":
             return struct.unpack(">II", o[16:24])
         if o[:4] == b"GIF8":
@@ -262,10 +267,27 @@ def _verifier_arret():
         raise KeyboardInterrupt("arrêt demandé")
 
 
+_dans_ceder = [0]  # le programme attend dans update() / sleep : un sys.exit() d'un rappel lui revient
+
+
 def _ceder(secondes=0.0):
     """Rend la main au navigateur (dessin, événements) : pour update() et time.sleep()."""
-    _attendre_promesse(asyncio.sleep(max(0.0, float(secondes))))
+    _dans_ceder[0] += 1
+    try:
+        _attendre_promesse(asyncio.sleep(max(0.0, float(secondes))))
+    finally:
+        _dans_ceder[0] -= 1
     _verifier_arret()
+
+
+def _verifier_appli(w):
+    """Comme Tk : une fois la fenêtre principale détruite, update() lève TclError (fin des boucles de jeu
+    « while True: … root.update() » qui attrapent tk.TclError)."""
+    r = w
+    while getattr(r, "master", None) is not None:
+        r = r.master
+    if getattr(r, "_detruit", False):
+        raise TclError('can\'t invoke "update" command: application has been destroyed')
 
 
 def _attendre(condition, attente=None):
@@ -297,10 +319,17 @@ def _reveiller():
 
 
 def _sortie_demandee(e):
-    """sys.exit() dans un rappel : comme Tk, le programme s'arrête (fenêtres fermées, mainloop relance)."""
-    if any(a.get("boucle") for a in _attentes):
+    """sys.exit() dans un rappel : comme Tk, le programme s'arrête (fenêtres fermées ; mainloop, update()
+    ou la boucle du programme principal relancent l'exception)."""
+    if any(a.get("boucle") for a in _attentes) or _dans_ceder[0] > 0:
         _sortie[0] = e
     _tout_detruire()
+
+
+def _relancer_sortie():
+    if _sortie[0] is not None:
+        e, _sortie[0] = _sortie[0], None
+        raise e
 
 
 def _fenetres_ouvertes():
@@ -321,6 +350,8 @@ _quitte = [False]
 def _apres_execution():
     """Fin d'une exécution de la console : un programme sorti de mainloop() par quit() se termine, ses
     fenêtres se ferment (comme à la fin d'un vrai processus)."""
+    if not _attentes:
+        _sortie[0] = None
     if _quitte[0]:
         _quitte[0] = False
         if not any(a.get("boucle") for a in _attentes):
@@ -477,7 +508,8 @@ def _correspond(motif, ev):
     mods, type_, detail = motif
     if type_ != ev["type"]:
         return False
-    if ("Double" in mods) != ev.get("double", False):
+    # Double / Triple : nombre de clics successifs requis (le 2e appui ne déclenche que <Double-…> s'il est lié).
+    if (3 if "Triple" in mods else 2 if "Double" in mods else 1) > ev.get("clics", 1):
         return False
     if detail is not None:
         d = ev.get("detail")
@@ -497,7 +529,7 @@ def _correspond(motif, ev):
 
 def _specificite(motif):
     mods, _, detail = motif
-    return (detail is not None) * 10 + len([m for m in mods if m not in ("Any",)])
+    return (detail is not None) * 10 + len([m for m in mods if m not in ("Any",)]) + ("Triple" in mods)
 
 
 def _choisir(liaisons, ev):
@@ -750,10 +782,10 @@ def _png(l, h, px):
 
 
 def _depng(o):
-    """PNG 8 bits non entrelacé (gris, RGB, palette, RGBA) → (l, h, pixels RGBA) ; None sinon."""
+    """PNG (gris, RGB, palette, avec alpha ; 1 à 16 bits ; entrelacé Adam7 ou non) → (l, h, pixels RGBA)."""
     import zlib
 
-    if o[:8] != b"\x89PNG\r\n\x1a\n":
+    if not o or o[:8] != b"\x89PNG\r\n\x1a\n":
         return None
     pos, idat, palette, trns = 8, b"", b"", b""
     l = h = prof = typ = entrelace = 0
@@ -771,52 +803,247 @@ def _depng(o):
             idat += d
         elif t == b"IEND":
             break
-    if prof != 8 or entrelace or typ not in (0, 2, 3, 4, 6):
+    if prof not in (1, 2, 4, 8, 16) or typ not in (0, 2, 3, 4, 6):
         return None
     k = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[typ]
+    bpp = max(1, k * prof // 8)
     brut = zlib.decompress(idat)
-    pas = l * k
-    lignes, prec, i = [], bytearray(pas), 0
-    for _ in range(h):
-        f, ligne = brut[i], bytearray(brut[i + 1:i + 1 + pas])
-        i += 1 + pas
-        if f == 1:
-            for x in range(k, pas):
-                ligne[x] = (ligne[x] + ligne[x - k]) & 255
-        elif f == 2:
-            ligne = bytearray((a + b) & 255 for a, b in zip(ligne, prec))
-        elif f == 3:
-            for x in range(pas):
-                ligne[x] = (ligne[x] + ((ligne[x - k] if x >= k else 0) + prec[x]) // 2) & 255
-        elif f == 4:
-            for x in range(pas):
-                a = ligne[x - k] if x >= k else 0
-                b, c = prec[x], (prec[x - k] if x >= k else 0)
-                p = a + b - c
-                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-                ligne[x] = (ligne[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-        lignes.append(ligne)
-        prec = ligne
     px = bytearray(l * h * 4)
-    for y, ligne in enumerate(lignes):
-        for x in range(l):
-            o4 = (y * l + x) * 4
-            if typ == 6:
-                px[o4:o4 + 4] = ligne[x * 4:x * 4 + 4]
-            elif typ == 2:
-                px[o4:o4 + 3] = ligne[x * 3:x * 3 + 3]
-                px[o4 + 3] = 255
-            elif typ == 0:
-                px[o4:o4 + 3] = bytes((ligne[x],)) * 3
-                px[o4 + 3] = 255
-            elif typ == 4:
-                px[o4:o4 + 3] = bytes((ligne[x * 2],)) * 3
-                px[o4 + 3] = ligne[x * 2 + 1]
+    passes = [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)] if entrelace else [(0, 0, 1, 1)]
+    maxi = (1 << prof) - 1
+    i = 0
+    for x0, y0, dx, dy in passes:
+        pw = (l - x0 + dx - 1) // dx if l > x0 else 0
+        ph = (h - y0 + dy - 1) // dy if h > y0 else 0
+        if not pw or not ph:
+            continue
+        pas = (pw * k * prof + 7) // 8
+        prec = bytearray(pas)
+        for r in range(ph):
+            f, ligne = brut[i], bytearray(brut[i + 1:i + 1 + pas])
+            i += 1 + pas
+            if f == 1:
+                for x in range(bpp, pas):
+                    ligne[x] = (ligne[x] + ligne[x - bpp]) & 255
+            elif f == 2:
+                ligne = bytearray((a + b) & 255 for a, b in zip(ligne, prec))
+            elif f == 3:
+                for x in range(pas):
+                    ligne[x] = (ligne[x] + ((ligne[x - bpp] if x >= bpp else 0) + prec[x]) // 2) & 255
+            elif f == 4:
+                for x in range(pas):
+                    a = ligne[x - bpp] if x >= bpp else 0
+                    b, c = prec[x], (prec[x - bpp] if x >= bpp else 0)
+                    p = a + b - c
+                    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                    ligne[x] = (ligne[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+            prec = ligne
+            # échantillons sur 8 bits (16 bits : octet de poids fort ; 1/2/4 bits : décompactés)
+            if prof == 8:
+                ech = ligne
+            elif prof == 16:
+                ech = ligne[0::2]
             else:
-                j = ligne[x]
-                px[o4:o4 + 3] = palette[j * 3:j * 3 + 3]
-                px[o4 + 3] = trns[j] if j < len(trns) else 255
+                ech = bytearray()
+                for octet in ligne:
+                    for dec in range(8 - prof, -1, -prof):
+                        ech.append((octet >> dec) & maxi)
+                del ech[pw * k:]
+                if typ == 0:
+                    ech = bytearray(v * 255 // maxi for v in ech)
+            y = y0 + r * dy
+            if dx == 1 and typ in (6, 2):
+                o4 = y * l * 4
+                if typ == 6:
+                    px[o4:o4 + l * 4] = ech[:l * 4]
+                else:
+                    zone = px[o4:o4 + l * 4]
+                    zone[0::4], zone[1::4], zone[2::4] = ech[0:l * 3:3], ech[1:l * 3:3], ech[2:l * 3:3]
+                    zone[3::4] = b"\xff" * l
+                    px[o4:o4 + l * 4] = zone
+                continue
+            for c in range(pw):
+                o4 = (y * l + x0 + c * dx) * 4
+                if typ == 6:
+                    px[o4:o4 + 4] = ech[c * 4:c * 4 + 4]
+                elif typ == 2:
+                    px[o4:o4 + 3] = ech[c * 3:c * 3 + 3]
+                    px[o4 + 3] = 255
+                elif typ == 0:
+                    px[o4:o4 + 3] = bytes((ech[c],)) * 3
+                    px[o4 + 3] = 255
+                elif typ == 4:
+                    px[o4:o4 + 3] = bytes((ech[c * 2],)) * 3
+                    px[o4 + 3] = ech[c * 2 + 1]
+                else:
+                    j = ech[c]
+                    px[o4:o4 + 3] = palette[j * 3:j * 3 + 3]
+                    px[o4 + 3] = trns[j] if j < len(trns) else 255
     return l, h, px
+
+
+def _lzw_gif(data, mcs, total):
+    clear, fin = 1 << mcs, (1 << mcs) + 1
+    taille = mcs + 1
+    dico = [bytes((i,)) for i in range(clear)] + [b"", b""]
+    out = bytearray()
+    prec = None
+    bits = nbits = i = 0
+    n = len(data)
+    while len(out) < total:
+        while nbits < taille:
+            if i >= n:
+                return out
+            bits |= data[i] << nbits
+            nbits += 8
+            i += 1
+        code = bits & ((1 << taille) - 1)
+        bits >>= taille
+        nbits -= taille
+        if code == clear:
+            taille = mcs + 1
+            del dico[clear + 2:]
+            prec = None
+            continue
+        if code == fin:
+            break
+        if prec is None:
+            e = dico[code] if code < len(dico) else b""
+        elif code < len(dico):
+            e = dico[code]
+            dico.append(prec + e[:1])
+        else:
+            e = prec + prec[:1]
+            dico.append(e)
+        out += e
+        prec = e
+        if len(dico) == (1 << taille) and taille < 12:
+            taille += 1
+    return out
+
+
+def _degif(o):
+    """GIF (première image, entrelacée ou non, transparence) → (l, h, pixels RGBA) ; None si illisible."""
+    try:
+        if not o or o[:4] != b"GIF8":
+            return None
+        L, H, f = struct.unpack("<HHB", o[6:11])
+        pos = 13
+        gct = b""
+        if f & 0x80:
+            n = 3 * (2 << (f & 7))
+            gct, pos = o[pos:pos + n], pos + n
+        transp = None
+        while pos < len(o):
+            b = o[pos]
+            if b == 0x21:
+                lab = o[pos + 1]
+                pos += 2
+                while True:
+                    n = o[pos]
+                    if lab == 0xF9 and n >= 4 and o[pos + 1] & 1:
+                        transp = o[pos + 4]
+                    pos += 1 + n
+                    if n == 0:
+                        break
+            elif b == 0x2C:
+                x0, y0, w, h, f2 = struct.unpack("<HHHHB", o[pos + 1:pos + 10])
+                pos += 10
+                ct = gct
+                if f2 & 0x80:
+                    n = 3 * (2 << (f2 & 7))
+                    ct, pos = o[pos:pos + n], pos + n
+                mcs = o[pos]
+                pos += 1
+                donnees = bytearray()
+                while True:
+                    n = o[pos]
+                    pos += 1
+                    if n == 0:
+                        break
+                    donnees += o[pos:pos + n]
+                    pos += n
+                ind = _lzw_gif(donnees, mcs, w * h)
+                lignes = list(range(h))
+                if f2 & 0x40:
+                    lignes = list(range(0, h, 8)) + list(range(4, h, 8)) + list(range(2, h, 4)) + list(range(1, h, 2))
+                px = bytearray(L * H * 4)
+                for r, y in enumerate(lignes):
+                    yy = y0 + y
+                    if yy >= H:
+                        continue
+                    for x in range(w):
+                        k = r * w + x
+                        if k >= len(ind) or x0 + x >= L:
+                            break
+                        j = ind[k]
+                        if j == transp:
+                            continue
+                        o4 = (yy * L + x0 + x) * 4
+                        px[o4:o4 + 3] = ct[j * 3:j * 3 + 3]
+                        px[o4 + 3] = 255
+                return L, H, px
+            else:
+                break
+    except Exception:
+        return None
+    return None
+
+
+def _deppm(o):
+    """PPM / PGM (P2, P3, P5, P6) → (l, h, pixels RGBA) ; None si illisible."""
+    try:
+        if not o or not re.match(rb"P[2356]\s", o[:3]):
+            return None
+        typ = o[1:2]
+        pos, vals = 2, []
+        while len(vals) < 3:
+            while o[pos:pos + 1].isspace():
+                pos += 1
+            if o[pos:pos + 1] == b"#":
+                while pos < len(o) and o[pos:pos + 1] not in (b"\n", b"\r"):
+                    pos += 1
+                continue
+            d = pos
+            while pos < len(o) and not o[pos:pos + 1].isspace() and o[pos:pos + 1] != b"#":
+                pos += 1
+            vals.append(int(o[d:pos]))
+        l, h, mx = vals
+        gris = typ in (b"2", b"5")
+        n = l * h * (1 if gris else 3)
+        if typ in (b"5", b"6"):
+            pos += 1  # un seul blanc après maxval
+            if mx < 256:
+                ech = bytes(o[pos:pos + n])
+            else:
+                ech = bytes(min(255, (o[pos + 2 * j] << 8 | o[pos + 2 * j + 1]) * 255 // mx) for j in range(n))
+                mx = 255
+        else:
+            ech = bytes(min(255, int(x) * 255 // max(1, mx)) for x in o[pos:].split()[:n])
+            mx = 255
+        if len(ech) < n:
+            return None
+        if mx not in (0, 255):
+            ech = bytes(v * 255 // mx for v in ech)
+        px = bytearray(l * h * 4)
+        if gris:
+            px[0::4] = px[1::4] = px[2::4] = ech
+        else:
+            px[0::4], px[1::4], px[2::4] = ech[0::3], ech[1::3], ech[2::3]
+        px[3::4] = b"\xff" * (l * h)
+        return l, h, px
+    except Exception:
+        return None
+
+
+def _decoder_image(o):
+    if not o:
+        return None
+    if o[:8] == b"\x89PNG\r\n\x1a\n":
+        return _depng(o)
+    if o[:4] == b"GIF8":
+        return _degif(o)
+    return _deppm(o)
 
 
 class PhotoImage(Image):
@@ -831,7 +1058,12 @@ class PhotoImage(Image):
                 self._octets(f.read())
         elif o.get("data") is not None:
             d = o["data"]
-            if isinstance(d, (bytes, bytearray)) and not bytes(d[:4]).isascii():
+            if isinstance(d, str) and re.match(r"P[2356]\s", d[:3]):
+                d = d.encode("latin-1")  # PPM / PGM en texte
+            binaire = isinstance(d, (bytes, bytearray)) and (
+                bytes(d[:4]) == b"GIF8" or bytes(d[:8]) == b"\x89PNG\r\n\x1a\n" or bytes(d[:2]) == b"\xff\xd8"
+                or re.match(rb"P[2356]\s", bytes(d[:3])) or not bytes(d[:4]).isascii())
+            if binaire:
                 self._octets(bytes(d))
             else:
                 try:
@@ -851,6 +1083,13 @@ class PhotoImage(Image):
             self._src = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
 
     def _octets(self, o):
+        self._px = None
+        if re.match(rb"P[2356]\s", o[:3]):
+            d = _deppm(o)  # PPM / PGM : affiché en PNG
+            if not d:
+                raise TclError("couldn't recognize image data")
+            self._l, self._h, self._px = d
+            o = _png(self._l, self._h, self._px)
         mime = "image/png" if o[:8] == b"\x89PNG\r\n\x1a\n" else "image/gif" if o[:4] == b"GIF8" else "image/jpeg" if o[:2] == b"\xff\xd8" else "image/png"
         self._l, self._h = _taille_image(o)
         self._brut = o
@@ -868,29 +1107,53 @@ class PhotoImage(Image):
     def __getitem__(self, k):
         return self.cget(k)
 
-    def _copie(self, ex, ey):
+    def _copie(self, zx=1, zy=1, sx=1, sy=1):
+        """Vraie copie des pixels (plus proche voisin), comme « copy -zoom / -subsample » de Tk : get() / put()
+        marchent sur la copie, et un put() récent (pas encore réencodé) est copié aussi."""
+        zx, zy, sx, sy = int(zx), int(zy), int(sx), int(sy)
+        if min(zx, zy, sx, sy) <= 0:
+            raise TclError("value must be positive")
+        try:
+            src = self._tampon()
+        except TclError:
+            # JPEG (non décodé ici) : copie agrandie par le navigateur
+            p = PhotoImage.__new__(PhotoImage)
+            Image.__init__(p)
+            p._src, p._l, p._h, p._ex, p._ey = self._src, self._l, self._h, self._ex * zx / sx, self._ey * zy / sy
+            return p
+        l0, h0 = self._l, self._h
+        bl, bh = -(-l0 // sx), -(-h0 // sy)  # subsample : arrondi supérieur, comme Tk
+        px = bytearray()
+        for by in range(bh):
+            ys = by * sy * l0 * 4
+            ligne = b"".join(bytes(src[ys + bx * sx * 4:ys + bx * sx * 4 + 4]) * zx for bx in range(bl))
+            px += ligne * zy
         p = PhotoImage.__new__(PhotoImage)
         Image.__init__(p)
-        p._src, p._l, p._h, p._ex, p._ey = self._src, self._l, self._h, ex, ey
+        p._l, p._h, p._px = bl * zx, bh * zy, px
+        if p._l and p._h:
+            p._encoder()
         return p
 
     def copy(self):
-        return self._copie(self._ex, self._ey)
+        return self._copie()
 
     def zoom(self, x, y=""):
-        y = x if y == "" else y
-        return self._copie(self._ex * x, self._ey * y)
+        return self._copie(zx=x, zy=x if y == "" else y)
 
     def subsample(self, x, y=""):
-        y = x if y == "" else y
-        return self._copie(self._ex / x, self._ey / y)
+        return self._copie(sx=x, sy=x if y == "" else y)
 
     # — pixels : tampon RGBA, réencodé en PNG après les modifications (une fois par rappel) —
     def _tampon(self):
         if getattr(self, "_px", None) is None:
-            dec = _depng(self._brut) if getattr(self, "_brut", None) else None
+            b = getattr(self, "_brut", None)
+            dec = _decoder_image(b) if b else None
             if dec and (dec[0], dec[1]) == (self._l, self._h):
                 self._px = dec[2]
+            elif b and not dec:
+                # Ne pas effacer l'image en silence au premier put() : format non lu pixel par pixel.
+                raise TclError("image non modifiable ici : seuls PNG, GIF et PPM/PGM sont lus pixel par pixel")
             else:
                 self._px = bytearray(max(0, self._l) * max(0, self._h) * 4)
         return self._px
@@ -1117,7 +1380,7 @@ class Misc:
 
     def event_generate(self, sequence, **kw):
         motif = _analyser(sequence)
-        ev = {"type": motif[1], "detail": motif[2], "mods": set(motif[0]), "double": "Double" in motif[0]}
+        ev = {"type": motif[1], "detail": motif[2], "mods": set(motif[0]), "clics": 3 if "Triple" in motif[0] else 2 if "Double" in motif[0] else 1}
         e = Event(widget=self, type=EventType.VirtualEvent if motif[1] == "Virtual" else getattr(EventType, motif[1], None), **{k: v for k, v in kw.items() if k in ("x", "y", "keysym", "char", "delta", "num", "width", "height", "state", "data")})
 
         def envoyer():
@@ -1171,13 +1434,16 @@ class Misc:
                 pass
 
     def update(self):
+        _verifier_appli(self)
         if _peut_attendre():
             _ceder(0)
+            _relancer_sortie()  # sys.exit() d'un rappel : tkinter le propage hors de update()
+            # La fenêtre fermée PENDANT cet update() : c'est l'appel suivant qui lève TclError, comme Tk.
         else:
             _surveiller_boucle()
 
     def update_idletasks(self):
-        pass
+        _verifier_appli(self)
 
     def mainloop(self, n=0):
         """Comme Tk, attend la fermeture des fenêtres (ou quit()) quand le navigateur le permet (JSPI) ;
@@ -1280,7 +1546,29 @@ class Misc:
         return _presse_papiers[0]
 
     def selection_get(self, **kw):
-        return _presse_papiers[0]
+        """Sélection PRIMARY comme Tk : texte sélectionné de ce widget, du widget qui a le focus ou d'un Text."""
+        if str(kw.get("selection", "PRIMARY")) == "CLIPBOARD":
+            return self.clipboard_get()
+        candidats = [self]
+        try:
+            f = self.focus_get()
+            if f is not None:
+                candidats.append(f)
+        except Exception:
+            pass
+        candidats += [w for w in list(_widgets.values()) if isinstance(w, Text)]
+        for w in candidats:
+            if getattr(w, "_detruit", False):
+                continue
+            if isinstance(w, Text):
+                w._synchro()
+                if w._sel:
+                    return w._contenu[w._sel[0]:w._sel[1]]
+            elif isinstance(w, _ChampTexte):
+                s = w._sel_page()
+                if s and s[0] != s[1]:
+                    return w.get()[s[0]:s[1]]
+        raise TclError('PRIMARY selection doesn\'t exist or form "STRING" not defined')
 
     # — focus —
     def focus_set(self):
@@ -1498,12 +1786,16 @@ class Misc:
         pass
 
     def lift(self, aboveThis=None):
-        _ui.ecrire(self._id, "premierPlan", None)
+        if isinstance(self, Wm):
+            _ui.ecrire(self._id, "premierPlan", None)
+        else:  # widget : passe au-dessus de ses frères (pages empilées dans la même cellule → tkraise)
+            _ui.ecrire(self._id, "pile", _js(["haut", getattr(aboveThis, "_id", None)]))
 
     tkraise = lift
 
     def lower(self, belowThis=None):
-        pass
+        if not isinstance(self, Wm):
+            _ui.ecrire(self._id, "pile", _js(["bas", getattr(belowThis, "_id", None)]))
 
     def image_names(self):
         return image_names()
@@ -1512,6 +1804,8 @@ class Misc:
         return image_types()
 
     def _recevoir(self, type_, d):
+        if type_ == "presse":
+            return _presse_evenement(self, d)
         return _evenement_dom(self, type_, d)
 
     def _variable_changee(self, var):
@@ -1558,7 +1852,8 @@ def _evenement_dom(cible, type_, d):
         num = int(d.get("bouton", 1))
         num = {1: 1, 2: 2, 3: 3}.get(num, num)
         tk_type = "ButtonRelease" if type_ == "mouseup" else "ButtonPress"
-        ev = {"type": tk_type, "detail": str(num), "mods": mods - {"B1", "B2", "B3"}, "double": type_ == "dblclick"}
+        clics = 2 if type_ == "dblclick" else max(1, int(d.get("clics", 1) or 1))
+        ev = {"type": tk_type, "detail": str(num), "mods": mods - {"B1", "B2", "B3"}, "clics": clics}
         e = Event(type=getattr(EventType, tk_type), num=num, **commun)
         if hasattr(cible, "_evenement_item"):
             cible._evenement_item(d, ev, e)
@@ -1594,6 +1889,11 @@ def _evenement_dom(cible, type_, d):
         return None
     if type_ in ("focusin", "focusout"):
         tk_type = "FocusIn" if type_ == "focusin" else "FocusOut"
+        if isinstance(cible, _ChampTexte) and cible._valide_au_focus():
+            try:
+                cible._valider(cible.get(), "-1", -1, "", type_)
+            except TclError:
+                pass
         return _dispatcher(cible, {"type": tk_type, "detail": None, "mods": set()}, Event(type=getattr(EventType, tk_type)))
     if type_ == "configure":
         e = Event(type=EventType.Configure, width=int(d.get("largeur", 0)), height=int(d.get("hauteur", 0)), x=0, y=0)
@@ -1632,6 +1932,19 @@ def _dispatcher(cible, ev, e, sans_toplevel=False, seulement_detail=False):
     return "traite" if traite else None
 
 
+def _presse_evenement(w, d):
+    """Ctrl+C / Ctrl+X / Ctrl+V de l'utilisateur dans un champ ou un Text : <<Copy>>, <<Cut>>, <<Paste>> comme
+    Tk (une liaison qui répond « break » empêche l'action) ; clipboard_get() voit ce qui a été copié."""
+    if isinstance(w, Text):
+        w._synchro()
+    nom = str(d.get("nom", ""))
+    t = str(d.get("texte", ""))
+    if t:
+        _presse_papiers[0] = t
+    r = _dispatcher(w, {"type": "Virtual", "detail": nom, "mods": set()}, Event(type=EventType.VirtualEvent, widget=w))
+    return "break" if r == "break" else None
+
+
 def _virtuel(w, nom, differe=True):
     """Événement virtuel (<<ListboxSelect>>, <<TreeviewSelect>>, <<Modified>>…) : comme la file d'événements de
     Tk, il part après le rappel en cours (le programme a fini de modifier le widget)."""
@@ -1653,8 +1966,6 @@ def _types_dom(liaisons):
             continue
         mods, t, detail = motif
         out.update(_DOM.get(t, []))
-        if "Double" in mods:
-            out.add("dblclick")
         if t == "ButtonPress" and detail in ("4", "5"):
             out.add("wheel")
         if t in ("KeyPress", "KeyRelease") and "keydown" not in out:
@@ -1679,6 +1990,8 @@ def _maj_ecoute_fenetre(top):
             continue
         types |= _types_dom(w._liaisons)
         types |= _types_dom(_classes.get(w.winfo_class()))
+        if isinstance(w, _ChampTexte) and w._valide_au_focus():
+            types |= {"focusin", "focusout"}
         for liaisons in getattr(w, "_liaisons_items", {}).values():
             # Liaisons d'éléments (canvas), de tags (Text) ou de lignes (Treeview)
             types |= _types_dom(liaisons)
@@ -2056,6 +2369,8 @@ class _Base(Misc):
         return o
 
     def configure(self, cnf=None, **kw):
+        if self._detruit and (kw or isinstance(cnf, dict)):
+            raise TclError(f'invalid command name "{self}"')
         if cnf is None and not kw:
             return {k: (k, k, k.capitalize(), "", v) for k, v in self._o.items()}
         if isinstance(cnf, str) and not kw:
@@ -2179,6 +2494,10 @@ class _Base(Misc):
         m = getattr(self, "master", None)
         if m is not None and getattr(m, "children", None) is not None:
             m.children.pop(getattr(self, "_name", ""), None)
+        for parent in {id(x): x for x in (m, getattr(self, "_gerant", None)) if x is not None}.values():
+            f = getattr(parent, "_enfant_detruit", None)
+            if f is not None:
+                f(self)  # Notebook : l'onglet de la page détruite disparaît, comme Tk
         if _attentes:
             _reveiller()  # mainloop() / wait_window() revérifient leur condition
 
@@ -2432,6 +2751,22 @@ class _ChampTexte:
     def _modifiable(self):
         return str(self._o.get("state", "normal")) not in ("disabled", "readonly")
 
+    def _variable_changee(self, var):
+        if var is self._var_texte:
+            self._valeur = str(var._valeur)  # sinon une frappe refusée restaurerait une valeur périmée
+        super()._variable_changee(var)
+
+    def _traduire(self, o):
+        j = super()._traduire(o)
+        if o.get("textvariable") is not None:
+            self._valeur = str(o["textvariable"].get())
+        if ("validate" in o or "validatecommand" in o or "vcmd" in o) and getattr(self, "_id", None) in _widgets:
+            _maj_ecoute(self)  # validation au focus : la page doit envoyer FocusIn / FocusOut
+        return j
+
+    def _valide_au_focus(self):
+        return str(self._o.get("validate", "none")) in ("focus", "focusin", "focusout", "all") and bool(self._o.get("validatecommand"))
+
     def _ecrire(self, texte):
         self._valeur = texte
         _ui.configurer(self._id, _js({"valeur": texte}))
@@ -2558,7 +2893,11 @@ class _ChampTexte:
     def _valider(self, nouveau, action="1", index=0, chaine="", raison="key"):
         mode = str(self._o.get("validate", "none"))
         vcmd = self._o.get("validatecommand")
-        if mode not in ("key", "all") or not vcmd:
+        if not vcmd:
+            return True
+        # Comme Tk : key, focus / focusin / focusout, all ; validate() force la validation (%V = forced).
+        if not (mode == "all" or raison == "forced" or (raison == "key" and mode == "key")
+                or (raison in ("focusin", "focusout") and mode in ("focus", raison))):
             return True
         ancien = getattr(self, "_valeur", "")
         if isinstance(vcmd, (tuple, list)):
@@ -2573,6 +2912,7 @@ class _ChampTexte:
             ok = fn(*[subst.get(a, a) if isinstance(a, str) else a for a in args])
         except Exception:
             _rapporter()
+            self._o["validate"] = "none"  # Tk coupe la validation quand la commande échoue
             return True
         valide = ok is not False and ok != 0 and str(ok).lower() not in ("false", "0")
         if not valide:
@@ -2963,6 +3303,38 @@ class Scale(Widget):
 
 # ─────────────────────────── Text ───────────────────────────
 
+def _motif_tcl(p, nolinestop=False):
+    """Expression régulière ARE de Tcl → module re : \\m \\M (début / fin de mot), \\y \\Y ; hors -nolinestop,
+    une classe niée [^…] ne franchit pas les fins de ligne (comme Tk)."""
+    out = []
+    i = 0
+    classe = False
+    while i < len(p):
+        ch = p[i]
+        if ch == "\\" and i + 1 < len(p):
+            n = p[i + 1]
+            if not classe and n in "mMyY":
+                out.append({"m": r"\b(?=\w)", "M": r"\b(?<=\w)", "y": r"\b", "Y": r"\B"}[n])
+            else:
+                out.append(p[i:i + 2])
+            i += 2
+            continue
+        if ch == "[" and not classe:
+            classe = True
+            nie = p.startswith("[^", i)
+            out.append("[^\\n" if nie and not nolinestop else "[^" if nie else "[")
+            i += 2 if nie else 1
+            if i < len(p) and p[i] == "]":
+                out.append("\\]")
+                i += 1
+            continue
+        if ch == "]" and classe:
+            classe = False
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 class Text(Widget):
     _type_js = "text"
     _classe_tk = "Text"
@@ -2984,6 +3356,9 @@ class Text(Widget):
         self._retablir = []
         self._separateur = False
         self._derniere_saisie = 0.0
+        self._mode_edition = None
+        self._cache_debuts = (None, [0])
+        self._integres = []  # [position, description pour la page, widget ou image] (window_create / image_create)
         self._liaisons_items = {}
         self._survoles = set()
         self._rendu_attente = False
@@ -3040,23 +3415,40 @@ class Text(Widget):
             return
         self._rendu_attente = False
         t = self._contenu
-        coupures = {0, len(t)}
+        n = len(t)
+        # Balayage : débuts / fins de plages triés une fois, tags actifs tenus à jour (pas de segments × plages).
+        ev = {}
         for tag, plages in self._tags.items():
-            if tag in self._styles:
+            if self._styles.get(tag):
                 for a, b in plages:
-                    coupures.update((max(0, min(len(t), a)), max(0, min(len(t), b))))
-        points = sorted(coupures)
+                    a, b = max(0, min(n, a)), max(0, min(n, b))
+                    if b > a:
+                        ev.setdefault(a, []).append((1, tag))
+                        ev.setdefault(b, []).append((-1, tag))
+        integres = {}
+        for e in self._integres:
+            if not (isinstance(e[2], Misc) and getattr(e[2], "_detruit", False)):
+                integres.setdefault(max(0, min(n, e[0])), []).append(e[1])
+        points = sorted(set(ev) | set(integres) | {0, n})
         ordre = {tag: i for i, tag in enumerate(self._ordre_tags)}
+        actifs = {}
+        memo = {}
         segments = []
         for a, b in zip(points, points[1:]):
+            for sens, tag in ev.get(a, ()):
+                actifs[tag] = actifs.get(tag, 0) + sens
+            segments.extend(integres.get(a, ()))
             if b <= a:
                 continue
-            style = {}
-            for tag in sorted(self._tags, key=lambda x: ordre.get(x, -1)):
-                st = self._styles.get(tag)
-                if st and any(x <= a and b <= y for x, y in self._tags[tag]):
-                    style.update(st)
+            cle = frozenset(k for k, v in actifs.items() if v > 0)
+            style = memo.get(cle)
+            if style is None:
+                style = {}
+                for tag in sorted(cle, key=lambda x: ordre.get(x, -1)):
+                    style.update(self._styles[tag])
+                memo[cle] = style
             segments.append({"texte": t[a:b], "style": style or None})
+        segments.extend(integres.get(n, ()))
         self._sel_envoyee = c = self._vue_selection()
         _ui.configurer(self._id, _js({"contenu": segments, "curseur": c}))
 
@@ -3064,6 +3456,19 @@ class Text(Widget):
         return str(self._o.get("state", "normal")) == "disabled"
 
     # — index « ligne.colonne », marques, sélection —
+    def _debuts(self):
+        """Débuts de ligne (décalages), recalculés seulement quand le texte change."""
+        t = self._contenu
+        c = self._cache_debuts
+        if c[0] is not t:
+            d = [0]
+            i = t.find("\n")
+            while i >= 0:
+                d.append(i + 1)
+                i = t.find("\n", i + 1)
+            self._cache_debuts = c = (t, d)
+        return c[1]
+
     def _offset(self, index):
         t = self._contenu
         s = str(index).strip()
@@ -3083,15 +3488,15 @@ class Text(Widget):
             pos = len(t) - 1 if p is None else int(p)
         elif re.fullmatch(r"\d+\.(\d+|end)", base):
             l, c = base.split(".")
-            lignes = t.split("\n")
+            d = self._debuts()
             l = int(l)
             if l < 1:
                 pos = 0
-            elif l > len(lignes) - 1:
+            elif l > len(d) - 1:
                 pos = len(t)
             else:
-                debut = sum(len(x) + 1 for x in lignes[:l - 1])
-                longueur = len(lignes[l - 1])
+                debut = d[l - 1]
+                longueur = d[l] - 1 - debut
                 col = longueur if c == "end" else min(int(c), longueur)
                 pos = debut + col
         elif base.endswith(".first") or base.endswith(".last"):
@@ -3121,18 +3526,24 @@ class Text(Widget):
                 mm = re.match(r"([+-])(\d+)(.*)", mod)
                 n = int(mm.group(2)) * (1 if mm.group(1) == "+" else -1)
                 if mm.group(3).startswith("l") or mm.group(3).startswith("displayl"):
-                    avant = t[:min(pos, len(t) - 1)].split("\n")
-                    l, c = len(avant), len(avant[-1])
-                    l = max(1, min(len(t.split("\n")) - 1, l + n))
-                    debut = sum(len(x) + 1 for x in t.split("\n")[:l - 1])
-                    pos = debut + min(c, len(t.split("\n")[l - 1]))
+                    # Comme Tk : la ligne fictive après le « \n » final (index end) est atteignable, ce qui
+                    # arrête les boucles « index + 1line » / dlineinfo() des numéros de ligne.
+                    d = self._debuts()
+                    pos = max(0, min(len(t), pos))
+                    l = bisect.bisect_right(d, pos)
+                    c = pos - d[l - 1]
+                    l = max(1, min(len(d), l + n))
+                    longueur = d[l] - 1 - d[l - 1] if l < len(d) else len(t) - d[l - 1]
+                    pos = d[l - 1] + min(c, longueur)
                 else:
                     pos += n
         return max(0, min(len(t), pos))
 
     def _pos_index(self, p):
-        avant = self._contenu[:p].split("\n")
-        return f"{len(avant)}.{len(avant[-1])}"
+        d = self._debuts()
+        p = max(0, min(len(self._contenu), p))
+        l = bisect.bisect_right(d, p)
+        return f"{l}.{p - d[l - 1]}"
 
     def index(self, index):
         self._synchro()
@@ -3173,6 +3584,25 @@ class Text(Widget):
                 self._marques[k] = v + n
             elif v > p:
                 self._marques[k] = p
+        if self._integres:
+            garder = []
+            for e in self._integres:
+                v = e[0]
+                if n >= 0:
+                    if v > p:  # gravité gauche : un texte inséré à sa place passe après l'élément intégré
+                        e[0] = v + n
+                elif p <= v < fin or (v >= p and fin >= len(self._contenu) + (-n) - 1):
+                    w = e[2]
+                    if isinstance(w, Misc) and not getattr(w, "_detruit", False):
+                        try:
+                            w.destroy()  # Tk détruit la fenêtre intégrée effacée avec le texte
+                        except Exception:
+                            pass
+                    continue
+                elif v >= fin:
+                    e[0] = v + n
+                garder.append(e)
+            self._integres = garder
         if self._sel:
             a, b = self._sel
             if n >= 0:
@@ -3187,30 +3617,46 @@ class Text(Widget):
             return
         if tag not in self._ordre_tags:
             self._ordre_tags.append(tag)
-        plages = sorted(self._tags.get(tag, []) + [[a, b]])
-        fusion = []
-        for x, y in plages:
-            if fusion and x <= fusion[-1][1]:
-                fusion[-1][1] = max(fusion[-1][1], y)
-            else:
-                fusion.append([x, y])
-        self._tags[tag] = fusion
+        plages = self._tags.setdefault(tag, [])
+        if not plages or a > plages[-1][1]:
+            plages.append([a, b])  # cas courant (coloration de haut en bas) : en fin de liste
+            return
+        # Plages triées et disjointes : on fusionne seulement les voisines touchées.
+        i = bisect.bisect_left([r[1] for r in plages], a)
+        j = i
+        while j < len(plages) and plages[j][0] <= b:
+            j += 1
+        if i < j:
+            a, b = min(a, plages[i][0]), max(b, plages[j - 1][1])
+        plages[i:j] = [[a, b]]
 
-    def _memoriser(self, avant, saisie=False):
-        """Pile d'annulation (undo=True) : une frappe continue (< 1 s) forme un seul pas, comme Tk."""
+    def _memoriser(self, avant, mode="insert", saisie=False):
+        """Pile d'annulation (undo=True), regroupée comme Tk (autoseparators) : une suite d'insertions (ou de
+        suppressions) forme un seul pas ; changer de genre d'édition ou edit_separator() en ouvre un nouveau.
+        Une pause de plus d'1 s dans la frappe ouvre aussi un pas."""
         try:
             actif = getboolean(self._o.get("undo", False))
         except TclError:
             actif = False
         if not actif:
             return
+        try:
+            auto = getboolean(self._o.get("autoseparators", 1))
+        except TclError:
+            auto = True
         maintenant = time.monotonic()
-        regrouper = saisie and self._annuler and self._annuler[-1][2] and maintenant - self._derniere_saisie < 1.0 and not self._separateur
-        if not regrouper:
+        nouveau = (not self._annuler or self._separateur or (auto and mode != self._mode_edition)
+                   or (auto and saisie and self._annuler[-1][2] and maintenant - self._derniere_saisie >= 1.0))
+        if nouveau:
             self._annuler.append([avant, self._marques.get("insert", 0), saisie, {k: [list(r) for r in v] for k, v in self._tags.items()}])
             n = int(self._o.get("maxundo", 0) or 0)
             if n > 0:
                 del self._annuler[:-n]
+            # Garde-fou mémoire : les pas les plus anciens partent au-delà d'environ 20 millions de caractères.
+            total = sum(len(e[0]) for e in self._annuler)
+            while len(self._annuler) > 1 and total > 20_000_000:
+                total -= len(self._annuler.pop(0)[0])
+        self._mode_edition = mode
         self._derniere_saisie = maintenant
         self._separateur = False
         self._retablir.clear()
@@ -3240,7 +3686,7 @@ class Text(Widget):
                     self._ajouter_plage(str(tag), p, p + len(t))
             p += len(t)
         if self._contenu != avant:
-            self._memoriser(avant)
+            self._memoriser(avant, "insert")
             self._marquer_modifie()
             self._rendre()
 
@@ -3256,7 +3702,7 @@ class Text(Widget):
         avant = self._contenu
         self._contenu = self._contenu[:a] + self._contenu[b:]
         self._decaler(a, -(b - a), fin=b)
-        self._memoriser(avant)
+        self._memoriser(avant, "delete")
         self._marquer_modifie()
         self._rendre()
 
@@ -3316,6 +3762,7 @@ class Text(Widget):
                 self._ajouter_plage(str(tagName), a, b)
         if tagName == SEL:
             self._envoyer_selection()
+            _virtuel(self, "<<Selection>>")
         else:
             self._rendre()
 
@@ -3327,6 +3774,7 @@ class Text(Widget):
             if self._sel and self._sel[0] < b and self._sel[1] > a:
                 self._sel = None
                 self._envoyer_selection()
+                _virtuel(self, "<<Selection>>")
             return
         restes = []
         for x, y in self._tags.get(tagName, []):
@@ -3402,20 +3850,29 @@ class Text(Widget):
             out += [self._pos_index(a), self._pos_index(b)]
         return tuple(out)
 
+    def _plages_tag(self, tagName):
+        if str(tagName) == SEL:
+            return [list(self._sel)] if self._sel else []
+        return sorted(self._tags.get(str(tagName), []))
+
     def tag_nextrange(self, tagName, index1, index2=None):
+        """Première plage qui COMMENCE dans [index1, index2) — entière, comme Tk."""
+        self._synchro()
         a = self._offset(index1)
-        b = self._offset(index2) if index2 else len(self._contenu)
-        for x, y in sorted(self._tags.get(str(tagName), [])):
-            if y > a and x < b:
-                return (self._pos_index(max(x, a)), self._pos_index(y))
+        b = self._offset(index2) if index2 is not None else len(self._contenu)
+        for x, y in self._plages_tag(tagName):
+            if a <= x < b:
+                return (self._pos_index(x), self._pos_index(y))
         return ()
 
     def tag_prevrange(self, tagName, index1, index2=None):
+        """Dernière plage qui commence avant index1 (et pas avant index2) — entière, comme Tk."""
+        self._synchro()
         a = self._offset(index1)
-        b = self._offset(index2) if index2 else 0
-        for x, y in sorted(self._tags.get(str(tagName), []), reverse=True):
-            if x < a and y > b:
-                return (self._pos_index(x), self._pos_index(min(y, a)))
+        b = self._offset(index2) if index2 is not None else 0
+        for x, y in reversed(self._plages_tag(tagName)):
+            if b <= x < a:
+                return (self._pos_index(x), self._pos_index(y))
         return ()
 
     def tag_raise(self, tagName, aboveThis=None):
@@ -3490,20 +3947,26 @@ class Text(Widget):
             self._survoles = set()
 
     # — recherche, comparaison —
-    def search(self, pattern, index, stopindex=None, forwards=None, backwards=None, exact=None, regexp=None, nocase=None, count=None, elide=None):
+    def search(self, pattern, index, stopindex=None, forwards=None, backwards=None, exact=None, regexp=None, nocase=None, count=None, elide=None, nolinestop=None, strictlimits=None):
         self._synchro()
         debut = self._offset(index)
         texte = self._contenu
         flags = re.I if nocase else 0
-        motif = re.compile(str(pattern) if regexp else re.escape(str(pattern)), flags)
+        try:
+            # Comme Tk (-lineanchor -linestop) : ^ et $ valent pour chaque ligne ; \m \M \y \Y de Tcl traduits.
+            motif = re.compile(_motif_tcl(str(pattern), bool(nolinestop)), flags | re.M) if regexp else re.compile(re.escape(str(pattern)), flags)
+        except re.error as e:
+            raise TclError(f"couldn't compile regular expression pattern: {e}") from None
         if backwards:
+            # Tk : la correspondance qui COMMENCE au plus près avant l'index (chevauchements compris).
             limite = self._offset(stopindex) if stopindex else None
             zones = [(limite if limite is not None else 0, debut)] + ([] if stopindex else [(debut, len(texte))])
             trouve = None
             for a, b in zones:
-                for m in motif.finditer(texte, a, b):
-                    if m.end() <= b:
-                        trouve = m
+                for i in range(b - 1, a - 1, -1):
+                    trouve = motif.match(texte, i)
+                    if trouve:
+                        break
                 if trouve:
                     break
         else:
@@ -3559,11 +4022,13 @@ class Text(Widget):
         if not self._annuler:
             raise TclError("nothing to undo")
         self._restaurer(self._annuler.pop(), self._retablir)
+        self._mode_edition = None
 
     def edit_redo(self):
         if not self._retablir:
             raise TclError("nothing to redo")
         self._restaurer(self._retablir.pop(), self._annuler)
+        self._mode_edition = None
 
     def edit_reset(self):
         self._annuler.clear()
@@ -3595,12 +4060,55 @@ class Text(Widget):
         self._vider_rendu()
         _ui.ecrire(self._id, "action", _js([a, _presse_papiers[0]]))
 
-    # — intégrations (non gérées) —
+    # — fenêtres et images intégrées au fil du texte —
+    def _integrer(self, index, desc, objet, o):
+        self._synchro()
+        p = min(self._offset(index), len(self._contenu) - 1)
+        desc["align"] = str(o.get("align", "center"))
+        desc["marge"] = [int(o.get("padx", 0) or 0), int(o.get("pady", 0) or 0)]
+        self._integres.append([p, desc, objet])
+        self._integres.sort(key=lambda e: e[0])
+        self._rendre()
+
     def window_create(self, index, cnf={}, **kw):
-        pass
+        o = {**(cnf or {}), **kw}
+        w = o.get("window")
+        if w is None and o.get("create"):
+            w = o["create"]()
+        if isinstance(w, str):
+            w = self.nametowidget(w)
+        if not isinstance(w, Misc):
+            return
+        self._integres = [e for e in self._integres if e[2] is not w]
+        self._integrer(index, {"widget": w._id}, w, o)
+
+    def window_names(self):
+        return tuple(str(e[2]) for e in self._integres if "widget" in e[1] and not getattr(e[2], "_detruit", False))
+
+    def window_cget(self, index, option):
+        p = self._offset(index)
+        for e in self._integres:
+            if e[0] == p and "widget" in e[1]:
+                return e[2] if str(option).lstrip("-") == "window" else e[1].get(str(option).lstrip("-"), "")
+        raise TclError(f'no embedded window at index "{index}"')
 
     def image_create(self, index, cnf={}, **kw):
-        return f"image{next(_compteur)}"
+        o = {**(cnf or {}), **kw}
+        im = o.get("image")
+        im = im if isinstance(im, Image) else _images.get(str(im))
+        if im is None:
+            raise TclError(f'image "{o.get("image")}" doesn\'t exist')
+        nom = str(o.get("name") or im.name)
+        noms = {e[1].get("nom") for e in self._integres}
+        base, k = nom, 1
+        while nom in noms:
+            k += 1
+            nom = f"{base}#{k}"
+        self._integrer(index, {"image": im._src, "nom": nom}, im, o)
+        return nom
+
+    def image_names(self):
+        return tuple(e[1]["nom"] for e in self._integres if "image" in e[1])
 
     # — défilement —
     def xview(self, *args):
@@ -3654,7 +4162,7 @@ class Text(Widget):
                 f = 0
                 while f < min(len(ancien), len(nouveau)) - p and ancien[len(ancien) - 1 - f] == nouveau[len(nouveau) - 1 - f]:
                     f += 1
-                self._memoriser(ancien, saisie=True)
+                self._memoriser(ancien, "insert" if len(nouveau) > len(ancien) else "delete", saisie=True)
                 if len(ancien) - f > p:
                     self._decaler(p, -(len(ancien) - f - p), fin=len(ancien) - f)
                 if len(nouveau) - f > p:
@@ -3674,6 +4182,10 @@ class Text(Widget):
                 self.edit_undo() if type_ == "annuler" else self.edit_redo()
             except TclError:
                 pass
+            return None
+        if type_ == "selection":  # la sélection de la page a changé (souris, Maj+flèches)
+            self._synchro()
+            _virtuel(self, "<<Selection>>")
             return None
         if type_ == "defilement":
             cmd = self._o.get("yscrollcommand")
@@ -3721,7 +4233,8 @@ class Listbox(Widget):
             if "dimensions" in j:
                 j["dimensions"]["hauteur"] = None
         if "selectmode" in o:
-            j["multiple"] = str(o["selectmode"]) in ("multiple", "extended")
+            m = str(o["selectmode"])
+            j["multiple"] = "bascule" if m == "multiple" else m == "extended"  # multiple : chaque clic bascule l'élément
         if "listvariable" in o and o["listvariable"] is not None:
             o["listvariable"]._lier(self)
             self._elements = self._depuis_var(o["listvariable"])
@@ -3758,6 +4271,12 @@ class Listbox(Widget):
     def _i(self, index, fin=False):
         """Index Tk : « end » = dernier élément ; pour insert / index, la position après le dernier."""
         n = len(self._elements)
+        if isinstance(index, (tuple, list)):
+            # lb.get(lb.curselection()) : Tk reçoit la liste Tcl « 1 », un index valide.
+            if len(index) == 1:
+                index = index[0]
+            else:
+                raise TclError('bad listbox index "%s": must be active, anchor, end, @x,y, or a number' % " ".join(str(x) for x in index))
         if index in (END, "end"):
             return n if fin else max(0, n - 1)
         if index in (ACTIVE, "active"):
@@ -3915,7 +4434,9 @@ class Listbox(Widget):
     def _recevoir(self, type_, d):
         if type_ == "selection":
             ind = d.get("indices") or []
-            if ind:
+            if d.get("actif") is not None:  # mode multiple : l'élément basculé devient actif
+                self._actif = self._ancre = int(d["actif"])
+            elif ind:
                 self._actif = int(ind[-1])
                 self._ancre = int(ind[0])
             _virtuel(self, "<<ListboxSelect>>")
@@ -3938,6 +4459,7 @@ class OptionMenu(Widget):
         self._var = variable
         self._commande = kwargs.pop("command", None)
         self._liste = [str(x) for x in ([value] if value is not None else []) + list(values)]
+        self._cmds = [None] * len(self._liste)  # None : var.set(v) puis command d'origine (_setit de Tk)
         super().__init__(master, {}, **kwargs)
         variable._lier(self)
         _ui.configurer(self._id, _js({"valeurs": self._liste, "valeur": str(variable._valeur)}))
@@ -3947,22 +4469,45 @@ class OptionMenu(Widget):
         if var is self._var:
             _ui.configurer(self._id, _js({"valeur": str(var._valeur)}))
 
+    def _choisir(self, i, v=None):
+        if not 0 <= i < len(self._liste):
+            i = self._liste.index(v) if v in self._liste else -1
+        if i < 0:
+            return None
+        v = self._liste[i]
+        cmd = self._cmds[i] if i < len(self._cmds) else None
+        if cmd is not None:
+            r = _appeler(cmd)  # entrée reconstruite par le programme (lambda, tk._setit…)
+        else:
+            self._var.set(v)
+            r = _appeler(self._commande, v) if self._commande else None
+        _ui.configurer(self._id, _js({"valeur": str(self._var._valeur)}))  # une lambda peut ne pas faire var.set
+        return r
+
     def _recevoir(self, type_, d):
         if type_ == "commande":
-            v = str(d.get("valeur", ""))
-            self._var.set(v)
-            if self._commande:
-                _appeler(self._commande, v)
+            self._choisir(int(d.get("index", -1) if d.get("index") is not None else -1), str(d.get("valeur", "")))
             return None
         return super()._recevoir(type_, d)
 
-    def _ajouter(self, label, command=None):
-        self._liste.append(str(label))
-        _ui.configurer(self._id, _js({"valeurs": self._liste}))
+    def _envoyer_liste(self):
+        _ui.configurer(self._id, _js({"valeurs": self._liste, "valeur": str(self._var._valeur)}))
+
+    def _ajouter(self, label, command=None, pos=None):
+        pos = len(self._liste) if pos is None else pos
+        self._liste.insert(pos, str(label))
+        self._cmds.insert(pos, command)
+        self._envoyer_liste()
 
     def _vider(self):
         self._liste = []
-        _ui.configurer(self._id, _js({"valeurs": []}))
+        self._cmds = []
+        self._envoyer_liste()
+
+    def _retirer(self, i, j):
+        del self._liste[i:j + 1]
+        del self._cmds[i:j + 1]
+        self._envoyer_liste()
 
 
 class _MenuOptions:
@@ -3971,17 +4516,63 @@ class _MenuOptions:
     def __init__(self, om):
         self._om = om
 
+    def index(self, i):
+        liste = self._om._liste
+        if i in ("end", "last", END):
+            return len(liste) - 1 if liste else None
+        if i in ("active", ACTIVE):
+            v = str(self._om._var._valeur)
+            return liste.index(v) if v in liste else None
+        if isinstance(i, int) or (isinstance(i, str) and i.lstrip("-").isdigit()):
+            return int(i)
+        import fnmatch
+        for k, x in enumerate(liste):
+            if fnmatch.fnmatchcase(x, str(i)):
+                return k
+        raise TclError(f'bad menu entry index "{i}"')
+
     def delete(self, first, last=None):
-        self._om._vider()
+        i = self.index(first)
+        j = self.index(last) if last is not None else i
+        if i is None or j is None:
+            return
+        i, j = max(0, i), min(len(self._om._liste) - 1, j)
+        if j >= i:
+            self._om._retirer(i, j)
 
     def add_command(self, label=None, command=None, **kw):
         self._om._ajouter(label, command)
 
-    def index(self, i):
-        return len(self._om._liste) - 1
+    def insert_command(self, index, label=None, command=None, **kw):
+        i = self.index(index)
+        self._om._ajouter(label, command, len(self._om._liste) if i is None else max(0, i))
 
-    def entryconfigure(self, *a, **k):
+    def add_separator(self, **kw):
         pass
+
+    def invoke(self, index):
+        i = self.index(index)
+        return self._om._choisir(i) if i is not None else None
+
+    def entrycget(self, index, option):
+        i = self.index(index)
+        option = str(option).lstrip("-")
+        if option == "label":
+            return self._om._liste[i]
+        if option == "command":
+            return self._om._cmds[i] or ""
+        return ""
+
+    def entryconfigure(self, index, cnf=None, **kw):
+        o = {**(cnf or {}), **kw}
+        i = self.index(index)
+        if i is None:
+            return
+        if "label" in o:
+            self._om._liste[i] = str(o["label"])
+        if "command" in o:
+            self._om._cmds[i] = o["command"]
+        self._om._envoyer_liste()
 
     entryconfig = entryconfigure
 
@@ -4015,12 +4606,19 @@ class Menu(Widget):
         self._items = []
         self._o.update(self._normaliser(cnf, kw))
 
+    def _contenu_dans(self, m, vus=None):
+        """Ce menu est-il m ou l'une de ses cascades (à n'importe quelle profondeur, quel que soit le maître) ?"""
+        vus = set() if vus is None else vus
+        if m is self:
+            return True
+        if id(m) in vus:
+            return False
+        vus.add(id(m))
+        return any(it["type"] == "cascade" and isinstance(it.get("menu"), Menu) and self._contenu_dans(it["menu"], vus) for it in m._items)
+
     def _maj(self):
-        racine = self
-        while isinstance(racine.master, Menu):
-            racine = racine.master
         for w in list(_widgets.values()):
-            if isinstance(w, Wm) and not w._detruit and w._o.get("menu") is racine:
+            if isinstance(w, Wm) and not w._detruit and isinstance(w._o.get("menu"), Menu) and self._contenu_dans(w._o["menu"]):
                 w._menu()
 
     def _desc(self):
@@ -4189,6 +4787,8 @@ class Menu(Widget):
             return None
         if type_ == "ouvrir":
             self._postcommand()  # peut modifier le menu : la page relit sa description ensuite
+            # Tk relit l'état des entrées (coches des variables, state) à chaque affichage.
+            _ui.descMenu(self._id, _js(self._desc()))
             return None
         return super()._recevoir(type_, d)
 
@@ -4234,6 +4834,46 @@ class PanedWindow(Widget):
 
 # ─────────────────────────── Canvas ───────────────────────────
 
+def _dist_segment(x, y, a, b):
+    (ax, ay), (bx, by) = a, b
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    t = 0.0 if l2 == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / l2))
+    px, py = ax + t * dx, ay + t * dy
+    return ((x - px) ** 2 + (y - py) ** 2) ** 0.5
+
+
+def _dans_polygone(x, y, pts):
+    dedans = False
+    j = len(pts) - 1
+    for k in range(len(pts)):
+        (xi, yi), (xj, yj) = pts[k], pts[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi:
+            dedans = not dedans
+        j = k
+    return dedans
+
+
+def _segment_rectangle(a, b, x1, y1, x2, y2):
+    """Le segment ab touche-t-il le rectangle (Liang-Barsky) ?"""
+    (ax, ay), (bx, by) = a, b
+    dx, dy = bx - ax, by - ay
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, ax - x1), (dx, x2 - ax), (-dy, ay - y1), (dy, y2 - ay)):
+        if p == 0:
+            if q < 0:
+                return False
+        else:
+            r = q / p
+            if p < 0:
+                t0 = max(t0, r)
+            else:
+                t1 = min(t1, r)
+            if t0 > t1:
+                return False
+    return True
+
+
 class Canvas(Widget):
     _type_js = "canvas"
     _classe_tk = "Canvas"
@@ -4269,7 +4909,12 @@ class Canvas(Widget):
         return v if len(v) == 4 else None
 
     # — modèle des éléments —
+    def _vivant(self):
+        if self._detruit:
+            raise TclError(f'invalid command name "{self}"')
+
     def _creer(self, kind, args, kw):
+        self._vivant()
         if kind in ("text", "image", "window", "bitmap"):
             coords = _aplatir(args[:2] if len(args) >= 2 or not args or not isinstance(args[0], (list, tuple)) else args[0])
         else:
@@ -4365,6 +5010,7 @@ class Canvas(Widget):
         return self._creer("window", args, kw)
 
     def coords(self, tagOrId, *args):
+        self._vivant()
         ids = self._resoudre(tagOrId)
         if not ids:
             return []
@@ -4375,6 +5021,7 @@ class Canvas(Widget):
         self._maj_item(ids[0])
 
     def move(self, tagOrId, xAmount, yAmount):
+        self._vivant()
         for i in self._resoudre(tagOrId):
             c = self._items[i]["coords"]
             self._items[i]["coords"] = [v + (float(xAmount) if k % 2 == 0 else float(yAmount)) for k, v in enumerate(c)]
@@ -4404,6 +5051,7 @@ class Canvas(Widget):
             self._envoyer(ops)
 
     def itemconfigure(self, tagOrId, cnf=None, **kw):
+        self._vivant()
         ids = self._resoudre(tagOrId)
         if cnf is None and not kw:
             return {k: (k, "", "", "", v) for k, v in (self._items[ids[0]]["opts"].items() if ids else [])}
@@ -4510,31 +5158,110 @@ class Canvas(Widget):
             return None
         return (int(min(b[0] for b in boites)), int(min(b[1] for b in boites)), int(round(max(b[2] for b in boites))), int(round(max(b[3] for b in boites))))
 
+    def _cache(self, i):
+        """state='hidden' (de l'élément, ou du canvas si l'élément n'en a pas) : ignoré par find_*, comme Tk."""
+        e = str(self._items[i]["opts"].get("state", "") or "")
+        return e == "hidden" or (not e and str(self._o.get("state", "")) == "hidden")
+
+    def _forme(self, i):
+        """(genre, points, demi-épaisseur, plein) pour les tests de forme ; None = la boîte suffit."""
+        it = self._items[i]
+        k, c, o = it["kind"], [float(v) for v in it["coords"]], it["opts"]
+        try:
+            w = max(0.5, float(o.get("width", 1) or 1) / 2)
+        except (TypeError, ValueError):
+            w = 0.5
+        if k == "line" and len(c) >= 4:
+            return ("ligne", [(c[j], c[j + 1]) for j in range(0, len(c) - 1, 2)], w, False)
+        if k in ("oval", "arc") and len(c) >= 4:
+            return ("ovale", c[:4], w, bool(o.get("fill")))
+        if k == "polygon" and len(c) >= 6:
+            return ("poly", [(c[j], c[j + 1]) for j in range(0, len(c) - 1, 2)], w, o.get("fill", "black") not in ("", None))
+        return None
+
+    def _distance(self, i, x, y):
+        """Distance du point à la forme réelle de l'élément (0 dedans), comme les fonctions point de Tk."""
+        f = self._forme(i)
+        if f is None:
+            b = self._boite(i)
+            if not b:
+                return None
+            dx = max(b[0] - x, 0, x - b[2])
+            dy = max(b[1] - y, 0, y - b[3])
+            return (dx * dx + dy * dy) ** 0.5
+        genre, pts, w, plein = f
+        if genre == "ligne":
+            return max(0.0, min(_dist_segment(x, y, a, b) for a, b in zip(pts, pts[1:])) - w)
+        if genre == "ovale":
+            x1, y1, x2, y2 = pts
+            cx, cy, rx, ry = (x1 + x2) / 2, (y1 + y2) / 2, max(abs(x2 - x1) / 2, 0.5), max(abs(y2 - y1) / 2, 0.5)
+            r = (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2) ** 0.5
+            if r <= 1 and plein:
+                return 0.0
+            return max(0.0, abs(r - 1) * min(rx, ry) - w)
+        if plein and _dans_polygone(x, y, pts):
+            return 0.0
+        return max(0.0, min(_dist_segment(x, y, a, b) for a, b in zip(pts, pts[1:] + pts[:1])) - w)
+
+    def _touche(self, i, x1, y1, x2, y2):
+        f = self._forme(i)
+        if f is None:
+            return True
+        genre, pts, w, plein = f
+        if genre == "ovale":
+            ox1, oy1, ox2, oy2 = pts
+            cx, cy = (ox1 + ox2) / 2, (oy1 + oy2) / 2
+            rx, ry = abs(ox2 - ox1) / 2 + w, abs(oy2 - oy1) / 2 + w
+            px, py = min(max(cx, x1), x2), min(max(cy, y1), y2)
+            if ((px - cx) / max(rx, 0.5)) ** 2 + ((py - cy) / max(ry, 0.5)) ** 2 > 1:
+                return False
+            if plein:
+                return True
+            # contour seul : le rectangle ne doit pas être entièrement dans l'ellipse intérieure
+            ix, iy = max(rx - 2 * w, 0.5), max(ry - 2 * w, 0.5)
+            return any(((qx - cx) / ix) ** 2 + ((qy - cy) / iy) ** 2 >= 1 for qx, qy in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)))
+        # ligne / polygone : un segment (élargi de w) coupe ou touche le rectangle
+        bx1, by1, bx2, by2 = x1 - w, y1 - w, x2 + w, y2 + w
+        segs = list(zip(pts, pts[1:])) + ([(pts[-1], pts[0])] if genre == "poly" else [])
+        if any(_segment_rectangle(a, b, bx1, by1, bx2, by2) for a, b in segs):
+            return True
+        return genre == "poly" and plein and _dans_polygone((x1 + x2) / 2, (y1 + y2) / 2, pts)
+
     def find_overlapping(self, x1, y1, x2, y2):
+        x1, y1, x2, y2 = float(x1), float(y1), float(x2), float(y2)
         out = []
         for i in self._ordre:
+            if self._cache(i):
+                continue
             b = self._boite(i)
-            if b and b[0] <= float(x2) and b[2] >= float(x1) and b[1] <= float(y2) and b[3] >= float(y1):
+            if b and b[0] <= x2 and b[2] >= x1 and b[1] <= y2 and b[3] >= y1 and self._touche(i, x1, y1, x2, y2):
                 out.append(i)
         return tuple(out)
 
     def find_enclosed(self, x1, y1, x2, y2):
         out = []
         for i in self._ordre:
+            if self._cache(i):
+                continue
             b = self._boite(i)
             if b and b[0] >= float(x1) and b[2] <= float(x2) and b[1] >= float(y1) and b[3] <= float(y2):
                 out.append(i)
         return tuple(out)
 
     def find_closest(self, x, y, halo=None, start=None):
+        x, y = float(x), float(y)
+        try:
+            h = float(halo or 0)
+        except (TypeError, ValueError):
+            h = 0.0
         meilleur, dist = None, None
-        for i in reversed(self._ordre):
-            b = self._boite(i)
-            if not b:
+        for i in reversed(self._ordre):  # à égalité, l'élément le plus haut gagne (Tk)
+            if self._cache(i):
                 continue
-            dx = max(b[0] - float(x), 0, float(x) - b[2])
-            dy = max(b[1] - float(y), 0, float(y) - b[3])
-            d = dx * dx + dy * dy
+            d = self._distance(i, x, y)
+            if d is None:
+                continue
+            d = max(0.0, d - h)
             if dist is None or d < dist:
                 meilleur, dist = i, d
         return (meilleur,) if meilleur is not None else ()
@@ -4610,17 +5337,29 @@ class Canvas(Widget):
 
     def _evenement_item(self, d, ev, e):
         i = d.get("item")
-        self._courant = int(i) if i is not None else None  # « current » : rien sous la souris → aucun élément
-        if i is None or int(i) not in self._items:
-            return None
-        i = int(i)
-        cles = [str(i)] + list(self._items[i]["tags"]) + ["all"]
-        for cle in cles:
-            liaisons = self._liaisons_items.get(cle)
-            if liaisons:
-                for fn in list(_choisir(liaisons, ev)):
-                    e.widget = self
-                    _appeler(fn, e)
+        i = int(i) if i is not None else None
+        t = ev["type"]
+        saisi = getattr(self, "_saisi", None)
+        fin_saisie = False
+        if t == "ButtonPress":
+            self._courant = self._saisi = i  # Tk : l'élément pressé garde « current » tant qu'un bouton est enfoncé
+        elif saisi is not None and (t == "ButtonRelease" or (t == "Motion" and ev["mods"] & {"B1", "B2", "B3"})):
+            i = saisi if saisi in self._items else None  # mouvements et relâchement vont à l'élément pressé
+            self._courant = i
+            fin_saisie = t == "ButtonRelease"
+        else:
+            self._courant = i  # « current » : rien sous la souris → aucun élément
+        if i is not None and i in self._items:
+            for cle in [str(i)] + list(self._items[i]["tags"]) + ["all"]:
+                liaisons = self._liaisons_items.get(cle)
+                if liaisons:
+                    for fn in list(_choisir(liaisons, ev)):
+                        e.widget = self
+                        _appeler(fn, e)
+        if fin_saisie:  # relâchement traité sur l'élément saisi, PUIS Tk repioche sous la souris
+            self._saisi = None
+            n = d.get("item")
+            self._courant = int(n) if n is not None else None
         return None
 
     def _survol_item(self, d, type_, commun):
@@ -4628,6 +5367,9 @@ class Canvas(Widget):
         if i is None or int(i) not in self._items:
             return
         i = int(i)
+        saisi = getattr(self, "_saisi", None)
+        if saisi is not None and i != saisi:
+            return  # glisser en cours : pas d'Enter / Leave pour les autres éléments (LEFT_GRABBED_ITEM de Tk)
         self._courant = i if type_ == "mouseover" else self._courant
         tk_type = "Enter" if type_ == "mouseover" else "Leave"
         for cle in [str(i)] + list(self._items[i]["tags"]):

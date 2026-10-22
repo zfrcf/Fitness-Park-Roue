@@ -14,7 +14,7 @@ type Opts = Record<string, unknown>;
 /** Fonction Python vue depuis JavaScript (PyProxy) : callPromising permet au Python d'attendre (JSPI). */
 type ProxyPy = ((...args: unknown[]) => unknown) & { callPromising?: (...args: unknown[]) => Promise<unknown>; destroy?: () => void };
 type Rappel = ProxyPy;
-type Gestion = "pack" | "grid" | "place";
+type Gestion = "pack" | "grid" | "place" | "page";
 
 interface CanvasEtat {
   svg: SVGSVGElement;
@@ -51,9 +51,17 @@ interface Widget {
   etire?: { x: boolean; y: boolean };
   /** Text : dernière sélection connue [début, fin] (décalages dans le texte). */
   selTexte?: [number, number];
+  /** Text : dernière plage sélectionnée signalée au Python (<<Selection>>). */
+  selPrec?: string;
+  /** Taille imposée par l'élément de canvas qui l'affiche (create_window(width=…, height=…)). */
+  tailleCanvas?: { l: number; h: number };
+  /** Page d'un Notebook dont le parent Tk n'est pas le Notebook (Frame(root) ajouté par nb.add). */
+  pageExterne?: boolean;
   /** Treeview : identifiants de colonnes affichées et lignes déjà dessinées (par iid). */
   colonnesArbre?: string[];
   lignesArbre?: Map<string, HTMLTableRowElement>;
+  /** Rang d'empilement parmi les frères (ordre de création, changé par lift / lower), comme Tk. */
+  rang: number;
 }
 
 interface Fenetre {
@@ -76,6 +84,8 @@ let rappel: Rappel | null = null;
 let couche: HTMLElement | null = null;
 let zMax = 70;
 let ordrePack = 0;
+let rangMax = 0;
+let rangMin = 0;
 let cascade = 0;
 const sales = new Set<Widget>();
 let planifie = false;
@@ -89,16 +99,47 @@ const descMenus = new Map<number, Opts[]>();
 /** JSPI : les rappels Python sont lancés en appel « promettant » et peuvent attendre (update(), time.sleep()). */
 let suspensible = false;
 let retourSync: unknown;
+/** Résultat d'un rappel qui s'est suspendu (update(), sleep…) avant de répondre : sa réponse viendra plus tard. */
+const EN_ATTENTE = Symbol("en attente");
+/**
+ * Profondeur d'appels Python → JS en cours. Un événement DOM émis pendant ce temps (focus(), execCommand,
+ * suppression d'un élément qui a le focus) ne doit JAMAIS relancer un callPromising imbriqué : Pyodide 0.26
+ * y perd ses piles et meurt (« memory access out of bounds »). Il est alors appelé de façon synchrone, ou mis
+ * en file comme le fait Tk pour FocusIn/FocusOut.
+ */
+let dansPython = 0;
 
-function appeler(cible: number, type: string, donnees: Opts = {}): unknown {
+function appeler(cible: number, type: string, donnees: Opts = {}, apres?: (final: unknown) => void): unknown {
   if (!rappel) return undefined;
   try {
+    if (dansPython > 0) {
+      if (type === "focusin" || type === "focusout") {
+        queueMicrotask(() => appeler(cible, type, donnees));
+        return undefined;
+      }
+      const sauve = retourSync; // le rappel imbriqué dépose aussi son résultat : ne pas écraser celui de l'appel en cours
+      try {
+        return rappel(cible, type, donnees);
+      } finally {
+        retourSync = sauve;
+      }
+    }
     if (suspensible && rappel.callPromising) {
       // Le Python s'exécute tout de suite jusqu'à sa première attente ; s'il n'a pas attendu, il a déjà
       // déposé son résultat (« break »…) par moteurFenetres.retour avant la fin de cet appel.
+      retourSync = EN_ATTENTE;
+      let p: Promise<unknown>;
+      dansPython++;
+      try {
+        p = rappel.callPromising(cible, type, donnees);
+      } finally {
+        dansPython--;
+      }
+      p.catch((e) => console.error("[fenêtres]", e));
+      const r = retourSync;
       retourSync = undefined;
-      rappel.callPromising(cible, type, donnees).catch((e) => console.error("[fenêtres]", e));
-      return retourSync;
+      if (r === EN_ATTENTE && apres) p.then(apres, () => apres(undefined));
+      return r;
     }
     return rappel(cible, type, donnees);
   } catch (e) {
@@ -130,14 +171,14 @@ const CSS = `
 .tk-deroulant button:hover:not(:disabled){background:#91c9f7}
 .tk-deroulant button:disabled{color:#999}
 .tk-deroulant hr{border:0;border-top:1px solid #ddd;margin:3px 0}
-.tk-corps{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden}
+.tk-corps{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;isolation:isolate}
 .tk-cavite{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0}
-.tk-parcelle{display:flex;min-width:0;min-height:0}
+.tk-parcelle{position:relative;display:flex;min-width:0;min-height:0}
 .tk-grille{display:grid;flex:1 1 auto;min-width:0;min-height:0;align-content:start;justify-content:start}
-.tk-cellule{display:flex;min-width:0;min-height:0}
+.tk-cellule{position:relative;display:flex;min-width:0;min-height:0}
 .tk-w{position:relative;flex:0 0 auto;min-width:0;min-height:0}
-.tk-frame{display:flex;flex-direction:column}
-.tk-labelframe{display:flex;flex-direction:column;border:1px solid #c8c8c8;border-radius:3px;margin:0;padding:4px 6px 6px}
+.tk-frame{display:flex;flex-direction:column;background:#f0f0f0;isolation:isolate}
+.tk-labelframe{display:flex;flex-direction:column;border:1px solid #c8c8c8;border-radius:3px;margin:0;padding:4px 6px 6px;background:#f0f0f0}
 .tk-labelframe>legend{padding:0 4px;font-size:inherit}
 .tk-label{display:flex;align-items:center;justify-content:center;white-space:pre;padding:1px 2px;line-height:1.25}
 .tk-label img{display:block}
@@ -189,7 +230,7 @@ const CSS = `
 .tk-onglets>.tk-tabs>button{font:inherit;color:inherit;border:1px solid transparent;border-bottom:0;background:transparent;padding:4px 10px;margin-bottom:-1px;cursor:default}
 .tk-onglets>.tk-tabs>button.actif{background:#fff;border-color:#c8c8c8;border-radius:3px 3px 0 0}
 .tk-onglets>.tk-tabs>button:disabled{color:#a0a0a0}
-.tk-onglets>.tk-page{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0;background:#fff;border:1px solid #c8c8c8;border-top:0}
+.tk-onglets>.tk-page{position:relative;display:grid;grid-template:minmax(0,1fr)/minmax(0,1fr);flex:1 1 auto;min-height:0;background:#fff;border:1px solid #c8c8c8;border-top:0;isolation:isolate}
 .tk-redim{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;touch-action:none;background:linear-gradient(135deg,transparent 50%,#bbb 50%,#bbb 60%,transparent 60%,transparent 70%,#bbb 70%,#bbb 80%,transparent 80%)}
 `;
 
@@ -205,14 +246,22 @@ function assurerCouche(): HTMLElement {
     ecoutesGlobales = true;
     // Sélection d'un widget Text suivie en continu : marque « insert » et tag « sel » du Python.
     document.addEventListener("selectionchange", () => {
-      const a = document.activeElement as HTMLElement | null;
-      const w = a?.classList.contains("tk-text") ? widgets.get(Number(a.dataset.tkid)) : undefined;
-      if (!w || enDisposition) return;
+      // Le Text est trouvé par la sélection elle-même : un Text désactivé (sans focus) se sélectionne aussi.
+      const n = window.getSelection()?.anchorNode;
+      const a = (n instanceof Element ? n : n?.parentElement)?.closest?.(".tk-text") as HTMLElement | null;
+      const w = a ? widgets.get(Number(a.dataset.tkid)) : undefined;
+      if (!w || enDisposition || !selectionDans(w.el)) return;
       const sel = lireSelectionTexte(w);
       // Le « \n » final (celui de Tk) n'est pas une ligne : le curseur ne va pas au-delà.
       const t = lireTexte(w.el);
       const max = t.endsWith("\n") ? t.length - 1 : t.length;
-      if (sel && (sel[0] > max || sel[1] > max)) placerSelectionTexte(w, Math.min(sel[0], max), Math.min(sel[1], max));
+      if (sel && (sel[0] > max || sel[1] > max)) placerSelectionTexte(w, Math.min(sel[0], max), Math.min(sel[1], max), true);
+      // <<Selection>> : seulement quand la plage sélectionnée change (pas à chaque déplacement du curseur).
+      const plage = sel && sel[0] !== sel[1] ? `${Math.min(sel[0], sel[1])}:${Math.max(sel[0], sel[1])}` : "";
+      if (plage !== (w.selPrec ?? "")) {
+        w.selPrec = plage;
+        appeler(w.id, "selection", {});
+      }
     });
     // Saisie implicite : mouvements et relâchement hors de la fenêtre renvoyés au widget cliqué.
     document.addEventListener("mousemove", relayerSaisie, true);
@@ -295,9 +344,20 @@ function disposerTout() {
   const selChamp = champ ? [champ.selectionStart, champ.selectionEnd] : null;
   const sel = window.getSelection();
   const plage = sel && sel.rangeCount && actif?.isContentEditable ? sel.getRangeAt(0).cloneRange() : null;
+  // Détacher un élément remet son défilement à 0 : Text, Listbox, Treeview et canvas défilants le retrouvent.
+  const defilements: [HTMLElement, number, number][] = [];
+  for (const f of fenetres.values()) {
+    for (const e of f.cadre.querySelectorAll<HTMLElement>(".tk-text,.tk-listbox,.tk-tableau,.tk-canvas")) {
+      if (e.scrollTop || e.scrollLeft) defilements.push([e, e.scrollTop, e.scrollLeft]);
+    }
+  }
   enDisposition = true;
   try {
     for (const w of liste) if (!w.detruit) disposer(w);
+    for (const [e, haut, gauche] of defilements) {
+      if (e.scrollTop !== haut) e.scrollTop = haut;
+      if (e.scrollLeft !== gauche) e.scrollLeft = gauche;
+    }
   } finally {
     if (actif && actif !== document.activeElement && document.contains(actif)) {
       actif.focus({ preventScroll: true });
@@ -345,7 +405,7 @@ function creerFenetre(id: number, opts: Opts) {
   cadre.style.top = `${Math.max(4, window.innerHeight / 2 - 160 + decalage)}px`;
   const w: Widget = {
     id, type: "fenetre", el: cadre, contenu: corps, parent: null, enfants: [], geo: null,
-    fen: undefined as unknown as Fenetre, opts: {}, propage: true, lignes: new Map(), colonnes: new Map(),
+    fen: undefined as unknown as Fenetre, opts: {}, propage: true, lignes: new Map(), colonnes: new Map(), rang: ++rangMax,
   };
   const f: Fenetre = { id, cadre, barre, titre, menu, widget: w, ecoutes: new Set(), tailleFixe: false };
   w.fen = f;
@@ -369,7 +429,12 @@ function creerFenetre(id: number, opts: Opts) {
     recadrer(f, true);
     const voulu = f.focusDemande;
     f.focusDemande = undefined;
-    if (voulu && document.contains(voulu)) voulu.focus({ preventScroll: true });
+    if (voulu && document.contains(voulu)) {
+      const wv = voulu.classList.contains("tk-text") ? widgets.get(Number(voulu.dataset.tkid)) : undefined;
+      const memo = wv?.selTexte ? [...wv.selTexte] : null;
+      voulu.focus({ preventScroll: true });
+      if (wv && memo) placerSelectionTexte(wv, memo[0], memo[1], true); // focus ne déplace pas « insert » (Tk)
+    }
     else if (!document.activeElement || document.activeElement === document.body || !document.activeElement.closest(".tk-fen")) cadre.focus({ preventScroll: true });
   });
   signalerNombre();
@@ -505,8 +570,8 @@ function ouvrirDeroulant(menuId: number, items: Opts[], x: number, y: number, so
       e.stopPropagation();
       if (it.type === "cascade") {
         const sous = nb(it.menu);
+        const r = b.getBoundingClientRect(); // mesuré avant : postcommand peut redessiner les menus
         appeler(sous, "ouvrir"); // postcommand du sous-menu, qui peut le modifier
-        const r = b.getBoundingClientRect();
         ouvrirDeroulant(sous, descMenus.get(sous) ?? (it.items as Opts[]) ?? [], r.right, r.top, true);
         return;
       }
@@ -558,8 +623,13 @@ function dessinerMenu(f: Fenetre, barre: Opts[] | null) {
         return;
       }
       const sous = nb(cascadeItem.menu);
+      // postcommand (fichiers récents…) peut reconstruire la barre et détacher ce bouton : position mesurée
+      // avant, puis reprise sur le bouton reconstruit de même rang.
+      const rang = [...f.menu.children].indexOf(b);
+      const avant = b.getBoundingClientRect();
       appeler(sous, "ouvrir");
-      const r = b.getBoundingClientRect();
+      const cible = b.isConnected ? b : (f.menu.children[rang] as HTMLElement | undefined);
+      const r = cible?.isConnected ? cible.getBoundingClientRect() : avant;
       ouvrirDeroulant(sous, descMenus.get(sous) ?? (cascadeItem.items as Opts[]) ?? [], r.left, r.bottom);
     });
     f.menu.appendChild(b);
@@ -575,7 +645,7 @@ function creer(id: number, type: string, parentId: number, opts: Opts) {
   let contenu: HTMLElement | null = null;
   const w: Widget = {
     id, type, el: null as unknown as HTMLElement, contenu: null as unknown as HTMLElement, parent, enfants: [], geo: null,
-    fen: parent.fen, opts: {}, propage: true, lignes: new Map(), colonnes: new Map(),
+    fen: parent.fen, opts: {}, propage: true, lignes: new Map(), colonnes: new Map(), rang: ++rangMax,
   };
   switch (type) {
     case "frame":
@@ -586,6 +656,7 @@ function creer(id: number, type: string, parentId: number, opts: Opts) {
       e.appendChild(el("legend"));
       contenu = el("div", "tk-cavite");
       contenu.style.position = "relative";
+      contenu.style.isolation = "isolate";
       e.appendChild(contenu);
       break;
     }
@@ -612,12 +683,21 @@ function creer(id: number, type: string, parentId: number, opts: Opts) {
       const t = el("div", "tk-w tk-text");
       t.contentEditable = "plaintext-only";
       t.spellcheck = false;
-      t.addEventListener("input", () => {
+      t.addEventListener("input", (ev) => {
+        if (ev.target !== t) return; // champ d'une fenêtre intégrée (window_create)
         lireSelectionTexte(w);
         appeler(id, "valeur", { valeur: lireTexte(t), selection: w.selTexte ?? null });
       });
+      // Focus clavier (Tab) : le curseur reste à la marque « insert » ; un clic garde son placement natif.
+      let souris = false;
+      t.addEventListener("mousedown", () => (souris = true));
+      t.addEventListener("mouseup", () => (souris = false));
+      t.addEventListener("blur", () => (souris = false));
+      t.addEventListener("focus", () => {
+        if (!souris && w.selTexte) placerSelectionTexte(w, w.selTexte[0], w.selTexte[1], true);
+      });
       t.addEventListener("keydown", (ev) => {
-        if (ev.defaultPrevented || ev.isComposing || t.contentEditable === "false") return;
+        if (ev.target !== t || ev.defaultPrevented || ev.isComposing || t.contentEditable === "false") return;
         const mod = ev.ctrlKey || ev.metaKey || ev.altKey;
         if ((ev.key === "Enter" && !mod) || (ev.key === "Tab" && !mod && !ev.shiftKey)) {
           // Saut de ligne et tabulation insérés comme du texte (\n, \t), comme dans Tk.
@@ -637,6 +717,27 @@ function creer(id: number, type: string, parentId: number, opts: Opts) {
       const s = el("select", "tk-w tk-listbox");
       s.size = 10;
       s.addEventListener("change", () => appeler(id, "selection", { indices: [...s.selectedOptions].map((o) => o.index) }));
+      // selectmode="multiple" (Tk) : chaque clic ou Espace bascule l'élément, sans Ctrl.
+      const basculer = (op: HTMLOptionElement) => {
+        op.selected = !op.selected;
+        appeler(id, "selection", { indices: [...s.selectedOptions].map((o) => o.index), actif: op.index });
+      };
+      s.addEventListener("mousedown", (ev) => {
+        if (!s.dataset.bascule || ev.button !== 0 || s.disabled) return;
+        const op = (ev.target as Element).closest?.("option") as HTMLOptionElement | null;
+        if (!op) return;
+        ev.preventDefault();
+        s.focus({ preventScroll: true });
+        s.dataset.actif = String(op.index);
+        basculer(op);
+      });
+      s.addEventListener("keydown", (ev) => {
+        if (!s.dataset.bascule || ev.key !== " " || s.disabled) return;
+        const op = s.options[nb(s.dataset.actif, s.selectedIndex)];
+        if (!op) return;
+        ev.preventDefault();
+        basculer(op);
+      });
       s.addEventListener("scroll", () => signalerDefilement(w));
       e = s;
       break;
@@ -791,9 +892,49 @@ function creer(id: number, type: string, parentId: number, opts: Opts) {
   e.dataset.tkid = String(id);
   w.el = e;
   w.contenu = contenu ?? e;
+  if (type === "entry" || type === "text" || type === "spinbox" || type === "combobox") brancherPressePapiers(w);
   widgets.set(id, w);
   parent.enfants.push(w);
   configurer(id, opts);
+}
+
+/** Fenêtre ou image intégrée dans un Text (window_create / image_create) : hors du texte. */
+function integre(n: Node): boolean {
+  return n instanceof HTMLElement && n.dataset.integre !== undefined;
+}
+
+/** La sélection du document est-elle dans cette zone (avec ou sans focus) ? */
+function selectionDans(t: HTMLElement): boolean {
+  const s = window.getSelection();
+  return !!(s && s.rangeCount && s.anchorNode && s.focusNode && t.contains(s.anchorNode) && t.contains(s.focusNode));
+}
+
+/**
+ * OptionMenu : la variable peut valoir un texte hors de la liste (« Choisissez… ») ; Tk l'affiche. Option
+ * cachée ajoutée en fin de liste : les indices des vraies options ne bougent pas.
+ */
+function choisirValeur(s: HTMLSelectElement, v: string) {
+  let hors = s.querySelector("option[data-hors-liste]") as HTMLOptionElement | null;
+  if ([...s.options].some((o) => o !== hors && o.value === v)) {
+    hors?.remove();
+    s.value = v;
+    return;
+  }
+  if (!hors) {
+    hors = el("option");
+    hors.dataset.horsListe = "";
+    hors.hidden = true;
+    s.appendChild(hors);
+  }
+  hors.value = hors.textContent = v;
+  s.value = v;
+}
+
+/** Combobox en lecture seule : l'option cachée d'indice 0 montre une valeur posée hors de la liste (set()). */
+function valeurCombo(s: HTMLSelectElement, v: string) {
+  const cachee = s.options[0];
+  if (cachee) cachee.value = cachee.textContent = [...s.options].slice(1).some((op) => op.value === v) ? "" : v;
+  s.value = v;
 }
 
 function lireTexte(t: HTMLElement): string {
@@ -803,7 +944,7 @@ function lireTexte(t: HTMLElement): string {
     for (const c of n.childNodes) {
       if (c.nodeType === Node.TEXT_NODE) s += (c as Text).data;
       else if (c.nodeName === "BR") s += "\n";
-      else parcourir(c);
+      else if (!integre(c)) parcourir(c);
     }
   };
   parcourir(t);
@@ -828,7 +969,7 @@ function decalageDans(t: HTMLElement, noeud: Node, pos: number): number {
       }
       if (c.nodeType === Node.TEXT_NODE) n += (c as Text).data.length;
       else if (c.nodeName === "BR") n += 1;
-      else parcourir(c);
+      else if (!integre(c)) parcourir(c);
     }
     if (x === noeud) fini = true;
   };
@@ -856,7 +997,7 @@ function pointDans(t: HTMLElement, cible: number): [Node, number] {
           return;
         }
         reste -= 1;
-      } else parcourir(c);
+      } else if (!integre(c)) parcourir(c);
     }
   };
   parcourir(t);
@@ -867,15 +1008,15 @@ function pointDans(t: HTMLElement, cible: number): [Node, number] {
 function lireSelectionTexte(w: Widget): [number, number] | null {
   const t = w.el;
   const sel = window.getSelection();
-  if (sel && sel.rangeCount && document.activeElement === t && sel.anchorNode && sel.focusNode && t.contains(sel.anchorNode) && t.contains(sel.focusNode)) {
-    w.selTexte = [decalageDans(t, sel.anchorNode, sel.anchorOffset), decalageDans(t, sel.focusNode, sel.focusOffset)];
+  if (sel && selectionDans(t)) {
+    w.selTexte = [decalageDans(t, sel.anchorNode!, sel.anchorOffset), decalageDans(t, sel.focusNode!, sel.focusOffset)];
   }
   return w.selTexte ?? null;
 }
 
-function placerSelectionTexte(w: Widget, a: number, b: number) {
+function placerSelectionTexte(w: Widget, a: number, b: number, force = false) {
   w.selTexte = [a, b];
-  if (document.activeElement !== w.el) return;
+  if (!force && document.activeElement !== w.el && !selectionDans(w.el)) return;
   const sel = window.getSelection();
   const [na, oa] = pointDans(w.el, a);
   const [nb2, ob] = pointDans(w.el, b);
@@ -980,7 +1121,34 @@ function actionEdition(w: Widget, valeur: unknown) {
     else coller(secours);
   } else {
     const commande = ({ copier: "copy", couper: "cut", effacer: "delete", annuler: "undo", retablir: "redo" } as Record<string, string>)[action];
-    if (commande) document.execCommand(commande);
+    enActionEdition = true; // event_generate("<<Copy>>") : déjà distribué côté Python, pas une 2e fois
+    try {
+      if (commande) document.execCommand(commande);
+    } finally {
+      enActionEdition = false;
+    }
+  }
+}
+
+let enActionEdition = false;
+
+/** Copier / couper / coller de l'utilisateur : <<Copy>>, <<Cut>>, <<Paste>> distribués au Python avant l'action. */
+function brancherPressePapiers(w: Widget) {
+  for (const [dom, nom] of [["copy", "<<Copy>>"], ["cut", "<<Cut>>"], ["paste", "<<Paste>>"]] as const) {
+    w.el.addEventListener(dom, (ev) => {
+      if (enActionEdition) return;
+      const ce = ev as ClipboardEvent;
+      let txt = "";
+      if (dom === "paste") txt = ce.clipboardData?.getData("text/plain") ?? "";
+      else if (w.type === "text") {
+        lireSelectionTexte(w);
+        txt = String(window.getSelection() ?? "");
+      } else {
+        const c = champDe(w);
+        if (c) txt = c.value.slice(c.selectionStart ?? 0, c.selectionEnd ?? 0);
+      }
+      if (appeler(w.id, "presse", { nom, texte: txt }) === "break") ce.preventDefault();
+    });
   }
 }
 
@@ -1083,7 +1251,13 @@ function configurer(id: number, o: Opts) {
     case "entry":
     case "spinbox": {
       const i = champDe(w)!;
-      if ("valeur" in o && i.value !== texte(o.valeur)) i.value = texte(o.valeur);
+      if ("valeur" in o && i.value !== texte(o.valeur)) {
+        // Comme EntrySetValue de Tk : le curseur garde sa place (bornée), il ne saute pas en fin de champ.
+        const v = texte(o.valeur);
+        const [d, f] = [i.selectionStart, i.selectionEnd];
+        i.value = v;
+        if (d !== null && f !== null && document.activeElement === i) i.setSelectionRange(Math.min(d, v.length), Math.min(f, v.length));
+      }
       if ("masque" in o) i.type = o.masque ? "password" : "text";
       if ("etat" in o) {
         i.disabled = o.etat === "disabled";
@@ -1099,12 +1273,14 @@ function configurer(id: number, o: Opts) {
       break;
     }
     case "text": {
+      // Calculé AVANT de redessiner : ensuite la plage retombe sur la zone elle-même.
+      const garder = document.activeElement === e || selectionDans(e);
       if ("contenu" in o) dessinerTexte(e, o.contenu as Opts[]);
       if ("curseur" in o) {
         const c = o.curseur as number[] | number;
         w.selTexte = Array.isArray(c) ? [nb(c[0]), nb(c[1] ?? c[0])] : [nb(c), nb(c)];
       }
-      if (("contenu" in o || "curseur" in o) && w.selTexte && document.activeElement === e) placerSelectionTexte(w, w.selTexte[0], w.selTexte[1]);
+      if (("contenu" in o || "curseur" in o) && w.selTexte && garder) placerSelectionTexte(w, w.selTexte[0], w.selTexte[1], true);
       if ("etat" in o) e.contentEditable = o.etat === "disabled" ? "false" : "plaintext-only";
       if ("retourLigne" in o) {
         e.style.whiteSpace = o.retourLigne === "none" ? "pre" : "pre-wrap";
@@ -1117,7 +1293,10 @@ function configurer(id: number, o: Opts) {
     case "listbox": {
       const s = e as HTMLSelectElement;
       if ("hauteurLignes" in o) s.size = Math.max(2, nb(o.hauteurLignes, 10));
-      if ("multiple" in o) s.multiple = !!o.multiple;
+      if ("multiple" in o) {
+        s.multiple = !!o.multiple;
+        s.dataset.bascule = o.multiple === "bascule" ? "1" : "";
+      }
       if ("elements" in o) {
         const els = (o.elements as Opts[]) ?? [];
         const sel = new Set([...s.selectedOptions].map((x) => x.index));
@@ -1201,9 +1380,9 @@ function configurer(id: number, o: Opts) {
             return op;
           }),
         );
-        s.value = actuelle;
+        choisirValeur(s, actuelle);
       }
-      if ("valeur" in o) s.value = texte(o.valeur);
+      if ("valeur" in o) choisirValeur(s, texte(o.valeur));
       if (desactive !== undefined) s.disabled = desactive;
       break;
     }
@@ -1228,11 +1407,11 @@ function configurer(id: number, o: Opts) {
             return op;
           }),
         );
-        s.value = i.value;
+        valeurCombo(s, i.value);
       }
       if ("valeur" in o) {
         i.value = texte(o.valeur);
-        s.value = i.value;
+        valeurCombo(s, i.value);
       }
       if ("etat" in o) {
         const lecture = o.etat === "readonly";
@@ -1315,8 +1494,15 @@ function tailleCadre(w: Widget) {
   const s = w.el.style;
   // Avec place(), width/height/relwidth/relheight imposent la taille : on n'y touche pas.
   // Largeur : toujours posée (taille demandée = contribution intrinsèque) ; flex « 1 1 auto » l'étire.
-  if (!(po && (po.width !== undefined || po.relwidth !== undefined))) s.width = fixe && l > 0 ? `${l}px` : "";
-  if (!(po && (po.height !== undefined || po.relheight !== undefined))) {
+  // place() sans width : taille demandée (max-content), sinon la largeur serait bornée par 1 − relx.
+  // create_window(width=…) : la taille imposée par l'élément de canvas l'emporte.
+  const tc = w.tailleCanvas;
+  if (tc?.l) s.width = `${tc.l}px`;
+  else if (!(po && (po.width !== undefined || po.relwidth !== undefined))) s.width = fixe && l > 0 ? `${l}px` : po ? "max-content" : "";
+  if (tc?.h) {
+    s.height = `${tc.h}px`;
+    s.minHeight = "";
+  } else if (!(po && (po.height !== undefined || po.relheight !== undefined))) {
     s.height = fixe && h > 0 && !w.etire?.y ? `${h}px` : "";
     s.minHeight = fixe && h > 0 && w.etire?.y ? `${h}px` : "";
   }
@@ -1332,31 +1518,112 @@ function appliquerTaille(w: Widget) {
   const po = w.geo?.gestion === "place" ? w.geo.opts : null;
   // Largeur demandée toujours posée : c'est la base du flex (« 1 1 auto »), fill / sticky l'agrandissent.
   // Hauteur : sur l'axe transversal, un étirement exige une hauteur automatique (minimum = demandée).
-  if (!(po && (po.width !== undefined || po.relwidth !== undefined))) s.width = w.dimL ?? "";
-  if (!(po && (po.height !== undefined || po.relheight !== undefined))) {
+  const tc = w.tailleCanvas;
+  if (tc?.l) s.width = `${tc.l}px`;
+  else if (!(po && (po.width !== undefined || po.relwidth !== undefined))) s.width = w.dimL ?? (po ? "max-content" : "");
+  if (tc?.h) {
+    s.height = `${tc.h}px`;
+    s.minHeight = "";
+  } else if (!(po && (po.height !== undefined || po.relheight !== undefined))) {
     s.height = w.etire?.y ? "" : (w.dimH ?? "");
     s.minHeight = w.etire?.y ? (w.dimH ?? "") : "";
   }
 }
 
+function morceauTexte(txt: string, st: Opts | null): Node {
+  if (!st) return document.createTextNode(txt);
+  const s = el("span");
+  s.textContent = txt;
+  if (st.couleur) s.style.color = texte(st.couleur);
+  if (st.fond) s.style.background = texte(st.fond);
+  if (st.police) s.style.font = texte(st.police);
+  if (st.souligne) s.style.textDecoration = "underline";
+  if (st.barre) s.style.textDecoration = "line-through";
+  if (st.cache) s.style.display = "none"; // elide
+  return s;
+}
+
+/** Fenêtre (window_create) ou image (image_create) intégrée au fil du texte. */
+function morceauIntegre(sg: Opts): Node | null {
+  const boite = el("span");
+  boite.dataset.integre = "";
+  boite.contentEditable = "false";
+  boite.style.display = "inline-block";
+  boite.style.verticalAlign = sg.align === "top" ? "top" : sg.align === "bottom" ? "bottom" : sg.align === "baseline" ? "baseline" : "middle";
+  const [px, py] = paire(sg.marge ?? 0);
+  boite.style.padding = `${py}px ${px}px`;
+  if (sg.widget !== undefined) {
+    const k = widgets.get(nb(sg.widget));
+    if (!k || k.detruit) return null;
+    k.etire = { x: false, y: false };
+    k.el.style.position = "relative";
+    appliquerTaille(k);
+    boite.appendChild(k.el);
+  } else {
+    const img = el("img");
+    img.src = texte(sg.image);
+    img.style.display = "block";
+    boite.appendChild(img);
+  }
+  return boite;
+}
+
 function dessinerTexte(t: HTMLElement, segments: Opts[]) {
-  const fin = t.scrollTop + t.clientHeight >= t.scrollHeight - 4;
-  t.replaceChildren(
-    ...(segments ?? []).map((sg) => {
-      if (!sg.style) return document.createTextNode(texte(sg.texte));
-      const s = el("span");
-      s.textContent = texte(sg.texte);
-      const st = sg.style as Opts;
-      if (st.couleur) s.style.color = texte(st.couleur);
-      if (st.fond) s.style.background = texte(st.fond);
-      if (st.police) s.style.font = texte(st.police);
-      if (st.souligne) s.style.textDecoration = "underline";
-      if (st.barre) s.style.textDecoration = "line-through";
-      if (st.justif) s.style.textAlign = texte(st.justif);
-      return s;
-    }),
-  );
-  if (fin) t.scrollTop = t.scrollHeight;
+  // Comme Tk : la vue garde sa position (un Text ne suit jamais tout seul les insertions ; see("end") le fait).
+  const haut = t.scrollTop;
+  const gauche = t.scrollLeft;
+  const sgs = segments ?? [];
+  const justif = (st: unknown) => {
+    const j = st ? texte((st as Opts).justif) : "";
+    return j && j !== "left" ? j : "";
+  };
+  if (!sgs.some((sg) => justif(sg.style))) {
+    t.replaceChildren(...(sgs.map((sg) => (sg.widget !== undefined || sg.image !== undefined ? morceauIntegre(sg) : morceauTexte(texte(sg.texte), (sg.style as Opts) ?? null))).filter(Boolean) as Node[]));
+  } else {
+    // justify : par ligne logique, selon le tag du premier caractère visible ; la ligne devient un bloc aligné.
+    const noeuds: Node[] = [];
+    let ligne: Node[] = [];
+    let jl = "";
+    let vu = false;
+    const fermer = () => {
+      if (jl) {
+        const b = el("span");
+        b.style.display = "block";
+        b.style.textAlign = jl;
+        b.append(...ligne);
+        noeuds.push(b);
+      } else noeuds.push(...ligne);
+      ligne = [];
+      jl = "";
+      vu = false;
+    };
+    for (const sg of sgs) {
+      if (sg.widget !== undefined || sg.image !== undefined) {
+        const n = morceauIntegre(sg);
+        if (n) ligne.push(n);
+        vu = true;
+        continue;
+      }
+      const st = (sg.style as Opts) ?? null;
+      const parts = texte(sg.texte).split("\n");
+      parts.forEach((part, i) => {
+        if (i > 0) {
+          ligne.push(morceauTexte("\n", st));
+          fermer();
+        }
+        if (!part) return;
+        if (!vu && !(st && st.cache)) {
+          jl = justif(st);
+          vu = true;
+        }
+        ligne.push(morceauTexte(part, st));
+      });
+    }
+    if (ligne.length) fermer();
+    t.replaceChildren(...noeuds);
+  }
+  t.scrollTop = Math.min(haut, Math.max(0, t.scrollHeight - t.clientHeight));
+  t.scrollLeft = gauche;
 }
 
 function alignement(a: unknown): string {
@@ -1473,7 +1740,8 @@ function brancherArbre(w: Widget, d: HTMLElement) {
   });
   d.addEventListener("dblclick", (ev) => {
     const tr = (ev.target as HTMLElement).closest("tr[data-iid]") as HTMLElement | null;
-    if (tr?.dataset.enfants && !ev.defaultPrevented && !surFleche(ev, tr, w)) appeler(id, "ouvrir", { iid: tr.dataset.iid });
+    // Comme ttk::treeview::DoubleClick : bascule toute ligne, même sans enfant (chargement paresseux).
+    if (tr && !ev.defaultPrevented && !surFleche(ev, tr, w)) appeler(id, "ouvrir", { iid: tr.dataset.iid });
   });
   d.addEventListener("click", (ev) => {
     const th = (ev.target as HTMLElement).closest("th[data-colonne]") as HTMLElement | null;
@@ -1497,6 +1765,9 @@ function brancherArbre(w: Widget, d: HTMLElement) {
         ev.preventDefault();
         appeler(id, "ouvrir", { iid: l.dataset.iid });
       }
+    } else if ((ev.key === "Enter" || ev.key === " ") && actuel >= 0) {
+      ev.preventDefault(); // ToggleFocus de Tk : Entrée / Espace basculent la ligne qui a le focus
+      appeler(id, "ouvrir", { iid: lignes[actuel].dataset.iid });
     }
   });
 }
@@ -1521,11 +1792,31 @@ function dessinerOnglets(w: Widget, o: Opts) {
       return b;
     }),
   );
+  // Tk accepte comme page un descendant du parent du Notebook : on la rattache au Notebook.
+  for (const t of onglets) {
+    const p = widgets.get(nb(t.id));
+    if (!p || p.detruit || p.parent === w) continue;
+    if (p.parent) {
+      p.parent.enfants = p.parent.enfants.filter((x) => x !== p);
+      demanderDisposition(p.parent);
+    }
+    p.el.remove();
+    p.parent = w;
+    p.pageExterne = true;
+    w.enfants.push(p);
+  }
+  // Toutes les pages restent empilées dans la même cellule (seule l'active est visible) : le Notebook prend
+  // la taille de la plus grande page et la fenêtre ne saute plus à chaque changement d'onglet (Tk).
+  const pages = new Set(onglets.map((t) => nb(t.id)));
   for (const e of w.enfants) {
     if (e.detruit) continue;
-    const visible = nb(e.id) === actif;
-    e.geo = visible ? { gestion: "pack", opts: { fill: "both", expand: 1 }, ordre: 0 } : null;
-    if (!visible) e.el.remove();
+    if (!pages.has(nb(e.id))) {
+      e.geo = null;
+      e.el.remove();
+      continue;
+    }
+    e.geo = { gestion: "page", opts: {}, ordre: 0 };
+    e.el.style.visibility = nb(e.id) === actif ? "" : "hidden";
   }
   demanderDisposition(w);
 }
@@ -1563,9 +1854,21 @@ function disposer(c: Widget) {
   const grid = vivants.filter((e) => e.geo!.gestion === "grid");
   const place = vivants.filter((e) => e.geo!.gestion === "place");
   for (const n of [...c.contenu.children]) if ((n as HTMLElement).classList.contains("tk-cavite") || (n as HTMLElement).classList.contains("tk-grille") || (n as HTMLElement).dataset.tkid) n.remove();
-  if (grid.length) disposerGrille(c, grid);
-  else if (pack.length) disposerPack(c, pack);
-  for (const p of place) disposerPlace(c, p);
+  if (c.type === "notebook") {
+    for (const k of vivants) {
+      k.el.style.gridArea = "1 / 1";
+      k.el.style.position = "relative";
+      k.etire = { x: true, y: true };
+      appliquerTaille(k);
+      c.contenu.appendChild(k.el);
+    }
+    return;
+  }
+  // Empilement comme Tk : ordre de création (ou lift / lower), quel que soit le gestionnaire de géométrie.
+  const z = new Map([...vivants].sort((a, b) => a.rang - b.rang).map((k, i) => [k, String(i + 1)]));
+  if (grid.length) disposerGrille(c, grid.sort((a, b) => a.rang - b.rang), z);
+  else if (pack.length) disposerPack(c, pack, z);
+  for (const p of place) disposerPlace(c, p, z);
   // Fenêtre principale vide : 200×200, comme Tk.
   if (c.type === "fenetre" && !c.fen.tailleFixe) {
     const vide = !grid.length && !pack.length;
@@ -1589,7 +1892,7 @@ function interne(k: Widget) {
   }
 }
 
-function disposerPack(c: Widget, kids: Widget[]) {
+function disposerPack(c: Widget, kids: Widget[], z: Map<Widget, string>) {
   let cavite = el("div", "tk-cavite");
   c.contenu.appendChild(cavite);
   kids.forEach((k, i) => {
@@ -1600,6 +1903,8 @@ function disposerPack(c: Widget, kids: Widget[]) {
     const fill = texte(o.fill) || "none";
     cavite.style.flexDirection = vertical ? "column" : "row";
     const parcelle = el("div", "tk-parcelle");
+    parcelle.style.zIndex = z.get(k) ?? "";
+    k.el.style.zIndex = "";
     // Comme Tk : la parcelle garde sa taille demandée ; « expand » ne lui donne que l'espace en plus.
     parcelle.style.flex = expand ? "1 1 auto" : "0 0 auto";
     const [pl, pr] = pad(o.padx);
@@ -1626,7 +1931,7 @@ function disposerPack(c: Widget, kids: Widget[]) {
   });
 }
 
-function disposerGrille(c: Widget, kids: Widget[]) {
+function disposerGrille(c: Widget, kids: Widget[], z: Map<Widget, string>) {
   const g = el("div", "tk-grille");
   c.contenu.appendChild(g);
   let nbCol = 0;
@@ -1651,6 +1956,8 @@ function disposerGrille(c: Widget, kids: Widget[]) {
   for (const k of kids) {
     const o = k.geo!.opts;
     const cell = el("div", "tk-cellule");
+    cell.style.zIndex = z.get(k) ?? "";
+    k.el.style.zIndex = "";
     cell.style.gridColumn = `${nb(o.column) + 1} / span ${Math.max(1, nb(o.columnspan, 1))}`;
     cell.style.gridRow = `${nb(o.row) + 1} / span ${Math.max(1, nb(o.rowspan, 1))}`;
     const [pl, pr] = pad(o.padx);
@@ -1670,17 +1977,18 @@ function disposerGrille(c: Widget, kids: Widget[]) {
   }
 }
 
-function disposerPlace(c: Widget, k: Widget) {
+function disposerPlace(c: Widget, k: Widget, z: Map<Widget, string>) {
   const o = k.geo!.opts;
   const s = k.el.style;
   s.position = "absolute";
+  s.zIndex = z.get(k) ?? "";
   const x = nb(o.x);
   const y = nb(o.y);
   const rx = nb(o.relx);
   const ry = nb(o.rely);
   s.left = `calc(${rx * 100}% + ${x}px)`;
   s.top = `calc(${ry * 100}% + ${y}px)`;
-  s.width = o.width !== undefined || o.relwidth !== undefined ? `calc(${nb(o.relwidth) * 100}% + ${nb(o.width)}px)` : (k.dimL ?? "");
+  s.width = o.width !== undefined || o.relwidth !== undefined ? `calc(${nb(o.relwidth) * 100}% + ${nb(o.width)}px)` : (k.dimL ?? "max-content");
   s.height = o.height !== undefined || o.relheight !== undefined ? `calc(${nb(o.relheight) * 100}% + ${nb(o.height)}px)` : (k.dimH ?? "");
   const a = normAncre(o.anchor, "nw");
   const tx = a.includes("e") ? "-100%" : a.includes("w") ? "0" : "-50%";
@@ -1923,6 +2231,7 @@ function dessinerItem(c: CanvasEtat, w: Widget, item: number, kind: string, coor
     e.setAttribute("href", texte(im.src));
     e.setAttribute("width", String(l));
     e.setAttribute("height", String(h));
+    e.setAttribute("preserveAspectRatio", "none"); // zoom(40, 20) étiré comme Tk, pas centré en carré
     e.setAttribute("x", String(a.includes("w") ? x : a.includes("e") ? x - l : x - l / 2));
     e.setAttribute("y", String(a.includes("n") ? y : a.includes("s") ? y - h : y - h / 2));
     e.style.display = o.state === "hidden" ? "none" : "";
@@ -1940,8 +2249,15 @@ function dessinerItem(c: CanvasEtat, w: Widget, item: number, kind: string, coor
       s.left = `${x - (c.zone?.[0] ?? 0)}px`;
       s.top = `${y - (c.zone?.[1] ?? 0)}px`;
       s.transform = `translate(${a.includes("w") ? "0" : a.includes("e") ? "-100%" : "-50%"}, ${a.includes("n") ? "0" : a.includes("s") ? "-100%" : "-50%"})`;
-      if (o.width !== undefined) s.width = `${nb(o.width)}px`;
-      if (o.height !== undefined) s.height = `${nb(o.height)}px`;
+      // width / height de l'élément imposent la taille (0 = taille demandée), même quand le cadre propage.
+      const l = o.width !== undefined ? nb(o.width) : 0;
+      const h = o.height !== undefined ? nb(o.height) : 0;
+      cible.tailleCanvas = { l, h };
+      cible.etire = { x: false, y: false };
+      if (l > 0) s.width = `${l}px`;
+      if (h > 0) s.height = `${h}px`;
+      if (cible.type === "frame" || cible.type === "labelframe") tailleCadre(cible);
+      else appliquerTaille(cible);
       w.el.appendChild(cible.el);
     }
   }
@@ -1957,7 +2273,12 @@ function operationCanvas(w: Widget, op: unknown[]) {
     c.items.delete(item);
     const wid = c.fenetres.get(item);
     if (wid !== undefined) {
-      widgets.get(wid)?.el.remove();
+      const cw = widgets.get(wid);
+      if (cw) {
+        cw.tailleCanvas = undefined;
+        cw.dansCanvas = undefined;
+        cw.el.remove();
+      }
       c.fenetres.delete(item);
     }
   } else if (nom === "haut") {
@@ -2029,6 +2350,7 @@ function donneesSouris(e: MouseEvent, cible: number): Opts {
   return {
     x: Math.round(e.clientX - (r?.left ?? 0)), y: Math.round(e.clientY - (r?.top ?? 0)), xRacine: e.clientX, yRacine: e.clientY,
     bouton: e.button + 1, boutons: e.buttons, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey,
+    clics: e.type === "mousedown" || e.type === "mouseup" ? e.detail || 1 : 1, // double / triple clic (comme Tk)
     item: item ? Number(item.dataset.item) : undefined,
     autreItem: autreItem ? Number(autreItem.dataset.item) : undefined,
     ligne: ligne?.dataset.iid,
@@ -2041,6 +2363,20 @@ function donneesSouris(e: MouseEvent, cible: number): Opts {
 function raccourciEdition(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement;
   return (e.ctrlKey || e.metaKey) && !e.altKey && /^[acvxzy]$/i.test(e.key) && !!t.closest?.("input,textarea,[contenteditable=plaintext-only]");
+}
+
+/** Frappe bloquée pendant qu'une liaison attendait : rejouée dans le champ si la liaison n'a pas répondu « break ». */
+function rejouerTouche(e: KeyboardEvent, final: unknown) {
+  if (final === "break" || e.type !== "keydown" || e.ctrlKey || e.metaKey || e.altKey || raccourciEdition(e)) return;
+  const champ = (e.target as HTMLElement | null)?.closest?.("input,textarea,[contenteditable=plaintext-only],[contenteditable=true]") as HTMLElement | null;
+  if (!champ || !champ.isConnected || (champ as HTMLInputElement).disabled || (champ as HTMLInputElement).readOnly) return;
+  const texte = champ.isContentEditable || champ instanceof HTMLTextAreaElement;
+  champ.focus({ preventScroll: true });
+  if (e.key.length === 1) document.execCommand("insertText", false, e.key);
+  else if (e.key === "Enter" && texte) document.execCommand("insertText", false, "\n");
+  else if (e.key === "Tab" && texte) document.execCommand("insertText", false, "\t");
+  else if (e.key === "Backspace") document.execCommand("delete");
+  else if (e.key === "Delete") document.execCommand("forwardDelete");
 }
 
 const ecouteurs = new WeakMap<HTMLElement, Map<string, (e: Event) => void>>();
@@ -2076,8 +2412,23 @@ function ecouter(fenId: number, types: string[]) {
         d = donneesSouris(e, cible);
         if (t === "mouseover" || t === "mouseout") d.autre = cibleDe(e.relatedTarget) ?? 0;
       } else d = {};
-      const r = appeler(cible, t, d);
-      if (r === "break" || r === "prevent") e.preventDefault();
+      const focusAvant = document.activeElement;
+      const r = appeler(cible, t, d, e instanceof KeyboardEvent ? (final) => rejouerTouche(e, final) : undefined);
+      if (e instanceof KeyboardEvent && t === "keydown" && document.activeElement !== focusAvant && (e.key === "Enter" || e.key === "Tab" || e.key.length === 1)) {
+        // La liaison a déplacé le focus (focus_set) : Tk n'applique pas la touche au nouveau widget ; un caractère
+        // va au champ d'origine (liaison de classe), sauf « break ».
+        e.preventDefault();
+        const c = focusAvant;
+        if (r !== "break" && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && (c instanceof HTMLInputElement || c instanceof HTMLTextAreaElement) && c.isConnected && !c.disabled && !c.readOnly) {
+          const a = c.selectionStart ?? c.value.length;
+          c.setRangeText(e.key, a, c.selectionEnd ?? a, "end");
+          c.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      } else if (r === EN_ATTENTE && e instanceof KeyboardEvent) {
+        // La liaison attend (update(), sleep, wait_window) : son « break » viendra trop tard. On bloque la touche
+        // tout de suite (raccourci du navigateur, caractère) et on rejoue la frappe si la réponse n'est pas « break ».
+        if (!raccourciEdition(e)) e.preventDefault();
+      } else if (r === "break" || r === "prevent") e.preventDefault();
       else if (r === "traite" && e instanceof KeyboardEvent && (e.ctrlKey || e.altKey || e.metaKey || /^F\d{1,2}$/.test(e.key)) && !raccourciEdition(e)) {
         // Raccourci géré par le programme (Ctrl+S, F5…) : le navigateur ne doit pas l'exécuter aussi.
         e.preventDefault();
@@ -2251,17 +2602,34 @@ function lire(id: number, quoi: string, arg?: unknown): unknown {
   return null;
 }
 
+const CHAMP_INTERNE = new Set(["entry", "spinbox", "combobox", "select", "text", "listbox", "treeview"]);
+
 function ecrire(id: number, quoi: string, valeur: unknown) {
   const w = widgets.get(id);
   if (!w) return;
   if (quoi === "focus") {
     if (planifie) disposerTout(); // le widget doit être dans la page pour recevoir le focus
-    const champ = (w.el.matches("input,select,textarea,[contenteditable],.tk-tableau") ? w.el : w.el.querySelector("input:not([type=checkbox]):not([type=radio]),select,textarea,[contenteditable]")) as HTMLElement | null;
+    // Le focus va au widget lui-même (Tk) : on ne cherche un champ intérieur que pour les widgets composites
+    // dont il fait partie. Racine, Frame, Canvas… : le cadre de la fenêtre (le Python route les touches).
+    const champ = (w.el.matches("input,select,textarea,[contenteditable],.tk-tableau")
+      ? w.el
+      : CHAMP_INTERNE.has(w.type)
+        ? w.el.querySelector("input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea,[contenteditable]")
+        : null) as HTMLElement | null;
     const cible = champ ?? w.fen.cadre;
     w.fen.focusDemande = cible; // honoré aussi à la première image (fenêtre encore en construction)
+    const memo = w.type === "text" && w.selTexte ? [...w.selTexte] : null;
     cible.focus({ preventScroll: true });
+    if (memo && cible === w.el) placerSelectionTexte(w, memo[0], memo[1], true); // focus ne déplace pas « insert »
     if (valeur === "tout" && champ instanceof HTMLInputElement) champ.select();
   } else if (quoi === "premierPlan") premierPlan(w.fen);
+  else if (quoi === "pile") {
+    // lift / lower d'un widget parmi ses frères (tkraise d'une page empilée dans la même cellule).
+    const [sens, refId] = Array.isArray(valeur) ? valeur : [valeur, null];
+    const ref = refId !== null && refId !== undefined ? widgets.get(nb(refId)) : undefined;
+    w.rang = ref ? ref.rang + (sens === "haut" ? 0.5 : -0.5) : sens === "haut" ? ++rangMax : --rangMin;
+    if (w.parent) demanderDisposition(w.parent);
+  }
   else if (quoi === "curseur" || quoi === "selectionTexte") {
     const c = champDe(w);
     const [a, b] = quoi === "curseur" ? [nb(valeur), nb(valeur)] : paire(valeur);
@@ -2286,7 +2654,7 @@ function detruire(id: number) {
     x.detruit = true;
     x.resize?.disconnect();
     widgets.delete(x.id);
-    for (const e of x.enfants) recursif(e);
+    for (const e of x.enfants) if (!e.pageExterne) recursif(e);
   };
   recursif(w);
   if (w.type === "fenetre") {
@@ -2305,7 +2673,23 @@ function detruire(id: number) {
 
 /* ───────────────────────────── API exposée au Python ───────────────────────────── */
 
-export const moteurFenetres = {
+/** Compte les appels Python → JS en cours (voir dansPython) : chaque fonction exposée au Python est enveloppée. */
+function garder<T extends Record<string, unknown>>(o: T, sauf: string[]): T {
+  for (const [k, f] of Object.entries(o)) {
+    if (typeof f !== "function" || sauf.includes(k)) continue;
+    (o as Record<string, unknown>)[k] = (...a: unknown[]) => {
+      dansPython++;
+      try {
+        return (f as (...x: unknown[]) => unknown)(...a);
+      } finally {
+        dansPython--;
+      }
+    };
+  }
+  return o;
+}
+
+export const moteurFenetres = garder({
   definirRappel(f: Rappel, jspi?: boolean) {
     rappel = f;
     suspensible = !!jspi && typeof f.callPromising === "function";
@@ -2325,8 +2709,16 @@ export const moteurFenetres = {
         }
       };
       try {
-        if (suspensible && fn.callPromising) fn.callPromising().catch((e) => console.error("[fenêtres]", e)).finally(liberer);
-        else {
+        if (suspensible && fn.callPromising && dansPython === 0) {
+          let p: Promise<unknown>;
+          dansPython++;
+          try {
+            p = fn.callPromising();
+          } finally {
+            dansPython--;
+          }
+          p.catch((e) => console.error("[fenêtres]", e)).finally(liberer);
+        } else {
           fn();
           liberer();
         }
@@ -2350,6 +2742,11 @@ export const moteurFenetres = {
   menuContextuel(menuId: number, items: Opts[], x: number, y: number) {
     ouvrirDeroulant(menuId, items, x, y);
   },
+  /** Description fraîche d'un menu (à l'ouverture : postcommand, coches des variables). */
+  descMenu(menuId: number, items: Opts[]) {
+    descMenus.set(menuId, items);
+    memoriserMenus(items);
+  },
   /** Couleur CSS normalisée par le navigateur (« #rrggbb » ou « rgba(…) ») : noms de couleurs du Python. */
   rgb(c: string): string {
     if (mesureur === undefined) mesureur = document.createElement("canvas").getContext("2d");
@@ -2371,7 +2768,7 @@ export const moteurFenetres = {
   demander(titre: string, message: string, defaut: string): string | null {
     return window.prompt(titre ? `${titre}\n\n${message}` : message, defaut ?? "");
   },
-};
+}, ["definirRappel", "retour"]);
 
 /** Ferme toutes les fenêtres des programmes (bouton « Fermer les fenêtres » de la console). */
 export function fermerToutesFenetres(): void {

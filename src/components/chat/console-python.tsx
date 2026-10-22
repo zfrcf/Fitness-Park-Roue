@@ -3,7 +3,7 @@
 import { AppWindow, CornerDownLeft, Loader2, Square, Terminal, Trash2, Upload, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { lignesAnsi, texteLigne, tronquerLignes } from "@/lib/execution/ansi";
+import { lignesAffichees, texteLigne } from "@/lib/execution/ansi";
 import { avecMorceau, grouperMorceaux } from "@/lib/execution/morceaux";
 import { abonnerEtatExecution, arreterExecution, etatExecution, executerPython, importerFichiersConsole, type Morceau } from "@/lib/execution/python-navigateur";
 import { abonnerProjetConsole, projetConsole } from "@/lib/execution/projet-console";
@@ -31,23 +31,28 @@ export function envoyerALaConsole(commande: string): void {
 
 /**
  * Texte d'un flux (sortie ou erreur) : couleurs ANSI et retours chariot « \r » interprétés (barres de
- * progression), lignes d'échec de pip (« ÉCHEC : », « ERREUR : ») en rouge, longueur limitée.
+ * progression), lignes d'échec de pip (« ÉCHEC : », « ERREUR : ») en rouge, longueur limitée en gardant
+ * la FIN comme un terminal (résultat final, dernière ligne d'un traceback ; en-tête du traceback aussi).
  */
 function TexteFlux({ texte, erreur }: { texte: string; erreur?: boolean }) {
-  const { lignes, avertissement } = useMemo(() => tronquerLignes(lignesAnsi(texte), erreur ? 60 : 400, erreur ? 4000 : 40_000), [texte, erreur]);
+  const { lignes, avertissement, position } = useMemo(() => (erreur ? lignesAffichees(texte, 80, 6000, 3) : lignesAffichees(texte, 400, 40_000)), [texte, erreur]);
+  const marque = avertissement ? <span className="text-muted-foreground">{`${avertissement}\n`}</span> : null;
   return (
     <span className={erreur ? "text-destructive" : undefined}>
       {lignes.map((ligne, i) => (
-        <span key={i} className={!erreur && /^(ÉCHEC|ERREUR) :/.test(texteLigne(ligne)) ? "text-destructive" : undefined}>
-          {ligne.map((s, j) => (
-            <span key={j} style={s.couleur ? { color: s.couleur } : undefined} className={s.gras ? "font-bold" : undefined}>
-              {s.texte}
-            </span>
-          ))}
-          {i < lignes.length - 1 ? "\n" : ""}
+        <span key={i}>
+          {i === position ? marque : null}
+          <span className={!erreur && /^(ÉCHEC|ERREUR) :/.test(texteLigne(ligne)) ? "text-destructive" : undefined}>
+            {ligne.map((s, j) => (
+              <span key={j} style={s.couleur ? { color: s.couleur } : undefined} className={s.gras ? "font-bold" : undefined}>
+                {s.texte}
+              </span>
+            ))}
+            {i < lignes.length - 1 ? "\n" : ""}
+          </span>
         </span>
       ))}
-      {avertissement ? <span className="text-muted-foreground">{`\n${avertissement}\n`}</span> : null}
+      {position >= lignes.length ? marque : null}
     </span>
   );
 }
@@ -60,6 +65,7 @@ export function SortieOrdonnee({ morceaux, classeTexte, classeImage }: { morceau
   const { groupes, tronque } = grouperMorceaux(morceaux);
   return (
     <>
+      {tronque && <pre className={cn("text-muted-foreground", classeTexte)}>[… début de la sortie masqué]</pre>}
       {groupes.map((g, i) =>
         "image" in g ? (
           // Graphique matplotlib produit dans le navigateur (data: URL PNG).
@@ -73,7 +79,6 @@ export function SortieOrdonnee({ morceaux, classeTexte, classeImage }: { morceau
           </pre>
         ),
       )}
-      {tronque && <pre className={cn("text-muted-foreground", classeTexte)}>[… sortie tronquée]</pre>}
     </>
   );
 }
@@ -115,10 +120,11 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
   const nbFichiersProjet = useSyncExternalStore(abonnerProjetConsole, () => projetConsole().length, () => 0);
   const nbFenetres = useSyncExternalStore(abonnerFenetres, nombreFenetres, () => 0);
   const enAttente = useSyncExternalStore(abonnerEtatExecution, () => etatExecution().attentes > 0, () => false);
-  // input() : le programme attend une réponse tapée dans la console (avec JSPI ; sinon boîte du navigateur).
-  const [saisie, setSaisie] = useState<{ invite: string } | null>(null);
+  // input(), sys.stdin, getpass : le programme attend une ligne tapée dans la console (avec JSPI ; sinon boîte du navigateur).
+  const [saisie, setSaisie] = useState<{ invite: string; masque: boolean; finDeFichier: boolean } | null>(null);
   const [reponse, setReponse] = useState("");
-  const repondre = useRef<((v: string | null) => void) | null>(null);
+  const repondre = useRef<((v: string | null | false) => void) | null>(null);
+  const demontee = useRef(false);
 
   useEffect(() => {
     bas.current?.scrollIntoView({ behavior: "smooth" });
@@ -126,8 +132,12 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
 
   useEffect(() => {
     zone.current?.focus();
-    // Console fermée pendant un input() : la saisie est annulée (sinon le programme attendrait sans fin).
-    return () => repondre.current?.(null);
+    demontee.current = false;
+    // Console fermée : comme un terminal fermé, plus aucune saisie possible (fin de fichier : EOFError).
+    return () => {
+      demontee.current = true;
+      repondre.current?.(false);
+    };
   }, []);
 
   const historique = cellules.map((c) => c.code);
@@ -143,8 +153,13 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
       // « ▶ Lancer » pendant qu'un programme tourne encore (fenêtre ouverte) : on l'arrête d'abord.
       if (!remplacer || !enCours.current) return;
       arreterExecution();
-      await enCours.current.catch(() => undefined);
-      if (occupeRef.current) return;
+      // Un programme peut intercepter l'interruption (except KeyboardInterrupt) et continuer : attente bornée.
+      await Promise.race([enCours.current.catch(() => undefined), new Promise((ok) => setTimeout(ok, 3000))]);
+      if (occupeRef.current) {
+        const message: Morceau = { texte: `Le programme en cours ne s'est pas arrêté (il intercepte l'interruption) : « ${source} » n'a pas été lancé. Répondez-lui ou cliquez de nouveau sur « Arrêter ».`, erreur: true };
+        setCellules((liste) => [...liste, { id: prochainId++, code: source, morceaux: [message] }]);
+        return;
+      }
     }
     occupeRef.current = true;
     setOccupe(true);
@@ -159,12 +174,20 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
       const r = await executerPython(source, setEtape, {
         sortieTardive: (m) => ajouterTardif(id, m),
         enDirect: (m) => ajouterTardif(id, m),
-        saisie: (invite) =>
-          new Promise((ok) => {
-            repondre.current = ok;
-            setReponse("");
-            setSaisie({ invite });
-          }),
+        saisie: (invite, { masque, finDeFichier, signal }) =>
+          demontee.current
+            ? Promise.resolve(false)
+            : new Promise((ok) => {
+                repondre.current = ok;
+                setReponse("");
+                setSaisie({ invite, masque: Boolean(masque), finDeFichier: Boolean(finDeFichier) });
+                // Demande abandonnée (Arrêter, fin du programme) : le champ disparaît.
+                signal.addEventListener("abort", () => {
+                  if (repondre.current !== ok) return;
+                  repondre.current = null;
+                  setSaisie(null);
+                });
+              }),
       });
       setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: r.morceaux, enCours: false } : c)));
     } catch (e) {
@@ -181,7 +204,7 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
     }
   }
 
-  function envoyerReponse(v: string | null) {
+  function envoyerReponse(v: string | null | false) {
     const f = repondre.current;
     repondre.current = null;
     setSaisie(null);
@@ -291,6 +314,8 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
             <span className="select-none text-primary">↳</span>
             <input
               autoFocus
+              type={saisie.masque ? "password" : "text"}
+              autoComplete="off"
               value={reponse}
               onChange={(e) => setReponse(e.target.value)}
               onKeyDown={(e) => {
@@ -300,9 +325,12 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
                 } else if (e.key === "Escape") envoyerReponse(null);
               }}
               aria-label={saisie.invite || "Réponse au programme"}
-              placeholder="Réponse au programme (Entrée pour valider, Échap pour annuler)"
+              placeholder={saisie.finDeFichier ? "Ligne lue par le programme (Entrée pour valider, Échap pour finir la saisie)" : "Réponse au programme (Entrée pour valider, Échap pour annuler)"}
               className="min-w-0 flex-1 rounded border bg-transparent px-2 py-0.5 font-mono text-[12.5px] outline-none focus-visible:border-ring"
             />
+            <Button variant="outline" size="xs" title="Arrête le programme (ses fenêtres se ferment)" onClick={() => arreterExecution()}>
+              <Square /> Arrêter
+            </Button>
           </div>
         ) : (
           occupe && (

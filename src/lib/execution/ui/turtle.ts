@@ -2,10 +2,14 @@
  * Module Python `turtle` de la console du navigateur : la tortue dessine sur un Canvas du tkinter de la
  * console — sa propre fenêtre (Screen) ou le Canvas d'un programme tkinter (TurtleScreen(cv),
  * RawTurtle(cv)) — avec une animation qui suit speed() et tracer(), le mode « logo » et undo().
+ * Avec JSPI, l'animation est minutée en Python comme dans CPython (chaque mise à jour redessine la page
+ * puis attend delay() ms) ; fermer la fenêtre arrête le programme (turtle.Terminator).
  */
 export const TURTLE = String.raw`
 """turtle pour la console Python du navigateur."""
+import itertools
 import math
+import re
 
 import tkinter
 from tkinter import _couleur, _js, _ui
@@ -82,24 +86,49 @@ _PX_PAR_PAS = {1: 3, 2: 4, 3: 6, 4: 8, 5: 11, 6: 14, 7: 18, 8: 24, 9: 32, 10: 45
 
 _ecran = [None]
 _tortue = [None]
+_NUMEROS = itertools.count(1)
+_FERMEE = "fenêtre turtle fermée : programme arrêté"
+_couleurs_connues = set()
+
+
+def _couleur_connue(nom):
+    """Nom de couleur Tk reconnu par le navigateur (« light blue », « red3 », « gray50 »…)."""
+    if str(_ui.rgb(_couleur(nom)) or ""):
+        return True
+    return not str(_ui.rgb("black") or "")  # navigateur incapable de vérifier : on n'empêche rien
+
+
+def _chaine_couleur(s):
+    """Couleur donnée par un nom ou « #rgb » : refusée comme dans CPython (TurtleGraphicsError) si elle est
+    inconnue — « rouge », « #FF000 »… donneraient sinon un trait invisible, sans aucun message."""
+    if s == "" or s in _couleurs_connues:
+        return s
+    if s.startswith("#"):
+        ok = re.fullmatch(r"#(?:[0-9a-fA-F]{3}){1,4}", s) is not None
+    else:
+        ok = re.fullmatch(r"[A-Za-z][A-Za-z0-9 ]*", s) is not None and _couleur_connue(s)
+    if not ok:
+        raise TurtleGraphicsError(f"bad color string: {s}")
+    if len(_couleurs_connues) < 2048:
+        _couleurs_connues.add(s)
+    return s
 
 
 def _vers_css(args, mode):
-    if len(args) == 1:
-        a = args[0]
-        if isinstance(a, (list, tuple)) and len(a) == 3:
-            args = tuple(a)
-        else:
-            return str(a)
-    if len(args) == 3:
-        r, g, b = args
-        if mode == 1.0:
-            r, g, b = (int(round(float(x) * 255)) for x in (r, g, b))
-        for x in (r, g, b):
-            if not 0 <= int(x) <= 255:
-                raise TurtleGraphicsError(f"bad color sequence: {args}")
-        return "#%02x%02x%02x" % (int(r), int(g), int(b))
-    raise TurtleGraphicsError(f"bad color arguments: {args}")
+    """Couleur de turtle (nom, « #rrggbb », (r, g, b) selon colormode) → couleur Tk, comme _colorstr de CPython.
+    Le nom Tk est gardé tel quel : le Canvas le traduit en CSS une seule fois (« red3 » resterait sinon invisible)."""
+    couleur = args[0] if len(args) == 1 else args
+    if isinstance(couleur, str):
+        return _chaine_couleur(couleur)
+    try:
+        r, g, b = couleur
+    except (TypeError, ValueError):
+        raise TurtleGraphicsError(f"bad color arguments: {couleur}") from None
+    if mode == 1.0:
+        r, g, b = (round(255.0 * float(x)) for x in (r, g, b))
+    if not all(0 <= float(x) <= 255 for x in (r, g, b)):
+        raise TurtleGraphicsError(f"bad color sequence: {couleur}")
+    return "#%02x%02x%02x" % (int(r), int(g), int(b))
 
 
 def _px(v, defaut):
@@ -131,7 +160,7 @@ class ScrolledCanvas(tkinter.Canvas):
             self.canvheight = canvheight
         if bg:
             self.bg = bg
-            self.configure(bg=_couleur(bg))
+            self.configure(bg=bg)
 
     def adjustScrolls(self):
         pass
@@ -143,6 +172,8 @@ class ScrolledCanvas(tkinter.Canvas):
 class TurtleScreen:
     """Écran de la tortue dessiné dans un Canvas tkinter donné (la fenêtre de Screen() ou celle du programme)."""
 
+    _RUNNING = True  # comme CPython : passe à False quand la fenêtre de Screen() se ferme (→ Terminator)
+
     def __init__(self, cv, mode="standard", colormode=1.0, delay=10):
         if mode not in ("standard", "logo", "world"):
             raise TurtleGraphicsError(f"No turtle-graphics-mode {mode}")
@@ -152,6 +183,7 @@ class TurtleScreen:
         self._h = max(1, _px(cv.cget("height"), 265))
         cv._ecran_tortue = self
         self._tracer = 1
+        self._compteur = 0  # mises à jour comptées pour tracer(n > 1)
         self._delai = delay
         self._mode = mode
         self._colormode = 1.0 if float(colormode) == 1.0 else 255
@@ -177,7 +209,10 @@ class TurtleScreen:
         return (x - self._l / 2, self._h / 2 - y)
 
     def _regler_animation(self):
-        if self._tracer == 0 or all(t._vitesse == 0 for t in self._tortues if t._visible or t._baisse) and self._tortues:
+        """File d'animation du moteur (opérations dessinées par image), utilisée sans JSPI. Quand le programme
+        peut attendre le navigateur (JSPI), c'est Python qui donne le rythme (_cadence) : chaque opération est
+        dessinée tout de suite."""
+        if tkinter._peut_attendre() or self._tracer == 0 or all(t._vitesse == 0 for t in self._tortues if t._visible or t._baisse) and self._tortues:
             n = 0
         else:
             n = 2 * max(1, int(self._tracer or 1))
@@ -187,6 +222,46 @@ class TurtleScreen:
 
     def _anime_actif(self):
         return self._anime != 0
+
+    def _verifier(self):
+        """Comme _incrementudc de CPython : après la fermeture de la fenêtre de Screen() (croix, bye(), « Fermer
+        les fenêtres »), la tortue lève turtle.Terminator, ce qui arrête le programme ; sur le Canvas détruit
+        d'un programme tkinter, TclError."""
+        if not TurtleScreen._RUNNING:
+            TurtleScreen._RUNNING = True
+            raise Terminator(_FERMEE)
+        if self.cv._detruit:
+            if isinstance(self, _Screen):
+                raise Terminator(_FERMEE)
+            raise tkinter.TclError(f'invalid command name "{self.cv}"')
+
+    def _cadence(self):
+        """Fin d'une mise à jour de la tortue, comme _update() + _delay() de CPython. Quand le programme peut
+        attendre le navigateur (JSPI) : avec tracer(1), la page se redessine et reçoit les événements (clavier,
+        « Arrêter », fermeture) puis le programme attend delay() ms ; avec tracer(n > 1), la page se redessine
+        toutes les n mises à jour, sans attente. Python reste ainsi au rythme de l'affichage, et une boucle
+        « while True: t.forward(…) » ne fige pas l'onglet. Sans JSPI, le moteur étale l'animation (file « anime »)."""
+        if self._tracer == 0 or not tkinter._peut_attendre():
+            return
+        if self._anime:
+            self._anime = 0
+            _ui.configurer(self.cv._id, _js({"anime": 0}))
+        if self._tracer == 1:
+            tkinter._ceder(max(0, self._delai or 0) / 1000)
+        else:
+            self._compteur = (self._compteur + 1) % self._tracer
+            if self._compteur:
+                return
+            tkinter._ceder(0)
+        self._apres_attente()
+
+    def _apres_attente(self):
+        """Après avoir rendu la main : sys.exit() appelé par un rappel (onkey…) pendant l'attente arrête le
+        programme, comme dans Tk ; fenêtre fermée pendant l'attente → Terminator."""
+        relancer = getattr(tkinter, "_relancer_sortie", None)
+        if relancer is not None:
+            relancer()
+        self._verifier()
 
     # — fenêtre —
     def screensize(self, canvwidth=None, canvheight=None, bg=None):
@@ -210,8 +285,10 @@ class TurtleScreen:
     def bgcolor(self, *args):
         if not args:
             return self._bg
+        self._verifier()
+        css = _vers_css(args, self._colormode)  # couleur refusée : l'état d'avant reste, comme dans CPython
         self._bg = args[0] if len(args) == 1 else args
-        self.cv.configure(bg=_couleur(_vers_css(args, self._colormode)))
+        self.cv.configure(bg=css)
 
     def bgpic(self, picname=None):
         if picname is None:
@@ -249,23 +326,43 @@ class TurtleScreen:
         if n is None:
             return self._tracer
         self._tracer = int(n)
+        self._compteur = 0
         if delay is not None:
-            self._delai = delay
+            self._delai = int(delay)
         self._regler_animation()
         if self._tracer:
-            self.update()
+            self._rafraichir()  # sans le garde-fou d'update() : tracer(1) n'est pas une boucle
 
     def delay(self, delay=None):
         if delay is None:
             return self._delai
         self._delai = int(delay)
 
-    def update(self):
+    def _rafraichir(self):
+        """Redessine les curseurs ; avec JSPI, rend la main au navigateur (la page se redessine, reçoit le clavier).
+        Renvoie False si le programme ne peut pas attendre (pas de JSPI)."""
+        self._verifier()
         for t in self._tortues:
             t._dessiner_curseur(force=True)
-        # Boucle de jeu « while True: écran.update() » : la page se redessine et reçoit le clavier (JSPI).
-        if tkinter._peut_attendre():
-            tkinter._ceder(0)
+        if not tkinter._peut_attendre():
+            return False
+        tkinter._ceder(0)
+        self._apres_attente()
+        return True
+
+    def update(self):
+        # Boucle de jeu « while True: écran.update() » : avec JSPI, la page se redessine et reçoit le clavier.
+        # Sans JSPI, elle resterait figée pour toujours : arrêtée au bout de 3 s, comme update() de tkinter.
+        if self._rafraichir():
+            return
+        try:
+            tkinter._surveiller_boucle()
+        except RuntimeError:
+            raise RuntimeError(
+                "Boucle sans fin avec update() : dans ce navigateur, la fenêtre turtle ne peut se redessiner que si "
+                "le programme rend la main. Remplacez « while True: … écran.update() » par une fonction qui se "
+                "reprogramme avec écran.ontimer(fonction, millisecondes)."
+            ) from None
 
     def turtles(self):
         return list(self._tortues)
@@ -338,24 +435,45 @@ class TurtleScreen:
     def textinput(self, title, prompt):
         from tkinter import simpledialog
 
+        self._verifier()
         return simpledialog.askstring(title, prompt)
 
     def numinput(self, title, prompt, default=None, minval=None, maxval=None):
         from tkinter import simpledialog
 
+        self._verifier()
         return simpledialog.askfloat(title, prompt, initialvalue=default, minvalue=minval, maxvalue=maxval)
 
     def mainloop(self):
         tkinter.mainloop()  # attend la fermeture de la fenêtre quand le navigateur le permet (JSPI)
+        if self.cv._detruit:
+            # Sortie de mainloop() parce que la fenêtre a été fermée : c'est la fin normale du programme. La console
+            # continue (pas un vrai processus) : la cellule suivante ne doit pas recevoir de Terminator.
+            TurtleScreen._RUNNING = True
 
     done = mainloop
+
+
+class _Root(tkinter.Tk):
+    """Fenêtre de Screen() (comme _Root de CPython) : la fermer — croix, bye(), « Fermer les fenêtres » de la
+    console — arrête le programme turtle en cours (TurtleScreen._RUNNING = False → turtle.Terminator)."""
+
+    def destroy(self):
+        e = getattr(self, "_ecran_tortue", None)
+        if not self._detruit and e is not None and _ecran[0] is e:
+            _ecran[0] = _tortue[0] = None
+            # Bouton « Arrêter » ou sys.exit() dans un rappel : le programme s'arrête déjà (KeyboardInterrupt,
+            # SystemExit) ; pas de Terminator en attente pour la suite de la console.
+            if not _ui.arretDemande() and getattr(tkinter, "_sortie", [None])[0] is None:
+                TurtleScreen._RUNNING = False
+        super().destroy()
 
 
 class _Screen(TurtleScreen):
     """L'écran unique de Screen() : une fenêtre « Python Turtle Graphics » avec son propre Canvas."""
 
     def __init__(self):
-        root = tkinter.Tk()
+        root = _Root()
         root.title("Python Turtle Graphics")
         l, h = (int(x) for x in _ui.ecran().to_py())
         cv = ScrolledCanvas(root, max(240, min(720, int(l * 0.7))), max(200, min(540, int(h * 0.65))))
@@ -404,17 +522,22 @@ def Screen():
 
 def _annulable(methode):
     """Méthode de la tortue annulable par undo() : l'état d'avant et les dessins créés sont notés.
-    Les appels imbriqués (circle → forward…) ne forment qu'une seule annulation, comme dans CPython."""
+    Les appels imbriqués (circle → forward…) ne forment qu'une seule annulation, comme dans CPython. Avec JSPI,
+    un rappel (ondrag, ontimer…) peut agir sur la tortue pendant qu'une méthode attend la page : il rejoint alors
+    l'annulation de la méthode en cours, notée par l'appel extérieur seulement."""
 
     def f(self, *args, **kw):
-        self._niveau_annul += 1
-        if self._niveau_annul == 1:
+        exterieur = self._niveau_annul == 0
+        if exterieur:
+            if args or kw or methode.__name__ not in _LECTURES:
+                self.screen._verifier()  # fenêtre fermée : Terminator avant tout dessin
             avant, n = self._etat_annul(), len(self._items)
+        self._niveau_annul += 1
         try:
             return methode(self, *args, **kw)
         finally:
             self._niveau_annul -= 1
-            if self._niveau_annul == 0:
+            if exterieur:
                 self._noter_annul(avant, n)
 
     f.__name__ = methode.__name__
@@ -422,7 +545,8 @@ def _annulable(methode):
     return f
 
 
-_ETAT_ANNUL = ("_x", "_y", "_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_visible", "_remplit", "_rempl_premier")
+_LECTURES = {"pencolor", "fillcolor", "color", "pensize", "pen"}  # sans argument : simple lecture
+_ETAT_ANNUL = ("_x","_y", "_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_visible", "_remplit", "_rempl_premier")
 
 
 class RawTurtle:
@@ -439,15 +563,15 @@ class RawTurtle:
         self._items = []
         self._tampons = {}
         self._curseur = None
+        self._etiquette = f"tortue{next(_NUMEROS)}"  # tag propre du curseur : onclick / ondrag de CETTE tortue
         self._remplit = False
         self._rempl_points = []
         self._rempl_premier = None
         self._poly = None
-        self._clics = {}
         self._initialiser(shape, visible)
         self.screen._tortues.append(self)
         self.screen._regler_animation()
-        self._dessiner_curseur(force=True)
+        self._maj(force=True)
 
     def _initialiser(self, shape="classic", visible=True):
         self._x = self._y = 0.0
@@ -494,10 +618,27 @@ class RawTurtle:
         """Angle utilisateur (degrés ou unité choisie, mode logo) → angle standard en degrés."""
         return float(a) * 360.0 / self._unite
 
-    def _pas(self, distance):
-        if not self.screen._anime_actif() or self._vitesse == 0:
+    def _pas(self, x0, y0, x, y):
+        """Nombre de mises à jour d'un déplacement (distance en pixels) : la formule de CPython (vitesse,
+        tracer(1)) quand Python donne le rythme (JSPI) ; sinon, un découpage adapté à la file du moteur."""
+        if not self._vitesse:
             return 1
-        return max(1, int(abs(distance) / _PX_PAR_PAS.get(self._vitesse, 14)))
+        (a, b), (c, d) = self._c(x0, y0), self._c(x, y)
+        distance = math.hypot(c - a, d - b)
+        if tkinter._peut_attendre():
+            if self.screen._tracer != 1:
+                return 1
+            return 1 + int(distance / (3 * 1.1 ** self._vitesse * self._vitesse))
+        if not self.screen._anime_actif():
+            return 1
+        return max(1, int(distance / _PX_PAR_PAS.get(self._vitesse, 14)))
+
+    def _maj(self, force=False):
+        """Comme _update() de CPython, après chaque changement : fenêtre fermée → Terminator, curseur redessiné,
+        puis (tracer actif, JSPI) la page se redessine et le programme attend delay() ms."""
+        self.screen._verifier()
+        self._dessiner_curseur(force)
+        self.screen._cadence()
 
     def _effacer_curseur(self):
         if self._curseur is not None:
@@ -529,7 +670,7 @@ class RawTurtle:
         if isinstance(forme, tuple) and forme and forme[0] == "image":
             x, y = self._c(self._x, self._y)
             if self._curseur is None:
-                self._curseur = self._cv.create_image(x, y, image=forme[1], tags=("tortue",))
+                self._curseur = self._cv.create_image(x, y, image=forme[1], tags=("tortue", self._etiquette))
             else:
                 self._cv.coords(self._curseur, x, y)
             return
@@ -538,7 +679,7 @@ class RawTurtle:
             self._effacer_curseur()
             return
         if self._curseur is None:
-            self._curseur = self._cv.create_polygon(*pts, fill=self._remplissage_css, outline=self._crayon_css, width=self._etirement[2], tags=("tortue",))
+            self._curseur = self._cv.create_polygon(*pts, fill=self._remplissage_css, outline=self._crayon_css, width=self._etirement[2], tags=("tortue", self._etiquette))
         else:
             it = self._cv._items.get(self._curseur)
             if it is not None:
@@ -551,7 +692,7 @@ class RawTurtle:
     def _aller(self, x, y, tracer_ligne=True):
         x0, y0 = self._x, self._y
         x, y = float(x), float(y)
-        n = self._pas(math.hypot(x - x0, y - y0))
+        n = self._pas(x0, y0, x, y)
         ligne = None
         if self._baisse and tracer_ligne and (x, y) != (x0, y0):
             c0 = self._c(x0, y0)
@@ -565,23 +706,34 @@ class RawTurtle:
             if ligne is not None and n > 1:
                 self._cv.coords(ligne, *self._c(x0, y0), *self._c(xi, yi))
             self._x, self._y = xi, yi
-            if n > 1 or k == n:
-                self._dessiner_curseur()
+            self._maj()  # une mise à jour par pas, comme CPython (même en vitesse 0 : une seule)
         self._x, self._y = x, y
         if self._remplit:
             self._rempl_points.append((x, y))
         if self._poly is not None:
             self._poly.append((x, y))
 
-    def _tourner(self, angle, animer=True):
-        if animer and self.screen._anime_actif() and self._vitesse and self._visible:
-            pas = max(1, int(abs(angle) / (10 * max(1, self._vitesse) / 3)))
-            for _ in range(pas):
-                self._cap = (self._cap + angle / pas) % 360
-                self._dessiner_curseur()
-        else:
-            self._cap = (self._cap + angle) % 360
-            self._dessiner_curseur()
+    def _tourner(self, angle):
+        """Rotation animée pas à pas (vitesse > 0), puis une mise à jour finale, comme _rotate de CPython."""
+        pas = 0
+        if self._vitesse:
+            if tkinter._peut_attendre():
+                if self.screen._tracer == 1:
+                    pas = 1 + int(abs(angle) / (3.0 * self._vitesse))
+            elif self.screen._anime_actif() and self._visible:
+                pas = max(1, int(abs(angle) / (10 * self._vitesse / 3)))
+        cap = (self._cap + angle) % 360
+        for _ in range(pas):
+            self._cap = (self._cap + angle / pas) % 360
+            self._maj()
+        self._cap = cap
+        self._maj()
+
+    def _changer_vitesse(self, vitesse, rythme):
+        """Vitesse changée pendant circle() : avec JSPI, compte une mise à jour comme speed() de CPython."""
+        self._vitesse = vitesse
+        if rythme:
+            self._maj()
 
     @_annulable
     def forward(self, distance):
@@ -656,14 +808,33 @@ class RawTurtle:
         l = 2.0 * radius * math.sin(math.radians(w2))
         if radius < 0:
             l, w, w2 = -l, -w, -w2
+        # Comme CPython : en vitesse 0, le cercle se dessine d'un coup (tracer coupé le temps du cercle) ; sinon
+        # chaque côté avance à la vitesse de la tortue et chaque rotation se fait en vitesse 0. Sans JSPI, la
+        # file du moteur anime les côtés un peu plus vite (vitesse + 3).
         vitesse = self._vitesse
-        self._tourner(w2, animer=False)
-        for _ in range(steps):
-            self._vitesse = min(10, vitesse + 3) if vitesse else 0
-            self.forward(l)
+        ecran = self.screen
+        rythme = tkinter._peut_attendre()
+        cote = vitesse if rythme or not vitesse else min(10, vitesse + 3)
+        tr = ecran._tracer
+        if vitesse == 0:
+            ecran._tracer = 0
+        try:
+            self._changer_vitesse(0, rythme)
+            self._tourner(w2)
+            for _ in range(steps):
+                self._changer_vitesse(cote, rythme)
+                self.forward(l)
+                self._changer_vitesse(0, rythme)
+                self._tourner(w)
+            self._tourner(-w2)
+        finally:
             self._vitesse = vitesse
-            self._tourner(w, animer=False)
-        self._tourner(-w2, animer=False)
+            if vitesse == 0:
+                ecran._tracer = tr
+        if vitesse == 0:
+            ecran.tracer(tr)
+        elif rythme:
+            self._maj()
 
     @_annulable
     def dot(self, size=None, *color):
@@ -675,7 +846,7 @@ class RawTurtle:
         x, y = self._c(self._x, self._y)
         i = self._cv.create_oval(x - d / 2, y - d / 2, x + d / 2, y + d / 2, fill=css, outline="")
         self._items.append(i)
-        self._dessiner_curseur()
+        self._maj()
 
     @_annulable
     def stamp(self):
@@ -710,7 +881,7 @@ class RawTurtle:
             b = self._cv.bbox(i)
             if b:
                 self._aller(self._x + (b[2] - b[0]), self._y, tracer_ligne=False)
-        self._dessiner_curseur()
+        self._maj()
 
     # — remplissage —
     @_annulable
@@ -718,6 +889,7 @@ class RawTurtle:
         self._remplit = True
         self._rempl_points = [(self._x, self._y)]
         self._rempl_premier = None
+        self._maj()
 
     @_annulable
     def end_fill(self):
@@ -731,7 +903,7 @@ class RawTurtle:
                 self._cv.tag_lower(poly, self._rempl_premier)
         self._remplit = False
         self._rempl_points = []
-        self._dessiner_curseur()
+        self._maj()
 
     def filling(self):
         return self._remplit
@@ -749,12 +921,14 @@ class RawTurtle:
     @_annulable
     def pendown(self):
         self._baisse = True
+        self._maj()
 
     pd = down = pendown
 
     @_annulable
     def penup(self):
         self._baisse = False
+        self._maj()
 
     pu = up = penup
 
@@ -766,6 +940,7 @@ class RawTurtle:
         if width is None:
             return self._epaisseur
         self._epaisseur = float(width)
+        self._maj()
 
     width = pensize
 
@@ -777,33 +952,42 @@ class RawTurtle:
         speed = float(speed)
         self._vitesse = 0 if speed > 10 or speed < 0.5 else int(round(speed))
         self.screen._regler_animation()
+        self._maj()
 
+    # Couleurs : vérifiées AVANT de changer l'état ; une couleur refusée laisse l'état d'avant, comme CPython.
     @_annulable
     def pencolor(self, *args):
         if not args:
             return self._crayon
+        css = _vers_css(args, self.screen._colormode)
         self._crayon = args[0] if len(args) == 1 else args
-        self._crayon_css = _couleur(_vers_css(args, self.screen._colormode))
-        self._dessiner_curseur()
+        self._crayon_css = css
+        self._maj()
 
     @_annulable
     def fillcolor(self, *args):
         if not args:
             return self._remplissage
+        css = _vers_css(args, self.screen._colormode)
         self._remplissage = args[0] if len(args) == 1 else args
-        self._remplissage_css = _couleur(_vers_css(args, self.screen._colormode))
-        self._dessiner_curseur()
+        self._remplissage_css = css
+        self._maj()
 
     @_annulable
     def color(self, *args):
         if not args:
             return (self._crayon, self._remplissage)
-        if len(args) == 1 or (len(args) == 3 and all(isinstance(a, (int, float)) for a in args)):
-            self.pencolor(*args)
-            self.fillcolor(*args)
+        if len(args) == 2:
+            crayon, remplissage = args
+        elif len(args) in (1, 3):
+            crayon = remplissage = args[0] if len(args) == 1 else args
         else:
-            self.pencolor(args[0])
-            self.fillcolor(args[1])
+            raise TurtleGraphicsError(f"bad color arguments: {args}")
+        mode = self.screen._colormode
+        css_crayon, css_remplissage = _vers_css((crayon,), mode), _vers_css((remplissage,), mode)
+        self._crayon, self._crayon_css = crayon, css_crayon
+        self._remplissage, self._remplissage_css = remplissage, css_remplissage
+        self._maj()
 
     @_annulable
     def pen(self, pen=None, **pendict):
@@ -828,7 +1012,7 @@ class RawTurtle:
     @_annulable
     def showturtle(self):
         self._visible = True
-        self._dessiner_curseur(force=True)
+        self._maj(force=True)
 
     st = showturtle
 
@@ -836,6 +1020,7 @@ class RawTurtle:
     def hideturtle(self):
         self._visible = False
         self._effacer_curseur()
+        self._maj()
 
     ht = hideturtle
 
@@ -849,7 +1034,7 @@ class RawTurtle:
             raise TurtleGraphicsError(f"There is no shape named {name}")
         self._forme = name
         self._effacer_curseur()
-        self._dessiner_curseur(force=True)
+        self._maj(force=True)
 
     def shapesize(self, stretch_wid=None, stretch_len=None, outline=None):
         if stretch_wid is None and stretch_len is None and outline is None:
@@ -857,7 +1042,7 @@ class RawTurtle:
         sw = float(stretch_wid) if stretch_wid is not None else self._etirement[0]
         sl = float(stretch_len) if stretch_len is not None else (sw if stretch_wid is not None else self._etirement[1])
         self._etirement = (sw, sl, outline if outline is not None else self._etirement[2])
-        self._dessiner_curseur()
+        self._maj()
 
     turtlesize = shapesize
 
@@ -913,18 +1098,24 @@ class RawTurtle:
     def radians(self):
         self._unite = 2 * math.pi
 
-    def clear(self):
+    def _effacer_dessins(self):
         for i in self._items:
             self._cv.delete(i)
         self._items = []
         self._tampons = {}
         self._annulations = []
 
+    def clear(self):
+        self.screen._verifier()
+        self._effacer_dessins()
+        self._maj()
+
     def reset(self):
-        self.clear()
+        self.screen._verifier()
+        self._effacer_dessins()
         self._effacer_curseur()
         self._initialiser(self._forme, True)
-        self._dessiner_curseur(force=True)
+        self._maj(force=True)
 
     def getscreen(self):
         return self.screen
@@ -944,6 +1135,7 @@ class RawTurtle:
 
     def undo(self):
         """Annule la dernière action (déplacement, rotation, cercle, tampon, remplissage, crayon…)."""
+        self.screen._verifier()
         if not self._annulations:
             return
         avant, crees = self._annulations.pop()
@@ -959,7 +1151,7 @@ class RawTurtle:
                 del liste[n:]
                 v = liste
             setattr(self, k, v)
-        self._dessiner_curseur(force=True)
+        self._maj(force=True)
 
     def setundobuffer(self, size):
         self._annul_max = int(size) if size else 0
@@ -976,14 +1168,25 @@ class RawTurtle:
         return tuple((x * sw, y * sl) for x, y in forme)
 
     # — événements de la tortue —
+    # Comme CPython : chaque tortue lie son propre curseur (tag self._etiquette, gardé quand le curseur est
+    # recréé), pas toutes les tortues ni tout le canevas.
+    def _lier(self, sequence, fun, add):
+        if fun is None:
+            self._cv.tag_unbind(self._etiquette, sequence)
+            return
+        ecran = self.screen
+        self._cv.tag_bind(self._etiquette, sequence, lambda e: fun(*ecran._depuis_canvas(e.x, e.y)), add)
+
     def onclick(self, fun, btn=1, add=None):
-        self._cv.tag_bind("tortue", f"<Button-{btn}>", lambda e: fun(*self.screen._depuis_canvas(e.x, e.y)) if fun else None)
+        self._lier(f"<Button-{btn}>", fun, add)
 
     def onrelease(self, fun, btn=1, add=None):
-        self._cv.tag_bind("tortue", f"<ButtonRelease-{btn}>", lambda e: fun(*self.screen._depuis_canvas(e.x, e.y)) if fun else None)
+        _ecouter_boutons(self._cv)
+        self._lier(f"<ButtonRelease-{btn}>", fun, add)
 
     def ondrag(self, fun, btn=1, add=None):
-        self._cv.bind(f"<B{btn}-Motion>", lambda e: fun(*self.screen._depuis_canvas(e.x, e.y)) if fun else None)
+        _ecouter_boutons(self._cv)
+        self._lier(f"<B{btn}-Motion>", fun, add)
 
 
 class Turtle(RawTurtle):
@@ -995,6 +1198,18 @@ RawPen = RawTurtle
 Pen = Turtle
 
 
+_SAISIE = "turtle-saisie"  # tag qu'aucun élément ne porte
+
+
+def _ecouter_boutons(cv):
+    """Le Canvas suit l'élément pressé pendant un glisser (saisie implicite de Tk : un glisser rapide ne perd pas la
+    tortue, un glisser commencé ailleurs ne la déplace pas) à condition de recevoir les pressions et relâchements de
+    bouton, même sans onclick : liaisons vides sur un tag qu'aucun élément ne porte."""
+    if not cv.tag_bind(_SAISIE):
+        cv.tag_bind(_SAISIE, "<ButtonPress>", lambda e: None, "+")
+        cv.tag_bind(_SAISIE, "<ButtonRelease>", lambda e: None, "+")
+
+
 def _tortue_defaut():
     t = _tortue[0]
     if t is None or t.screen is not Screen() or t not in t.screen._tortues:
@@ -1003,9 +1218,20 @@ def _tortue_defaut():
 
 
 def _reinitialiser():
+    """Nouveau lancement (lanceur) : la fenêtre turtle précédente se ferme, sans que le nouveau programme reçoive
+    le Terminator de cette fermeture."""
     e = _ecran[0]
     if e is not None:
         e.bye()
+    TurtleScreen._RUNNING = True
+
+
+def _verifier_fonctionnement():
+    """Comme les fonctions du module de CPython : après la fermeture de la fenêtre, le premier appel lève
+    turtle.Terminator (le programme s'arrête au lieu de rouvrir une fenêtre) ; l'appel suivant en rouvre une."""
+    if not TurtleScreen._RUNNING:
+        TurtleScreen._RUNNING = True
+        raise Terminator(_FERMEE)
 
 
 _METHODES_ECRAN = [
@@ -1028,6 +1254,7 @@ _METHODES_TORTUE = [
 
 def _fonction_ecran(nom):
     def f(*args, **kw):
+        _verifier_fonctionnement()
         return getattr(Screen(), nom)(*args, **kw)
 
     f.__name__ = nom
@@ -1036,6 +1263,7 @@ def _fonction_ecran(nom):
 
 def _fonction_tortue(nom):
     def f(*args, **kw):
+        _verifier_fonctionnement()
         return getattr(_tortue_defaut(), nom)(*args, **kw)
 
     f.__name__ = nom

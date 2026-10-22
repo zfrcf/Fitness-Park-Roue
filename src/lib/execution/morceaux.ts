@@ -60,11 +60,12 @@ export type GroupeSortie = { textes: { texte: string; erreur?: boolean }[] } | {
 /**
  * Regroupe les morceaux pour l'affichage : les textes qui se suivent (sortie et erreurs mêlées)
  * forment un seul bloc, comme dans un terminal ; chaque image coupe le flux. Au-delà de `max`
- * morceaux (programme qui alterne sans fin), la suite n'est pas affichée (`tronque`).
+ * morceaux (programme qui alterne sans fin), seuls les derniers sont affichés, comme un terminal
+ * qui défile (`tronque` : le début est masqué).
  */
 export function grouperMorceaux(liste: Morceau[], max = 400): { groupes: GroupeSortie[]; tronque: boolean } {
   const groupes: GroupeSortie[] = [];
-  for (const m of liste.slice(0, max)) {
+  for (const m of liste.length > max ? liste.slice(-max) : liste) {
     if ("image" in m) {
       groupes.push({ image: m.image });
       continue;

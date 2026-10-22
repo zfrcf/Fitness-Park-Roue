@@ -168,29 +168,90 @@ export function texteLigne(ligne: LigneAnsi): string {
   return ligne.map((s) => s.texte).join("");
 }
 
-/**
- * Limite les lignes affichées (après interprétation des « \r ») : au plus `maxLignes` lignes et
- * `maxCar` caractères. Renvoie les lignes gardées et l'avertissement à afficher, s'il y a lieu.
- */
-export function tronquerLignes(lignes: LigneAnsi[], maxLignes: number, maxCar: number): { lignes: LigneAnsi[]; avertissement: string | null } {
-  const gardees: LigneAnsi[] = [];
-  let car = 0;
-  for (let i = 0; i < lignes.length; i++) {
-    if (i >= maxLignes) return { lignes: gardees, avertissement: `[… ${lignes.length - maxLignes} lignes de plus]` };
-    const longueur = texteLigne(lignes[i]).length;
-    if (car + longueur > maxCar) {
-      let reste = maxCar - car;
-      const coupee: LigneAnsi = [];
-      for (const s of lignes[i]) {
-        if (reste <= 0) break;
-        coupee.push({ ...s, texte: s.texte.slice(0, reste) });
-        reste -= s.texte.length;
-      }
-      if (coupee.length) gardees.push(coupee);
-      return { lignes: gardees, avertissement: "[… sortie tronquée]" };
-    }
-    car += longueur + 1;
-    gardees.push(lignes[i]);
+/** Lignes à afficher, avec l'avertissement à placer à l'endroit des lignes masquées. */
+export interface LignesTronquees {
+  lignes: LigneAnsi[];
+  /** Texte à la place des lignes masquées (null : tout est affiché). */
+  avertissement: string | null;
+  /** Indice, dans `lignes`, avant lequel placer l'avertissement (les lignes d'en-tête gardées sont avant). */
+  position: number;
+}
+
+/** Les `n` derniers caractères d'une ligne (styles conservés). */
+function finDeLigne(ligne: LigneAnsi, n: number): LigneAnsi {
+  const out: LigneAnsi = [];
+  let reste = n;
+  for (let i = ligne.length - 1; i >= 0 && reste > 0; i--) {
+    const s = ligne[i];
+    const texte = s.texte.length > reste ? s.texte.slice(s.texte.length - reste) : s.texte;
+    out.unshift({ ...s, texte });
+    reste -= texte.length;
   }
-  return { lignes: gardees, avertissement: null };
+  return out;
+}
+
+/**
+ * Limite les lignes affichées (après interprétation des « \r ») en gardant la FIN, comme un terminal :
+ * le résultat final et la dernière ligne d'un traceback restent visibles. Les `tete` premières lignes
+ * (en-tête « Traceback (most recent call last): ») sont gardées aussi ; au plus `maxLignes` lignes et
+ * `maxCar` caractères en tout. `dejaMasquees` : lignes déjà retirées entre l'en-tête et la fin.
+ */
+export function tronquerLignes(lignes: LigneAnsi[], maxLignes: number, maxCar: number, tete = 0, dejaMasquees = 0): LignesTronquees {
+  const longueurs = lignes.map((l) => texteLigne(l).length);
+  const total = longueurs.reduce((a, b) => a + b, 0) + Math.max(0, lignes.length - 1);
+  if (!dejaMasquees && lignes.length <= maxLignes && total <= maxCar) return { lignes, avertissement: null, position: lignes.length };
+  // En-tête : au plus `tete` lignes, sur au plus la moitié du budget.
+  const debut: LigneAnsi[] = [];
+  let car = 0;
+  for (let i = 0; i < Math.min(tete, maxLignes - 1, lignes.length); i++) {
+    if (car + longueurs[i] > maxCar / 2) break;
+    debut.push(lignes[i]);
+    car += longueurs[i] + 1;
+  }
+  // Fin : de la dernière ligne vers le haut, tant qu'elle tient.
+  const fin: LigneAnsi[] = [];
+  let coupee = false;
+  for (let i = lignes.length - 1; i >= debut.length && debut.length + fin.length < maxLignes; i--) {
+    if (car + longueurs[i] > maxCar) {
+      if (!fin.length) {
+        fin.unshift(finDeLigne(lignes[i], Math.max(0, maxCar - car))); // une seule ligne trop longue : sa fin
+        coupee = true;
+      }
+      break;
+    }
+    fin.unshift(lignes[i]);
+    car += longueurs[i] + 1;
+  }
+  const masquees = lignes.length - debut.length - fin.length + dejaMasquees;
+  const avertissement = masquees > 0 ? `[… ${masquees} ligne${masquees > 1 ? "s" : ""} masquée${masquees > 1 ? "s" : ""}]` : coupee ? "[… début de la ligne masqué]" : null;
+  return { lignes: [...debut, ...fin], avertissement, position: debut.length };
+}
+
+/**
+ * Lignes à afficher pour le texte d'un flux (voir tronquerLignes), à coût borné quelle que soit la
+ * longueur de la sortie : seuls l'en-tête et la fin du texte brut sont interprétés (sortie en direct
+ * d'un programme qui affiche beaucoup : chaque nouveau morceau relance ce calcul).
+ */
+export function lignesAffichees(texte: string, maxLignes: number, maxCar: number, tete = 0): LignesTronquees {
+  const budget = 2 * maxCar;
+  // En-tête brut : les `tete` premières lignes.
+  let finTete = 0;
+  for (let k = 0; k < tete; k++) {
+    const j = texte.indexOf("\n", finTete);
+    if (j < 0 || j > maxCar) break;
+    finTete = j + 1;
+  }
+  // Fin brute : au plus maxLignes + 1 lignes et `budget` caractères, coupée en début de ligne.
+  let p = texte.length;
+  for (let n = 0; n <= maxLignes; n++) {
+    const j = texte.lastIndexOf("\n", p - 2);
+    if (j < 0 || texte.length - (j + 1) > budget) break;
+    p = j + 1;
+  }
+  if (p === texte.length && texte.length > budget) p = texte.length - budget; // dernière ligne immense
+  if (p <= finTete) return tronquerLignes(lignesAnsi(texte), maxLignes, maxCar, tete);
+  let masquees = 0;
+  for (let j = texte.indexOf("\n", finTete); j >= 0 && j < p; j = texte.indexOf("\n", j + 1)) masquees++;
+  const enTete = finTete > 0 ? lignesAnsi(texte.slice(0, finTete - 1)) : [];
+  return tronquerLignes([...enTete, ...lignesAnsi(texte.slice(p))], maxLignes, maxCar, enTete.length, masquees);
 }

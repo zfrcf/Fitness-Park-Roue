@@ -356,6 +356,10 @@ class Label(_Theme, tkinter.Label):
 
 
 class Entry(_Theme, tkinter.Entry):
+    def validate(self):
+        """Validation forcée (%V = forced), comme « pathName validate » de ttk."""
+        return bool(self._valider(self.get(), "-1", -1, "", "forced"))
+
     _style_defaut = "TEntry"
     _classe_tk = "TEntry"
     _champ = True
@@ -409,6 +413,10 @@ class Scale(_Theme, tkinter.Scale):
 
 
 class Spinbox(_Theme, tkinter.Spinbox):
+    def validate(self):
+        """Validation forcée (%V = forced), comme « pathName validate » de ttk."""
+        return bool(self._valider(self.get(), "-1", -1, "", "forced"))
+
     _style_defaut = "TSpinbox"
     _classe_tk = "TSpinbox"
     _champ = True
@@ -528,6 +536,10 @@ class Progressbar(_Theme, tkinter.Widget):
 
 
 class Combobox(_Theme, tkinter.Entry):
+    def validate(self):
+        """Validation forcée (%V = forced), comme « pathName validate » de ttk."""
+        return bool(self._valider(self.get(), "-1", -1, "", "forced"))
+
     _type_js = "combobox"
     _style_defaut = "TCombobox"
     _classe_tk = "TCombobox"
@@ -599,6 +611,25 @@ class Notebook(_Theme, tkinter.Widget):
             return self._onglets[int(tab_id)]["w"]
         return self.nametowidget(tab_id)
 
+    def _verifier_page(self, child):
+        """Comme Ttk_Maintainable : la page est le Notebook... ou un descendant du parent du Notebook."""
+        if child is self or isinstance(child, (tkinter.Tk, tkinter.Toplevel)):
+            raise TclError(f"can't add {child} as slave of {self}")
+        a = getattr(child, "master", None)
+        while a is not None and a is not self and a is not self.master:
+            if isinstance(a, (tkinter.Tk, tkinter.Toplevel)):
+                a = None  # sous une autre fenêtre : pas une page possible
+                break
+            a = getattr(a, "master", None)
+        if a is None:
+            raise TclError(f"can't add {child} as slave of {self}")
+        child._gerant = self
+
+    def _premier_onglet(self, child, kw):
+        if self._actif is None and kw.get("state", "normal") == "normal":
+            self._actif = child
+            _virtuel(self, "<<NotebookTabChanged>>")  # Tk sélectionne le premier onglet (événement en file)
+
     def add(self, child, **kw):
         for t in self._onglets:
             if t["w"] is child:
@@ -607,23 +638,49 @@ class Notebook(_Theme, tkinter.Widget):
                 t.update(kw)
                 self._envoyer()
                 return
+        self._verifier_page(child)
         self._onglets.append({"w": child, **kw})
-        if self._actif is None:
-            self._actif = child
+        self._premier_onglet(child, kw)
         self._envoyer()
 
     def insert(self, pos, child, **kw):
+        self._verifier_page(child)
         self._onglets = [t for t in self._onglets if t["w"] is not child]
         i = len(self._onglets) if pos in ("end",) else self.index(pos)
         self._onglets.insert(i, {"w": child, **kw})
-        if self._actif is None:
-            self._actif = child
+        self._premier_onglet(child, kw)
         self._envoyer()
+
+    def _retirer(self, w):
+        """Onglet retiré (forget, page détruite) : comme SelectNearestTab de Tk, l'onglet suivant (sinon le
+        précédent) devient courant et <<NotebookTabChanged>> part."""
+        i = next((k for k, t in enumerate(self._onglets) if t["w"] is w), None)
+        if i is None:
+            return
+        if self._actif is w:
+            ok = lambda t: t.get("state", "normal") == "normal" and not getattr(t["w"], "_detruit", False)
+            suiv = [t["w"] for t in self._onglets[i + 1:] if ok(t)]
+            prec = [t["w"] for t in reversed(self._onglets[:i]) if ok(t)]
+            self._actif = (suiv or prec or [None])[0]
+            if self._actif is not None:
+                _virtuel(self, "<<NotebookTabChanged>>")
+        del self._onglets[i]
+        if not self._detruit and not getattr(self, "_en_destruction", False):
+            self._envoyer()
+
+    def _enfant_detruit(self, w):
+        self._retirer(w)
+
+    def destroy(self):
+        self._en_destruction = True
+        super().destroy()
 
     def select(self, tab_id=None):
         if tab_id is None:
             return str(self._actif) if self._actif is not None else ""
         w = self._w(tab_id)
+        if any(t["w"] is w and t.get("state") == "disabled" for t in self._onglets):
+            return  # Tk ignore la sélection d'un onglet désactivé
         for t in self._onglets:
             if t["w"] is w and t.get("state") == "hidden":
                 t["state"] = "normal"
@@ -654,11 +711,7 @@ class Notebook(_Theme, tkinter.Widget):
         return tuple(str(t["w"]) for t in self._onglets)
 
     def forget(self, tab_id):
-        w = self._w(tab_id)
-        self._onglets = [t for t in self._onglets if t["w"] is not w]
-        if self._actif is w:
-            self._actif = self._onglets[0]["w"] if self._onglets else None
-        self._envoyer()
+        self._retirer(self._w(tab_id))
 
     def hide(self, tab_id):
         w = self._w(tab_id)
@@ -719,8 +772,19 @@ class Treeview(_Theme, tkinter.Widget):
             self._planifier()
         return j
 
+    @staticmethod
+    def _iid(item):
+        """tree.item(tree.selection()) : Tk reçoit la liste Tcl « I002 » ; () désigne la racine."""
+        if isinstance(item, (list, tuple)):
+            if not item:
+                return ""
+            if len(item) == 1:
+                return str(item[0])
+            raise TclError("Item " + " ".join(str(x) for x in item) + " not found")
+        return str(item)
+
     def _it(self, item):
-        iid = str(item)
+        iid = self._iid(item)
         if iid not in self._items:
             raise TclError(f"Item {item} not found")
         return self._items[iid]
@@ -816,7 +880,7 @@ class Treeview(_Theme, tkinter.Widget):
         self._a_voir = None
 
     def insert(self, parent, index, iid=None, **kw):
-        parent = str(parent)
+        parent = self._iid(parent)
         self._it(parent)
         if iid is None or iid == "":
             self._n += 1
@@ -864,14 +928,17 @@ class Treeview(_Theme, tkinter.Widget):
         return tuple(self._it(item or "")["children"])
 
     def set_children(self, item, *newchildren):
-        it = self._it(item or "")
+        item = self._iid(item or "")
+        it = self._it(item)
         nouveaux = [str(c) for c in newchildren]
+        for c in nouveaux:  # tout est vérifié AVANT de modifier (comme TreeviewChildrenCommand)
+            self._it(c)
+            self._verifier_ascendance(c, item)
         for c in it["children"]:
             self._items[c]["parent"] = None
         for c in nouveaux:
-            self._it(c)
             self._retirer(c)
-            self._items[c]["parent"] = str(item or "")
+            self._items[c]["parent"] = item
         it["children"] = nouveaux
         self._planifier()
 
@@ -908,10 +975,19 @@ class Treeview(_Theme, tkinter.Widget):
             self._items[iid]["parent"] = None
         self._planifier()
 
+    def _verifier_ascendance(self, item, parent):
+        """Comme AncestryCheck de Tk : un élément ne va pas sous lui-même ni sous un de ses descendants."""
+        p = parent
+        while p is not None:
+            if p == item:
+                raise TclError(f"Cannot insert {item} as descendant of {parent}")
+            p = self._items[p]["parent"]
+
     def move(self, item, parent, index):
-        item, parent = str(item), str(parent)
+        item, parent = self._iid(item), self._iid(parent)
         self._it(item)
         self._it(parent)
+        self._verifier_ascendance(item, parent)
         self._retirer(item)
         enfants = self._items[parent]["children"]
         pos = len(enfants) if str(index) == "end" else max(0, min(len(enfants), int(index)))
@@ -926,26 +1002,29 @@ class Treeview(_Theme, tkinter.Widget):
 
     def index(self, item):
         p = self.parent(item)
-        return self._items[p]["children"].index(str(item))
+        return self._items[p]["children"].index(self._iid(item))
 
     def next(self, item):
         p = self._items[self.parent(item)]["children"]
-        i = p.index(str(item))
+        i = p.index(self._iid(item))
         return p[i + 1] if i + 1 < len(p) else ""
 
     def prev(self, item):
         p = self._items[self.parent(item)]["children"]
-        i = p.index(str(item))
+        i = p.index(self._iid(item))
         return p[i - 1] if i > 0 else ""
 
     def exists(self, item):
-        return str(item) in self._items
+        try:
+            return self._iid(item) in self._items
+        except TclError:
+            return False
 
     def focus(self, item=None):
         if item is None:
             return self._focus
         self._it(item)
-        self._focus = str(item)
+        self._focus = self._iid(item)
         self._planifier()
 
     def selection(self, selop=None, items=None):
@@ -994,10 +1073,12 @@ class Treeview(_Theme, tkinter.Widget):
 
     def see(self, item):
         p = self.parent(item)
-        while p:
+        vus = set()
+        while p and p not in vus:
+            vus.add(p)
             self._items[p]["open"] = True
             p = self.parent(p)
-        self._a_voir = str(item)
+        self._a_voir = self._iid(item)
         self._planifier()
 
     def set(self, item, column=None, value=None):
@@ -1119,7 +1200,7 @@ class Treeview(_Theme, tkinter.Widget):
         if column is not None:
             nom = self._nom_colonne(column)
             col = 0 if nom == "#0" else self._affichees().index(nom) + (1 if "tree" in self._show() else 0)
-        b = _py(_ui.lire(self._id, "boiteLigne", _js([str(item), col])))
+        b = _py(_ui.lire(self._id, "boiteLigne", _js([self._iid(item), col])))
         return tuple(int(x) for x in b) if b else ""
 
     def xview(self, *args):
@@ -1181,11 +1262,15 @@ class Treeview(_Theme, tkinter.Widget):
             iid = str(d.get("iid", ""))
             if iid in self._items:
                 self._focus = iid
-                ouvrir = not self._items[iid]["open"]
-                # Comme ttk : l'événement part AVANT l'ouverture (chargement des enfants à la demande).
-                _virtuel(self, "<<TreeviewOpen>>" if ouvrir else "<<TreeviewClose>>", differe=False)
-                if iid in self._items:
-                    self._items[iid]["open"] = ouvrir
+                if not self._items[iid]["open"]:
+                    # Comme OpenItem de ttk : l'événement AVANT l'ouverture (chargement des enfants à la demande).
+                    _virtuel(self, "<<TreeviewOpen>>", differe=False)
+                    if iid in self._items:
+                        self._items[iid]["open"] = True
+                else:
+                    # CloseItem : fermé d'abord, puis l'événement (le gestionnaire lit open = 0).
+                    self._items[iid]["open"] = False
+                    _virtuel(self, "<<TreeviewClose>>", differe=False)
                 self._planifier()
             return None
         return super()._recevoir(type_, d)
@@ -1203,9 +1288,10 @@ class OptionMenu(tkinter.OptionMenu):
 
     def set_menu(self, default=None, *values):
         self._liste = [str(v) for v in values]
-        _ui.configurer(self._id, _js({"valeurs": self._liste}))
+        self._cmds = [None] * len(self._liste)
         if default is not None:
             self._var.set(default)
+        _ui.configurer(self._id, _js({"valeurs": self._liste, "valeur": str(self._var._valeur)}))
 
 
 class LabeledScale(Frame):

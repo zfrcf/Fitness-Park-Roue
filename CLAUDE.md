@@ -103,6 +103,14 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   sous la commande. Sorties exactes via `setStdout({write})` (pas `batched`). Text : le modèle Python garde le « \n »
   final de Tk (affiché dans la page) ; curseur / sélection lus dans la page seulement s'ils ont changé depuis le
   dernier envoi.
+  **Jamais de callPromising imbriqué** (Pyodide 0.26 en meurt) : `dansPython` compte les appels Python → JS
+  (`garder()` enveloppe `moteurFenetres`) ; un événement DOM émis pendant ce temps (focus(), execCommand) part en
+  appel synchrone, FocusIn/FocusOut en microtâche (file de Tk). Rappel suspendu (update, sleep) → `EN_ATTENTE` :
+  la touche est bloquée puis rejouée si la réponse n'est pas « break ». Empilement : `rang` par widget (création,
+  `lift`/`tkraise`/`lower` → `ecrire("pile")`) → z-index des parcelles/cellules/placés ; Frames opaques comme Tk.
+  Notebook : toutes les pages empilées (taille = la plus grande), pages externes (`Frame(root)`) rattachées.
+  `update()` lève TclError une fois la racine détruite. Logique Python testée en CPython avec un faux navigateur :
+  `tkinter-cpython.test.ts`.
   Fichiers .py : bouton « ▶ Lancer » de l'explorateur → événement `atelier:lancer-python` → console.
 - Bons/mauvais points + mémoire de leçons (`src/lib/comptes/lecons.ts` pur/testé, table `lecons`,
   `src/lib/db/lecons.ts`, API `/api/retours`, UI `bouton-retour.tsx` + store `retours.ts`) : 👍/👎 avec note sur

@@ -546,7 +546,7 @@ def _annulable(methode):
 
 
 _LECTURES = {"pencolor", "fillcolor", "color", "pensize", "pen"}  # sans argument : simple lecture
-_ETAT_ANNUL = ("_x","_y", "_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_visible", "_remplit", "_rempl_premier")
+_ETAT_ANNUL = ("_x", "_y","_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_visible", "_remplit", "_rempl_premier")
 
 
 class RawTurtle:
@@ -1203,8 +1203,8 @@ _SAISIE = "turtle-saisie"  # tag qu'aucun élément ne porte
 
 def _ecouter_boutons(cv):
     """Le Canvas suit l'élément pressé pendant un glisser (saisie implicite de Tk : un glisser rapide ne perd pas la
-    tortue, un glisser commencé ailleurs ne la déplace pas) à condition de recevoir les pressions et relâchements de
-    bouton, même sans onclick : liaisons vides sur un tag qu'aucun élément ne porte."""
+    tortue) à condition de recevoir les pressions et relâchements de bouton, même sans onclick : liaisons vides sur
+    un tag qu'aucun élément ne porte."""
     if not cv.tag_bind(_SAISIE):
         cv.tag_bind(_SAISIE, "<ButtonPress>", lambda e: None, "+")
         cv.tag_bind(_SAISIE, "<ButtonRelease>", lambda e: None, "+")

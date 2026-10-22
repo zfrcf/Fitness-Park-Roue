@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lignesAnsi, segmentsAnsi, texteLigne, tronquerLignes } from "./ansi";
+import { lignesAffichees, lignesAnsi, segmentsAnsi, texteLigne, tronquerLignes } from "./ansi";
 
 const texteDe = (texte: string) => lignesAnsi(texte).map(texteLigne).join("\n");
 
@@ -79,20 +79,83 @@ describe("lignesAnsi", () => {
 });
 
 describe("tronquerLignes", () => {
-  it("limite le nombre de lignes", () => {
+  it("garde la FIN, comme un terminal, et dit combien de lignes sont masquées", () => {
     const r = tronquerLignes(lignesAnsi("1\n2\n3\n4"), 2, 1000);
-    expect(r.lignes.map(texteLigne)).toEqual(["1", "2"]);
-    expect(r.avertissement).toBe("[… 2 lignes de plus]");
+    expect(r.lignes.map(texteLigne)).toEqual(["3", "4"]);
+    expect(r.avertissement).toBe("[… 2 lignes masquées]");
+    expect(r.position).toBe(0);
   });
 
-  it("limite le nombre de caractères en coupant la ligne", () => {
+  it("garde aussi les lignes d'en-tête demandées, l'avertissement entre les deux", () => {
+    const r = tronquerLignes(lignesAnsi("T\na\nb\nc\nd\nErreur"), 3, 1000, 1);
+    expect(r.lignes.map(texteLigne)).toEqual(["T", "d", "Erreur"]);
+    expect(r.position).toBe(1);
+    expect(r.avertissement).toBe("[… 3 lignes masquées]");
+  });
+
+  it("limite le nombre de caractères en partant de la fin", () => {
     const r = tronquerLignes(lignesAnsi("abcd\n\x1b[31mefgh\x1b[0m"), 10, 7);
-    expect(r.lignes.map(texteLigne)).toEqual(["abcd", "ef"]);
-    expect(r.lignes[1][0].couleur).toBeTruthy();
-    expect(r.avertissement).toBe("[… sortie tronquée]");
+    expect(r.lignes.map(texteLigne)).toEqual(["efgh"]);
+    expect(r.lignes[0][0].couleur).toBeTruthy();
+    expect(r.avertissement).toBe("[… 1 ligne masquée]");
+  });
+
+  it("garde la fin d'une dernière ligne trop longue", () => {
+    const r = tronquerLignes(lignesAnsi("x".repeat(20) + "FIN"), 10, 5);
+    expect(r.lignes.map(texteLigne)).toEqual(["xxFIN"]);
+    expect(r.avertissement).toBe("[… début de la ligne masqué]");
   });
 
   it("ne dit rien quand tout tient", () => {
-    expect(tronquerLignes(lignesAnsi("a\nb"), 10, 100).avertissement).toBeNull();
+    const r = tronquerLignes(lignesAnsi("a\nb"), 10, 100);
+    expect(r.avertissement).toBeNull();
+    expect(r.position).toBe(2);
+  });
+});
+
+describe("lignesAffichees", () => {
+  it("500 lignes puis le résultat : le résultat est la dernière ligne affichée", () => {
+    const texte = Array.from({ length: 500 }, (_, i) => `ligne ${i + 1}`).join("\n") + "\nRÉSULTAT FINAL = 42\n";
+    const r = lignesAffichees(texte, 400, 40_000);
+    const vues = r.lignes.map(texteLigne);
+    expect(vues[vues.length - 2]).toBe("RÉSULTAT FINAL = 42");
+    expect(vues).toHaveLength(400);
+    expect(r.avertissement).toBe("[… 102 lignes masquées]");
+  });
+
+  it("traceback de 1000 lignes : en-tête et dernière ligne (l'erreur) visibles", () => {
+    const cadres = Array.from({ length: 500 }, (_, i) => `  File "<exec>", line ${i % 2 ? 8 : 5}, in ${i % 2 ? "impair" : "pair"}\n    return f(n - 1)`).join("\n");
+    const texte = `Traceback (most recent call last):\n  File "<exec>", line 10, in <module>\n    pair(5000)\n${cadres}\nRecursionError: maximum recursion depth exceeded`;
+    const r = lignesAffichees(texte, 80, 6000, 3);
+    const vues = r.lignes.map(texteLigne);
+    expect(vues[0]).toBe("Traceback (most recent call last):");
+    expect(r.position).toBe(3);
+    expect(vues[vues.length - 1]).toBe("RecursionError: maximum recursion depth exceeded");
+    expect(vues.length).toBeLessThanOrEqual(80);
+    // Lignes masquées : toutes celles qui ne sont pas affichées.
+    expect(r.avertissement).toBe(`[… ${texte.split("\n").length - vues.length} lignes masquées]`);
+  });
+
+  it("80 lignes de journal puis une exception sur stderr : l'exception reste visible", () => {
+    const texte = Array.from({ length: 80 }, (_, i) => `INFO:root:traitement de l'élément ${i}`).join("\n") + "\nTraceback (most recent call last):\n  File \"<exec>\", line 5, in <module>\nValueError: donnée invalide à la fin\n";
+    const vues = lignesAffichees(texte, 60, 4000, 3).lignes.map(texteLigne);
+    expect(vues).toContain("ValueError: donnée invalide à la fin");
+  });
+
+  it("donne le même résultat que tronquerLignes sur un texte court, et reste rapide sur un texte énorme", () => {
+    const court = "a\nb\nc\nd";
+    expect(lignesAffichees(court, 2, 100)).toEqual(tronquerLignes(lignesAnsi(court), 2, 100));
+    const enorme = Array.from({ length: 200_000 }, (_, i) => `ligne ${i}`).join("\n");
+    const debut = performance.now();
+    const r = lignesAffichees(enorme, 400, 40_000);
+    expect(performance.now() - debut).toBeLessThan(200);
+    expect(texteLigne(r.lignes[r.lignes.length - 1])).toBe("ligne 199999");
+    expect(r.avertissement).toBe(`[… ${200_000 - 400} lignes masquées]`);
+  });
+
+  it("une seule ligne immense (barre de progression sans fin de ligne) : sa fin", () => {
+    const r = lignesAffichees("#".repeat(100_000) + " 100%", 400, 1000);
+    expect(texteLigne(r.lignes[0]).endsWith(" 100%")).toBe(true);
+    expect(texteLigne(r.lignes[0])).toHaveLength(1000);
   });
 });

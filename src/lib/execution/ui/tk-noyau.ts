@@ -77,6 +77,15 @@ _SYSTEME = {
 }
 
 
+# Noms de couleur de Tk (X11) absents du CSS ; gray / green / maroon / purple suivent le web (Tk 8.6, TIP 403).
+_X11 = {
+    "navyblue": "#000080", "violetred": "#d02090", "lightgoldenrod": "#eedd82", "lightslateblue": "#8470ff",
+    "debianred": "#d70751", "x11gray": "#bebebe", "x11grey": "#bebebe", "x11green": "#00ff00",
+    "x11maroon": "#b03060", "x11purple": "#a020f0", "webgray": "#808080", "webgrey": "#808080",
+    "webgreen": "#008000", "webmaroon": "#800000", "webpurple": "#800080",
+}
+
+
 def _couleur(c):
     if c is None:
         return None
@@ -93,6 +102,8 @@ def _couleur(c):
     b = c.lower().replace(" ", "")
     if b in _SYSTEME:
         return _SYSTEME[b]
+    if b in _X11:
+        return _X11[b]
     m = re.fullmatch(r"gr[ae]y(\d{1,3})", b)
     if m:
         v = round(min(100, int(m.group(1))) * 2.55)
@@ -100,7 +111,7 @@ def _couleur(c):
     m = re.fullmatch(r"([a-z]+?)([1-4])", b)
     if m:
         f = {"1": 100, "2": 93, "3": 80, "4": 55}[m.group(2)]
-        return f"color-mix(in srgb, {m.group(1)} {f}%, black)"
+        return f"color-mix(in srgb, {_X11.get(m.group(1), m.group(1))} {f}%, black)"
     return b
 
 
@@ -1995,6 +2006,8 @@ def _maj_ecoute_fenetre(top):
         for liaisons in getattr(w, "_liaisons_items", {}).values():
             # Liaisons d'éléments (canvas), de tags (Text) ou de lignes (Treeview)
             types |= _types_dom(liaisons)
+            if any(m[1] in ("Motion", "ButtonRelease") for m in liaisons):
+                types |= {"mousedown", "mouseup", "mousemove"}  # la saisie de l'élément commence à l'appui
             if any(m[1] in ("Enter", "Leave") for m in liaisons):
                 types |= {"mouseover", "mouseout"} | ({"mousemove"} if isinstance(w, Text) else set())
     _ui.ecouter(top._id, _js(sorted(types)))
@@ -5343,7 +5356,8 @@ class Canvas(Widget):
         fin_saisie = False
         if t == "ButtonPress":
             self._courant = self._saisi = i  # Tk : l'élément pressé garde « current » tant qu'un bouton est enfoncé
-        elif saisi is not None and (t == "ButtonRelease" or (t == "Motion" and ev["mods"] & {"B1", "B2", "B3"})):
+            self._enfonce = True  # même pressé dans le vide : aucun élément survolé ne reçoit le glisser
+        elif getattr(self, "_enfonce", False) and (t == "ButtonRelease" or (t == "Motion" and ev["mods"] & {"B1", "B2", "B3"})):
             i = saisi if saisi in self._items else None  # mouvements et relâchement vont à l'élément pressé
             self._courant = i
             fin_saisie = t == "ButtonRelease"
@@ -5358,6 +5372,7 @@ class Canvas(Widget):
                         _appeler(fn, e)
         if fin_saisie:  # relâchement traité sur l'élément saisi, PUIS Tk repioche sous la souris
             self._saisi = None
+            self._enfonce = False
             n = d.get("item")
             self._courant = int(n) if n is not None else None
         return None
@@ -5368,7 +5383,7 @@ class Canvas(Widget):
             return
         i = int(i)
         saisi = getattr(self, "_saisi", None)
-        if saisi is not None and i != saisi:
+        if getattr(self, "_enfonce", False) and i != saisi:
             return  # glisser en cours : pas d'Enter / Leave pour les autres éléments (LEFT_GRABBED_ITEM de Tk)
         self._courant = i if type_ == "mouseover" else self._courant
         tk_type = "Enter" if type_ == "mouseover" else "Leave"

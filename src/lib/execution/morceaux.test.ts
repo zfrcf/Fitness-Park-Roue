@@ -66,11 +66,12 @@ describe("grouperMorceaux", () => {
       tronque: false,
     });
   });
-  it("limite le nombre de morceaux affichés", () => {
-    const l: Morceau[] = Array.from({ length: 10 }, (_, i) => (i % 2 ? { texte: "e", erreur: true } : { texte: "s" }));
+  it("au-delà de la limite, garde les DERNIERS morceaux (la fin de la sortie)", () => {
+    const l: Morceau[] = Array.from({ length: 10 }, (_, i) => (i % 2 ? { texte: `e${i}`, erreur: true } : { texte: `s${i}` }));
     const r = grouperMorceaux(l, 4);
     expect(r.tronque).toBe(true);
     expect(r.groupes).toHaveLength(1);
-    expect("textes" in r.groupes[0] && r.groupes[0].textes).toHaveLength(4);
+    expect("textes" in r.groupes[0] && r.groupes[0].textes.map((t) => t.texte)).toEqual(["s6", "e7", "s8", "e9"]);
+    expect(grouperMorceaux(l, 10).tronque).toBe(false);
   });
 });

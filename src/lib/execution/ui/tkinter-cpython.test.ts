@@ -307,4 +307,34 @@ print(journal)
 `);
     expect(sortie.split("\n")).toEqual(["['simple', 'double']", "['simple', 'double', 'triple']"]);
   });
+
+  it("Canvas : l'élément pressé reçoit le glisser ; un appui dans le vide ne déclenche rien en passant sur un élément", () => {
+    const sortie = executer(String.raw`
+import tkinter as tk
+c = tk.Canvas(tk.Tk())
+a = c.create_oval(40, 40, 60, 60, tags="piece")
+journal = []
+c.tag_bind("piece", "<B1-Motion>", lambda e: journal.append(("glisse", c.find_withtag("current"))))
+c.tag_bind("piece", "<ButtonRelease-1>", lambda e: journal.append("relache"))
+B1 = {"bouton": 1, "boutons": 1}
+c._recevoir("mousedown", {**B1, "item": a, "x": 50, "y": 50})
+c._recevoir("mousemove", {**B1, "x": 120, "y": 50})
+c._recevoir("mouseup", {"bouton": 1, "x": 120, "y": 50})
+print(journal)
+journal.clear()
+c._recevoir("mousedown", {**B1, "x": 5, "y": 5})
+c._recevoir("mousemove", {**B1, "item": a, "x": 50, "y": 50})
+c._recevoir("mouseup", {"bouton": 1, "item": a, "x": 50, "y": 50})
+print(journal)
+`);
+    expect(sortie.split("\n")).toEqual(["[('glisse', (1,)), 'relache']", "[]"]);
+  });
+
+  it("Couleurs : noms X11 propres à Tk (NavyBlue, VioletRed3…)", () => {
+    const sortie = executer(String.raw`
+import tkinter as tk
+print(tk._couleur("NavyBlue"), tk._couleur("VioletRed3"), tk._couleur("red3"), tk._couleur("gray50"))
+`);
+    expect(sortie).toBe("#000080 color-mix(in srgb, #d02090 80%, black) color-mix(in srgb, red 80%, black) rgb(127,127,127)"); // gray50 = #7f7f7f dans X11
+  });
 });

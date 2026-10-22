@@ -60,6 +60,18 @@ def _ident():
     return _execution.get()
 
 
+def dans_execution(ident, fn, *args):
+    """Appelle fn(*args) au nom de l'exécution « ident » (rappel de fenêtre, minuterie, relevé par _ident()
+    à la création) : sa sortie, ses images et ses saisies vont à cette exécution, même si une autre a
+    démarré depuis. Contexte copié à chaque appel : aucun effet sur l'appelant, rappels imbriqués permis."""
+
+    def _appel():
+        _execution.set(ident)
+        return fn(*args)
+
+    return contextvars.copy_context().run(_appel)
+
+
 # ─── sys.stdout / sys.stderr : chaque écriture part aussitôt vers l'exécution qui l'a produite ───
 
 
@@ -406,7 +418,20 @@ def _sleep(secondes):
     if _peut_attendre():
         # La page continue de vivre pendant l'attente (dessin, clics, animations turtle / tkinter) ;
         # « Arrêter » réveille la pause tout de suite (_ui.dormir) et lève KeyboardInterrupt.
-        _attendre(_ui.dormir(s * 1000))
+        # Pour tkinter, le programme « attend dans update() / sleep » : un sys.exit() lancé par un rappel
+        # pendant la pause (onkeypress(sys.exit, "q")) lui est rendu à la sortie de la pause, comme Tk.
+        tk = sys.modules.get("tkinter")
+        compteur = getattr(tk, "_dans_ceder", None)
+        if compteur is not None:
+            compteur[0] += 1
+        try:
+            _attendre(_ui.dormir(s * 1000))
+        finally:
+            if compteur is not None:
+                compteur[0] -= 1
+        relancer = getattr(tk, "_relancer_sortie", None)
+        if relancer is not None:
+            relancer()
         return
     if time.monotonic() - _debut[0] + s > LIMITE:
         raise RuntimeError(
@@ -433,12 +458,12 @@ def _contexte(t):
 
 def _annuler_taches(filtre):
     try:
-        taches = list(asyncio.all_tasks())
+        taches = [t for t in asyncio.all_tasks() if not t.done() and filtre(t)]
     except RuntimeError:
-        return
+        return []
     for t in taches:
-        if not t.done() and filtre(t):
-            t.cancel("arrêt demandé")
+        t.cancel("arrêt demandé")
+    return taches
 
 
 def interrompre():
@@ -474,7 +499,14 @@ def _run_bloquant(main):
     except asyncio.CancelledError:  # tâche annulée avant même d'avoir démarré main
         boite.setdefault("exc", asyncio.CancelledError())
     finally:
-        _annuler_taches(lambda t: t is not tache and _contexte(t).get(_jeton_run) is jeton)
+        # Comme CPython : les tâches créées par main et encore en cours sont annulées, et leur nettoyage
+        # (except CancelledError, finally) a lieu avant le retour (attente bornée à 1 s).
+        restantes = _annuler_taches(lambda t: t is not tache and _contexte(t).get(_jeton_run) is jeton)
+        if restantes:
+            try:
+                run_sync(asyncio.wait(restantes, timeout=1.0))
+            except BaseException:
+                pass
     e = boite.pop("exc", None)
     if e is None:
         return boite.get("valeur")
@@ -739,6 +771,13 @@ async def cellule(code, ident=None):
         _cellules.add(tache)
     _execution.set(ident)
     n0 = _ui.numeroArret()
+    tortue = sys.modules.get("turtle")
+    if tortue is not None and hasattr(tortue, "TurtleScreen"):
+        # Fenêtre turtle fermée après la fin d'un programme sans done() : pas de Terminator résiduel.
+        try:
+            tortue.TurtleScreen._RUNNING = True
+        except Exception:
+            pass
     try:
         return await eval_code_async(code, __main__.__dict__, filename="<exec>")
     except SystemExit as e:

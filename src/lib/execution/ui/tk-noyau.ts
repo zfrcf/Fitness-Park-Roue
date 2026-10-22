@@ -247,14 +247,43 @@ def _appeler(fn, *args):
         return fn(*args)
     except SystemExit as e:
         _sortie_demandee(e)
-    except KeyboardInterrupt:
-        if _ui.arretDemande():
+    except KeyboardInterrupt as e:
+        if _arret_bouton(e):
             _tout_detruire()  # bouton « Arrêter » pendant un rappel qui attendait
         else:
             _rapporter()
     except BaseException:
         _rapporter()
     return None
+
+
+def _lanceur():
+    """Module atelier_run (lancement des programmes) : contrat d'arrêt ponctuel et routage de la sortie."""
+    return sys.modules.get("atelier_run")
+
+
+def _arret_bouton(e):
+    l = _lanceur()
+    return (l is not None and isinstance(e, getattr(l, "ArretDemande", ()))) or bool(_ui.arretDemande())
+
+
+def _racine_de(w):
+    while getattr(w, "master", None) is not None:
+        w = w.master
+    return w
+
+
+def _au_nom_de(ident, fn, *args):
+    """Appelle fn au nom de l'exécution qui a créé la fenêtre (ou la minuterie) : sa sortie lui revient."""
+    l = _lanceur()
+    if l is not None and hasattr(l, "dans_execution"):
+        return l.dans_execution(ident, fn, *args)
+    return fn(*args)
+
+
+def _ident_execution():
+    l = _lanceur()
+    return l._ident() if l is not None and hasattr(l, "_ident") else None
 
 
 # ─────────────────────────── Attentes (JSPI) ───────────────────────────
@@ -273,8 +302,12 @@ def _peut_attendre():
         return False
 
 
-def _verifier_arret():
-    if _ui.arretDemande():
+def _verifier_arret(n0=None):
+    """« Arrêter » : un signal ponctuel (comme Ctrl+C) — seules les attentes en cours au clic sont interrompues."""
+    l = _lanceur()
+    if n0 is not None and l is not None and hasattr(l, "_verifier_arret"):
+        l._verifier_arret(n0)
+    elif n0 is None and l is None and _ui.arretDemande():
         raise KeyboardInterrupt("arrêt demandé")
 
 
@@ -285,10 +318,15 @@ def _ceder(secondes=0.0):
     """Rend la main au navigateur (dessin, événements) : pour update() et time.sleep()."""
     _dans_ceder[0] += 1
     try:
-        _attendre_promesse(asyncio.sleep(max(0.0, float(secondes))))
+        l = _lanceur()
+        if l is not None and hasattr(l, "_attendre"):
+            # dormir() : promesse de la page, réveillée tout de suite par « Arrêter » (KeyboardInterrupt propre)
+            l._attendre(_ui.dormir(max(0.0, float(secondes)) * 1000))
+        else:
+            _attendre_promesse(asyncio.sleep(max(0.0, float(secondes))))
+            _verifier_arret()
     finally:
         _dans_ceder[0] -= 1
-    _verifier_arret()
 
 
 def _verifier_appli(w):
@@ -309,8 +347,12 @@ def _attendre(condition, attente=None):
     try:
         while condition() and not moi["quitte"]:
             moi["fut"] = asyncio.get_event_loop().create_future()
-            _attendre_promesse(moi["fut"])
-            _verifier_arret()
+            l = _lanceur()
+            if l is not None and hasattr(l, "_attendre"):
+                l._attendre(moi["fut"])
+            else:
+                _attendre_promesse(moi["fut"])
+                _verifier_arret()
             if _sortie[0] is not None:
                 e, _sortie[0] = _sortie[0], None
                 raise e
@@ -399,11 +441,12 @@ def _rappel(cible, type_, donnees):
     try:
         w = _widgets.get(int(cible))
         if w is not None:
-            r = w._recevoir(str(type_), _py(donnees) or {})
+            ident = getattr(_racine_de(w), "_execution", None)
+            r = _au_nom_de(ident, w._recevoir, str(type_), _py(donnees) or {})
     except SystemExit as e:
         _sortie_demandee(e)
-    except KeyboardInterrupt:
-        _tout_detruire() if _ui.arretDemande() else _rapporter()
+    except KeyboardInterrupt as e:
+        _tout_detruire() if _arret_bouton(e) else _rapporter()
     except BaseException:
         _rapporter()
     # Appel « promettant » (JSPI) : la page lit ce résultat tout de suite si le rappel n'a pas attendu.
@@ -411,7 +454,17 @@ def _rappel(cible, type_, donnees):
     return r
 
 
-_ui.definirRappel(create_proxy(_rappel), _peut_attendre())
+def _python_actif():
+    """Appelée par la page (synchrone) avant un rappel : du code Python est-il déjà sur la pile (ex. une lambda
+    de setTimeout qui fait element.click()) ? Alors le rappel ne doit pas partir en appel « promettant »."""
+    try:
+        sys._getframe(1)
+        return True
+    except ValueError:
+        return False
+
+
+_ui.definirRappel(create_proxy(_rappel), _peut_attendre(), create_proxy(_python_actif))
 
 
 # ─────────────────────────── Séquences d'événements ───────────────────────────
@@ -1421,11 +1474,12 @@ class Misc:
             time.sleep(max(0, float(ms)) / 1000)
             return None
         nom = f"after#{next(_noms_minuterie)}"
+        ident = _ident_execution()
 
         def tirer():
             m = _minuteries.pop(nom, None)
             if m is not None and not getattr(m[1], "_detruit", False):
-                _appeler(func, *args)
+                _au_nom_de(ident, _appeler, func, *args)
 
         # Lancée par la page en appel « promettant » : la fonction peut appeler update() / time.sleep().
         rappel = create_proxy(tirer)
@@ -2532,6 +2586,7 @@ class Tk(Wm, _Base):
         self._titre = className.lower() if className and className != "Tk" else "tk"
         self._o.update({"background": "#f0f0f0"})
         _ui.creerFenetre(self._id, _js({"titre": self._titre}))
+        self._execution = _ident_execution()  # sa sortie (rappels, minuteries) revient à ce programme
         if _default_root is None or _default_root._detruit:
             _default_root = self
 

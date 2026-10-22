@@ -163,6 +163,17 @@ if type(sys.stderr).__name__ != "_Sortie":
     sys.stderr = _Sortie(sys.stderr, True)
 
 
+def _excepthook(typ, val, tb):
+    """Pyodide appelle sys.excepthook (PyErr_Print) pour composer le message d'une exception qui remonte vers
+    la page ; ce texte doit aller au flux d'origine (que Pyodide capture), pas s'afficher brut dans la console :
+    la page montre ensuite le traceback nettoyé."""
+    origine = getattr(sys.stderr, "_origine", None) or sys.__stderr__
+    traceback.print_exception(typ, val, tb, file=origine)
+
+
+sys.excepthook = _excepthook
+
+
 def _vider_flux():
     for f in (sys.stdout, sys.stderr):
         try:

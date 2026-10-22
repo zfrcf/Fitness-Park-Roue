@@ -90,7 +90,8 @@ afterAll(() => {
   if (dossier) rmSync(dossier, { recursive: true, force: true });
 });
 
-describe.skipIf(!python)("tkinter de la console en CPython", () => {
+// Chaque cas lance un interpréteur : délai large (machine chargée, CI).
+describe.skipIf(!python)("tkinter de la console en CPython", { timeout: 60_000 }, () => {
   it("Text : « +1line » atteint end (numéros de ligne qui s'arrêtent), end-1line", () => {
     const sortie = executer(String.raw`
 import tkinter as tk

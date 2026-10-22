@@ -108,11 +108,13 @@ const EN_ATTENTE = Symbol("en attente");
  * en file comme le fait Tk pour FocusIn/FocusOut.
  */
 let dansPython = 0;
+/** Sonde Python synchrone : du code Python est-il déjà en cours (appelé hors de moteurFenetres) ? */
+let sondePython: ProxyPy | null = null;
 
 function appeler(cible: number, type: string, donnees: Opts = {}, apres?: (final: unknown) => void): unknown {
   if (!rappel) return undefined;
   try {
-    if (dansPython > 0) {
+    if (dansPython > 0 || (suspensible && sondePython?.() === true)) {
       if (type === "focusin" || type === "focusout") {
         queueMicrotask(() => appeler(cible, type, donnees));
         return undefined;
@@ -2690,9 +2692,10 @@ function garder<T extends Record<string, unknown>>(o: T, sauf: string[]): T {
 }
 
 export const moteurFenetres = garder({
-  definirRappel(f: Rappel, jspi?: boolean) {
+  definirRappel(f: Rappel, jspi?: boolean, sonde?: ProxyPy) {
     rappel = f;
     suspensible = !!jspi && typeof f.callPromising === "function";
+    sondePython = sonde ?? null;
   },
   /** Résultat d'un rappel Python (lu juste après un appel promettant). */
   retour(v: unknown) {
@@ -2709,7 +2712,7 @@ export const moteurFenetres = garder({
         }
       };
       try {
-        if (suspensible && fn.callPromising && dansPython === 0) {
+        if (suspensible && fn.callPromising && dansPython === 0 && sondePython?.() !== true) {
           let p: Promise<unknown>;
           dansPython++;
           try {

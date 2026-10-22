@@ -27,20 +27,32 @@ function lire(env: NodeJS.ProcessEnv, n: number, cle: string) {
   return env[`PROVIDER_${n}_${cle}`]?.trim() || undefined;
 }
 
+/** Liste séparée par des virgules (« a, b ») → éléments non vides. */
+function liste(v: string | undefined): string[] {
+  return (v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+}
+
 /**
  * Lit PROVIDER_n_* pour n = 1, 2, … jusqu'au premier rang absent.
  * Un rang est considéré présent dès que NAME ou BASE_URL est défini.
+ *
+ * PROVIDER_n_MODEL peut lister des modèles de secours (« modele-a, modele-b ») : chacun devient un
+ * fournisseur du même rang, essayé dans l'ordre. Quand le premier est retiré par l'hébergeur (410,
+ * fin de vie), la rotation passe au suivant au lieu de faire échouer le chat. PROVIDER_n_CONTEXT
+ * peut donner une fenêtre par modèle (« 1048576, 200000 ») ; la dernière vaut pour les suivants.
  */
 export function chargerFournisseurs(env: NodeJS.ProcessEnv = process.env): Fournisseur[] {
-  const liste: Fournisseur[] = [];
+  const resultat: Fournisseur[] = [];
   const problemes: string[] = [];
   for (let n = 1; n <= 50; n++) {
     const nom = lire(env, n, "NAME");
     const baseUrl = lire(env, n, "BASE_URL");
     if (!nom && !baseUrl) break;
     const apiKey = lire(env, n, "API_KEY");
-    const modele = lire(env, n, "MODEL");
-    const contexte = Number(lire(env, n, "CONTEXT") ?? "");
+    const modeles = liste(lire(env, n, "MODEL"));
+    const modele = modeles[0];
+    const contextes = liste(lire(env, n, "CONTEXT")).map(Number);
+    const contexte = contextes[0] ?? NaN;
     const manquants = [
       !nom && "NAME",
       !baseUrl && "BASE_URL",
@@ -60,26 +72,30 @@ export function chargerFournisseurs(env: NodeJS.ProcessEnv = process.env): Fourn
     const prixEntree = Number(lire(env, n, "PRICE_INPUT") ?? "");
     const prixSortie = Number(lire(env, n, "PRICE_OUTPUT") ?? "");
     const rpm = Number(lire(env, n, "RPM") ?? "");
-    liste.push({
-      id: `${n}-${slug(nom!)}`,
-      rang: n,
-      nom: nom!,
-      baseUrl: baseUrl!.replace(/\/+$/, ""),
-      apiKey: apiKey!,
-      modele: modele!,
-      contexte,
-      payant,
-      prixEntree: prixEntree > 0 ? prixEntree : undefined,
-      prixSortie: prixSortie > 0 ? prixSortie : undefined,
-      famille: detecterFamille(baseUrl!),
-      rpm: rpm > 0 ? rpm : undefined,
+    modeles.forEach((m, i) => {
+      // Le premier garde l'identifiant historique (état et compteurs déjà enregistrés).
+      const ctx = contextes[Math.min(i, contextes.length - 1)];
+      resultat.push({
+        id: i === 0 ? `${n}-${slug(nom!)}` : `${n}-${slug(nom!)}-${slug(m)}`,
+        rang: n,
+        nom: i === 0 ? nom! : `${nom!} (secours ${i} : ${m.split("/").pop()})`,
+        baseUrl: baseUrl!.replace(/\/+$/, ""),
+        apiKey: apiKey!,
+        modele: m,
+        contexte: ctx > 0 ? ctx : contexte,
+        payant,
+        prixEntree: prixEntree > 0 ? prixEntree : undefined,
+        prixSortie: prixSortie > 0 ? prixSortie : undefined,
+        famille: detecterFamille(baseUrl!),
+        rpm: rpm > 0 ? rpm : undefined,
+      });
     });
   }
   if (problemes.length && process.env.NODE_ENV !== "test") {
     console.warn(`[fournisseurs] ignorés : ${problemes.join(" ; ")}`);
   }
-  // Les gratuits d'abord (ordre des rangs), les payants en dernier.
-  return liste.sort((a, b) => Number(a.payant) - Number(b.payant) || a.rang - b.rang);
+  // Les gratuits d'abord (ordre des rangs, puis des modèles de secours), les payants en dernier.
+  return resultat.sort((a, b) => Number(a.payant) - Number(b.payant) || a.rang - b.rang);
 }
 
 let cache: Fournisseur[] | null = null;

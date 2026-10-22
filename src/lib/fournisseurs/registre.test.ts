@@ -49,6 +49,35 @@ describe("chargerFournisseurs", () => {
   });
 });
 
+describe("modèles de secours (PROVIDER_n_MODEL en liste)", () => {
+  const nvidia = {
+    PROVIDER_1_NAME: "NVIDIA",
+    PROVIDER_1_BASE_URL: "https://integrate.api.nvidia.com/v1",
+    PROVIDER_1_API_KEY: "k",
+    PROVIDER_1_MODEL: "nvidia/nemotron-3-ultra-550b-a55b, z-ai/glm-5.3",
+    PROVIDER_1_CONTEXT: "1048576, 200000",
+    PROVIDER_2_NAME: "OpenRouter",
+    PROVIDER_2_BASE_URL: "https://openrouter.ai/api/v1",
+    PROVIDER_2_API_KEY: "k2",
+    PROVIDER_2_MODEL: "qwen/qwen3.8-27b:free",
+    PROVIDER_2_CONTEXT: "262144",
+    NODE_ENV: "test" as const,
+  };
+  it("chaque modèle devient un fournisseur du même rang, essayé dans l'ordre, avant le rang suivant", () => {
+    const l = chargerFournisseurs(nvidia);
+    expect(l.map((f) => [f.id, f.modele, f.contexte])).toEqual([
+      ["1-nvidia", "nvidia/nemotron-3-ultra-550b-a55b", 1048576],
+      ["1-nvidia-z-ai-glm-5-3", "z-ai/glm-5.3", 200000],
+      ["2-openrouter", "qwen/qwen3.8-27b:free", 262144],
+    ]);
+    expect(l[1]).toMatchObject({ rang: 1, famille: "nvidia", nom: "NVIDIA (secours 1 : glm-5.3)" });
+  });
+  it("une seule fenêtre de contexte vaut pour tous les modèles", () => {
+    const l = chargerFournisseurs({ ...nvidia, PROVIDER_1_CONTEXT: "131072" });
+    expect(l.slice(0, 2).map((f) => f.contexte)).toEqual([131072, 131072]);
+  });
+});
+
 describe("famille NVIDIA", () => {
   it("reconnaît integrate.api.nvidia.com", async () => {
     const { detecterFamille } = await import("./registre");

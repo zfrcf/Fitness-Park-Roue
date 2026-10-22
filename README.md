@@ -128,19 +128,29 @@ juste après `dash.cloudflare.com/`.
 
 Clé gratuite sur <https://build.nvidia.com/settings/api-keys> (compte NVIDIA, « Generate API Key »).
 Base URL `https://integrate.api.nvidia.com/v1`. Pas de quota journalier : la seule limite est
-d'environ 40 requêtes par minute, partagée entre tous les modèles. Les modèles Qwen y ont été
-retirés ; le modèle retenu est **`moonshotai/kimi-k3`** (Kimi K3, fenêtre de 1 048 576 tokens,
-très bon en code, appels d'outils). Particularités gérées par la famille `nvidia` :
+d'environ 40 requêtes par minute, partagée entre tous les modèles. NVIDIA retire régulièrement
+des modèles (Qwen, puis **Kimi K3 le 15/10/2026**, qui répond depuis « 410 Gone ») : indiquez
+donc un modèle de secours. Configuration retenue :
 
-- la réflexion se pilote par `chat_template_kwargs.thinking` ; « Aucun » la coupe, sauf quand
-  des outils sont envoyés (sans réflexion, Kimi K3 ne sait pas appeler d'outil) ;
+```
+PROVIDER_1_MODEL=nvidia/nemotron-3-ultra-550b-a55b, z-ai/glm-5.3
+PROVIDER_1_CONTEXT=1048576, 200000
+```
+
+Nemotron 3 Ultra (550B, fenêtre de 1 048 576 tokens) est rapide (premier mot en 1 à 9 s) et
+juste en code ; GLM 5.3, tout aussi juste mais bien plus lent (jusqu'à 2 min de réflexion avant
+le premier mot), sert de secours. Chaque modèle de la liste devient un fournisseur du même rang :
+si le premier est retiré (410) ou en panne, la rotation passe au suivant, puis aux autres rangs.
+Particularités gérées par la famille `nvidia` :
+
+- la réflexion se pilote dans `chat_template_kwargs` : `thinking` (Kimi) et `enable_thinking`
+  (Nemotron, GLM, Qwen) sont envoyés ensemble ; « Aucun » la coupe, sauf quand des outils sont
+  envoyés. Sans réflexion, Nemotron lit mal un long contexte (valeurs fausses lors des tests) ;
 - « Moyen » et « Élevé » envoient `reasoning_effort` `high` et `max` (`low` donne parfois une
   réponse vide, il n'est pas utilisé).
 
-Défaut observé sur l'infrastructure NIM : environ une réponse sur six de Kimi K3 est « dégénérée »
-(suite de `!!!!`, puis rien). L'application la détecte, retente une fois sur place puis bascule ;
-le texte dégénéré n'est jamais conservé. Alternative sans ce défaut lors des tests, un peu plus
-bavarde : `nvidia/nemotron-3-ultra-550b-a55b` (changer `PROVIDER_1_MODEL`).
+Pour lister les modèles ouverts à votre clé : `GET https://integrate.api.nvidia.com/v1/models`
+(certains y figurent sans être appelables : 404 « Not found for account »).
 
 ## Ajouter un fournisseur
 
@@ -458,7 +468,7 @@ poursuivies automatiquement (voir la rotation).
 |---|---|---|
 | Groq, `qwen/qwen3.8-27b` | 30 req/min, 1 000 req/jour, 7 000 tokens d'entrée et **1 000 tokens de sortie** par minute | inutilisable pour générer du code long : avec « Tokens max » au-dessus de 1 000, Groq est évité dès que sa limite est connue, et ne sert qu'aux réponses courtes |
 | Cloudflare Workers AI | 10 000 neurons/jour, 300 req/min ; `qwen3.8-27b` coûte environ 0,45 $ d'entrée et 3,20 $ de sortie par million de tokens en neurons ; le raisonnement est toujours actif (`reasoning_effort` low au minimum) et compte dans « Tokens max » | 6 à 8 réponses longues par jour ; l'épuisement est détecté aux codes 3036 et 4006 et levé à minuit UTC |
-| NVIDIA NIM, `moonshotai/kimi-k3` | ~40 req/min, pas de quota journalier observé | fournisseur principal ; 69 000 tokens d'entrée testés sans problème |
+| NVIDIA NIM, `nvidia/nemotron-3-ultra-550b-a55b` (secours `z-ai/glm-5.3`) | ~40 req/min, pas de quota journalier observé | fournisseur principal ; 635 000 tokens d'entrée acceptés par Nemotron, 194 000 par GLM |
 | OpenRouter, `:free` | 20 req/min, 50 req/jour (1 000 si 10 $ de crédits achetés) | réserve de fin de journée |
 | Jina Reader sans clé | 20 lectures/min | suffisant pour un usage personnel |
 

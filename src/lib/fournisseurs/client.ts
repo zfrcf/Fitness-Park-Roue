@@ -20,8 +20,8 @@ export function adapterCorps(
 ): Record<string, unknown> {
   const c = { ...corps };
   // Filet de sécurité : jamais de `reasoning_content` dans l'historique envoyé (Groq le refuse :
-  // « property 'reasoning_content' is unsupported »). On le CONSERVE pour NVIDIA/Kimi K3, dont la
-  // boucle d'appels d'outils (thinking forcé) a besoin du raisonnement intermédiaire. (#31)
+  // « property 'reasoning_content' is unsupported »). On le CONSERVE pour NVIDIA, dont les modèles
+  // raisonneurs ont besoin du raisonnement intermédiaire dans la boucle d'appels d'outils. (#31)
   if (f.famille !== "nvidia" && Array.isArray(c.messages)) {
     c.messages = (c.messages as unknown[]).map((m) => {
       if (!m || typeof m !== "object" || !("reasoning_content" in m)) return m;
@@ -47,12 +47,18 @@ export function adapterCorps(
       c.reasoning_effort = raisonnement === "eleve" ? "xhigh" : raisonnement === "moyen" ? "medium" : "low";
       break;
     case "nvidia": {
-      // NVIDIA NIM (Kimi K3) : la réflexion se pilote par chat_template_kwargs.thinking. Sans
-      // réflexion, les appels d'outils échouent : on la garde dès que des outils sont envoyés.
+      // NVIDIA NIM : la réflexion se pilote dans chat_template_kwargs, avec un nom qui dépend du
+      // modèle : « thinking » (Kimi), « enable_thinking » (Nemotron, GLM, Qwen). On envoie les deux :
+      // le modèle ignore celui qu'il ne connaît pas. Sans réflexion, Kimi n'appelait pas les outils et
+      // Nemotron lit mal un long contexte : on la garde dès que des outils sont envoyés.
       // reasoning_effort « low » donne parfois une réponse vide : on ne l'utilise pas.
       const outils = Array.isArray(c.tools) && c.tools.length > 0;
       const reflechir = raisonnement !== "aucun" || outils;
-      c.chat_template_kwargs = { ...((c.chat_template_kwargs as Record<string, unknown>) ?? {}), thinking: reflechir };
+      c.chat_template_kwargs = {
+        ...((c.chat_template_kwargs as Record<string, unknown>) ?? {}),
+        thinking: reflechir,
+        enable_thinking: reflechir,
+      };
       if (raisonnement === "moyen") c.reasoning_effort = "high";
       else if (raisonnement === "eleve") c.reasoning_effort = "max";
       else delete c.reasoning_effort;

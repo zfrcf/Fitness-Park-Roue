@@ -235,6 +235,7 @@ class TurtleScreen:
         """Comme _incrementudc de CPython : après la fermeture de la fenêtre de Screen() (croix, bye(), « Fermer
         les fenêtres »), la tortue lève turtle.Terminator, ce qui arrête le programme ; sur le Canvas détruit
         d'un programme tkinter, TclError."""
+        _verifier_execution()  # objets d'un programme remplacé, repris par les globales partagées
         if not TurtleScreen._RUNNING:
             TurtleScreen._RUNNING = True
             raise Terminator(_FERMEE)
@@ -249,19 +250,21 @@ class TurtleScreen:
         « Arrêter », fermeture) puis le programme attend delay() ms ; avec tracer(n > 1), la page se redessine
         toutes les n mises à jour, sans attente. Python reste ainsi au rythme de l'affichage, et une boucle
         « while True: t.forward(…) » ne fige pas l'onglet. Sans JSPI, le moteur étale l'animation (file « anime »)."""
-        if not tkinter._peut_attendre():
-            # Sans JSPI, une boucle « while True: t.forward(…) » ne rend jamais la main : arrêtée au bout de 30 s
-            # plutôt que de figer l'onglet pour toujours.
-            try:
-                tkinter._surveiller_boucle(appel=False)
-            except RuntimeError:
-                raise RuntimeError(
-                    "Programme arrêté après 30 s sans rendre la main : dans ce navigateur (sans JSPI), la fenêtre "
-                    "turtle ne se redessine qu'une fois le programme fini. Pour une animation sans fin, utilisez une "
-                    "fonction qui se reprogramme avec écran.ontimer(fonction, millisecondes), ou un Chrome récent."
-                ) from None
-            return
         if self._tracer == 0:
+            return
+        if not tkinter._peut_attendre():
+            # Sans JSPI, une boucle « while True: t.forward(…) » ne rend jamais la main : arrêtée au bout de 5 s
+            # (Firefox propose de tuer le script vers 10 s) plutôt que de figer l'onglet pour toujours.
+            try:
+                tkinter._surveiller_boucle(appel=False, limite=5)
+            except RuntimeError:
+                self._anime = 0
+                _ui.configurer(self.cv._id, _js({"anime": 0}))  # la file d'animation s'applique d'un coup
+                raise RuntimeError(
+                    "Boucle sans fin : dans ce navigateur (sans JSPI), la fenêtre turtle ne se redessine que si le "
+                    "programme rend la main. Remplacez « while True: … » par une fonction qui se reprogramme avec "
+                    "écran.ontimer(fonction, millisecondes), ou utilisez un Chrome récent."
+                ) from None
             return
         if self._anime:
             self._anime = 0
@@ -534,6 +537,7 @@ def _ecran_du_canvas(cv):
 
 
 def Screen():
+    _verifier_execution()
     e = _ecran[0]
     if e is None or e._root._detruit:
         e = _ecran[0] = _Screen()
@@ -1259,6 +1263,13 @@ def _tortue_defaut():
 _executions_fermees = set()  # programmes dont la fenêtre turtle a été fermée par le lancement d'un autre
 
 
+def _verifier_execution():
+    """Programme dont la fenêtre turtle a été fermée par un nouveau lancement (bloc « Exécuter », python x.py) :
+    il s'arrête (Terminator) au lieu de dessiner dans la fenêtre du nouveau programme."""
+    if _executions_fermees and tkinter._ident_execution() in _executions_fermees:
+        raise Terminator(_FERMEE)
+
+
 def _reinitialiser(choisir=None):
     """Nouveau lancement (lanceur) : la fenêtre turtle précédente se ferme (si choisir(ident) la retient), sans
     que le nouveau programme reçoive le Terminator de cette fermeture. Le programme qui l'avait ouverte, s'il
@@ -1266,7 +1277,7 @@ def _reinitialiser(choisir=None):
     e = _ecran[0]
     if e is not None and (choisir is None or choisir(getattr(e._root, "_execution", None))):
         ident = getattr(e._root, "_execution", None)
-        if ident is not None:
+        if ident is not None and ident != tkinter._ident_execution():  # pas le programme qui se lance (même cellule)
             _executions_fermees.add(ident)
         e.bye()
     TurtleScreen._RUNNING = True
@@ -1275,8 +1286,7 @@ def _reinitialiser(choisir=None):
 def _verifier_fonctionnement():
     """Comme les fonctions du module de CPython : après la fermeture de la fenêtre, le premier appel lève
     turtle.Terminator (le programme s'arrête au lieu de rouvrir une fenêtre) ; l'appel suivant en rouvre une."""
-    if _executions_fermees and tkinter._ident_execution() in _executions_fermees:
-        raise Terminator(_FERMEE)
+    _verifier_execution()
     if not TurtleScreen._RUNNING:
         TurtleScreen._RUNNING = True
         raise Terminator(_FERMEE)

@@ -121,8 +121,9 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   ferme que les fenêtres/figures des blocs précédents (`_blocs`, `root._execution`) ; `python x.py` ne ferme pas
   celles des blocs. Sans JSPI, un programme fini fenêtres ouvertes garde son environnement (flux, sys.path, argv,
   `__main__`) dans ses rappels (`_env_programmes`). Sans JSPI, garde-fous (`_surveiller_boucle`) : update() en
-  boucle (50 appels en plus de 3 s) ou 30 s sans rendre la main (turtle compris) → RuntimeError plutôt qu'un onglet
-  figé ; la file d'animation du Canvas est vidée d'un coup quand un tour plus récent (rappel ontimer) l'alimente.
+  boucle (50 appels en plus de 3 s) ou 30 s sans rendre la main (turtle : 5 s, hors tracer(0)) → RuntimeError plutôt qu'un onglet
+  figé ; une minuterie (after/ontimer, ms > 0) attend que la file d'animation du Canvas soit dessinée (comme
+  delay() de CPython), sinon l'affichage d'un jeu prendrait un retard sans limite.
   Sortie bornée (`morceaux.ts` : 200 000 caractères par flux, début masqué) et une mise à jour React par image
   (`tamponMorceaux`). Connexion / déconnexion = rechargement complet de la page (Pyodide et fenêtres du compte
   précédent détruits). Limite connue : « Arrêter » vise toutes les exécutions.

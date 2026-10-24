@@ -438,10 +438,10 @@ def _demarrer_tranche():
         lanceur._debut_execution()  # le garde-fou de time.sleep compte par rappel, pas depuis le lancement
 
 
-def _surveiller_boucle(appel=True):
+def _surveiller_boucle(appel=True, limite=30):
     """Sans JSPI, plutôt que de figer la page : update() appelé en boucle (50 fois en plus de 3 s) ou plus de
-    30 s sans rendre la main → RuntimeError. Un programme qui appelle update() de temps en temps pendant un
-    long calcul (fougère, fractale) n'est pas arrêté."""
+    « limite » s sans rendre la main → RuntimeError. Un programme qui appelle update() de temps en temps pendant
+    un long calcul (fougère, fractale) n'est pas arrêté."""
     maintenant = time.monotonic()
     if _debut_tranche[0] is None:
         _ouvrir_tranche(maintenant)
@@ -449,7 +449,7 @@ def _surveiller_boucle(appel=True):
     if appel:
         _appels_tranche[0] += 1
     duree = maintenant - _debut_tranche[0]
-    if (duree > 3 and _appels_tranche[0] >= 50) or duree > 30:
+    if (duree > 3 and _appels_tranche[0] >= 50) or duree > limite:
         _debut_tranche[0] = None
         raise RuntimeError(
             "Boucle sans fin avec update() : dans le navigateur, la fenêtre ne peut se redessiner que si le "

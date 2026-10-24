@@ -362,8 +362,14 @@ def essai(nombre, pas, appel=True):
     except RuntimeError as e:
         return "arrêt " + str(e).split(" :")[0]
 print(essai(30, 0.35), essai(80, 0.06), essai(40, 1.0, appel=False))
+# Un rappel (clic, after) puis, bien plus tard, un seul update() : pas d'heure périmée.
+tk._appeler(lambda: None)
+js.vider()
+t[0] += 10
+root.update()
+print("update unique ok")
 `);
-    expect(sortie).toBe("ok arrêt Boucle sans fin avec update() arrêt Boucle sans fin avec update()");
+    expect(sortie.split("\n")).toEqual(["ok arrêt Boucle sans fin avec update() arrêt Boucle sans fin avec update()", "update unique ok"]);
   });
 
   it("turtle : le programme dont la fenêtre est fermée par un autre lancement reçoit Terminator", () => {
@@ -376,15 +382,19 @@ cur[0] = 2
 turtle._reinitialiser()     # programme 2 lancé : la fenêtre du 1 se ferme
 turtle.forward(5)
 cur[0] = 1
-try:
-    turtle.forward(5)
-    print("dessine encore")
-except turtle.Terminator:
-    print("Terminator")
+for f in (lambda: turtle.forward(5), turtle.Screen):
+    try:
+        f()
+        print("dessine encore")
+    except turtle.Terminator:
+        print("Terminator")
 cur[0] = 2
 print(len(turtle.Screen().turtles()))
+turtle._reinitialiser()     # même exécution qui relance (deux python x.py dans une cellule) : pas de Terminator
+turtle.forward(5)
+print("relance ok")
 `);
-    expect(sortie.split("\n")).toEqual(["Terminator", "1"]);
+    expect(sortie.split("\n")).toEqual(["Terminator", "Terminator", "1", "relance ok"]);
   });
 
   it("turtle : clone() garde les attributs du programme (copie indépendante des données)", () => {

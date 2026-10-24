@@ -23,9 +23,6 @@ interface CanvasEtat {
   anime: number; // opérations par image (0 = immédiat) : animation de turtle
   file: unknown[][];
   enCours: boolean;
-  /** Tour du navigateur où la file a reçu ses dernières opérations, et nombre d'opérations à dessiner tout de suite. */
-  tourFile?: number;
-  limite?: number;
   /** scrollregion [x1, y1, x2, y2] : le canvas défile (barres natives, molette, xview / yview). */
   zone?: [number, number, number, number] | null;
   espace?: HTMLElement;
@@ -2386,19 +2383,8 @@ function operationCanvas(w: Widget, op: unknown[]) {
   }
 }
 
-/** Numéro du tour du navigateur (change dès que le JavaScript en cours, programme Python compris, a rendu la main). */
-let tourNavigateur = 0;
-let finDeTourPrevue = false;
-function tourActuel(): number {
-  if (!finDeTourPrevue) {
-    finDeTourPrevue = true;
-    queueMicrotask(() => {
-      tourNavigateur++;
-      finDeTourPrevue = false;
-    });
-  }
-  return tourNavigateur;
-}
+const attenteDessin = new Map<number, number>(); // minuterie → requestAnimationFrame (attend la file d'animation)
+const dessinEnCours = () => [...widgets.values()].some((w) => w.canvas?.enCours && !w.detruit);
 
 function dessin(id: number, ops: unknown[][]) {
   const w = widgets.get(id);
@@ -2408,19 +2394,12 @@ function dessin(id: number, ops: unknown[][]) {
     for (const op of ops) operationCanvas(w, op);
     return;
   }
-  // Opérations d'un tour plus récent (rappel ontimer/onkey d'un jeu) alors que la file n'est pas vide : ce qui
-  // attend est dessiné d'un coup à l'image suivante, sinon le retard d'affichage croîtrait sans limite. Un dessin
-  // envoyé en une fois par le programme reste animé à la vitesse demandée.
-  const tour = tourActuel();
-  if (c.file.length && c.tourFile !== tour) c.limite = c.file.length;
-  c.tourFile = tour;
   c.file.push(...ops);
   if (c.enCours) return;
   c.enCours = true;
   const pas = () => {
     if (w.detruit) return;
-    const n = Math.max(1, c.anime || c.file.length, c.limite ?? 0);
-    c.limite = 0;
+    const n = Math.max(1, c.anime || c.file.length);
     for (const op of c.file.splice(0, n)) operationCanvas(w, op);
     if (c.file.length) requestAnimationFrame(pas);
     else c.enCours = false;
@@ -2805,6 +2784,11 @@ export const moteurFenetres = garder({
   /** after_cancel / destruction : la minuterie peut déjà attendre dans la file (rappel endormi). */
   annulerMinuterie(id: number) {
     window.clearTimeout(id);
+    const r = attenteDessin.get(id);
+    if (r !== undefined) {
+      cancelAnimationFrame(r);
+      attenteDessin.delete(id);
+    }
     const i = fileTk.findIndex((f) => (f as { minuterie?: number }).minuterie === id);
     if (i >= 0) fileTk.splice(i, 1);
   },
@@ -2849,7 +2833,14 @@ export const moteurFenetres = garder({
         liberer();
       }
     };
-    const id: number = window.setTimeout(() => {
+    const id: number = window.setTimeout(function partir() {
+      // Sans JSPI, Python ne peut pas attendre delay() comme CPython : une minuterie (ontimer d'un jeu turtle)
+      // attend que l'animation déjà demandée soit dessinée, sinon la file prendrait un retard sans limite.
+      if (!suspensible && ms > 0 && dessinEnCours()) {
+        attenteDessin.set(id, requestAnimationFrame(partir));
+        return;
+      }
+      attenteDessin.delete(id);
       if (doitAttendre()) fileTk.push(Object.assign(() => tirer(), { minuterie: id }));
       else tirer();
     }, Math.max(0, ms));

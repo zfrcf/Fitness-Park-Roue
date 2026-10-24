@@ -411,23 +411,45 @@ def _apres_execution():
             _tout_detruire()
 
 
+# Sans JSPI, le Python ne rend jamais la main pendant une boucle : la « tranche » mesure le temps passé depuis
+# le dernier retour au navigateur (remise à zéro par un setTimeout, qui ne part qu'une fois la main rendue).
 _debut_tranche = [None]
+_appels_tranche = [0]
+_remise_prevue = [False]
+
+
+def _remettre_tranche():
+    _remise_prevue[0] = False
+    _debut_tranche[0] = None
+
+
+def _ouvrir_tranche(maintenant):
+    _debut_tranche[0] = maintenant
+    _appels_tranche[0] = 0
+    if not _remise_prevue[0]:
+        _remise_prevue[0] = True
+        js.setTimeout(create_once_callable(_remettre_tranche), 0)
 
 
 def _demarrer_tranche():
-    _debut_tranche[0] = time.monotonic()
+    _ouvrir_tranche(time.monotonic())
     lanceur = sys.modules.get("atelier_run")
     if lanceur is not None:
         lanceur._debut_execution()  # le garde-fou de time.sleep compte par rappel, pas depuis le lancement
 
 
-def _surveiller_boucle():
-    """update() appelé en boucle sans rendre la main : au-delà de 3 s, on arrête plutôt que de figer la page."""
+def _surveiller_boucle(appel=True):
+    """Sans JSPI, plutôt que de figer la page : update() appelé en boucle (50 fois en plus de 3 s) ou plus de
+    30 s sans rendre la main → RuntimeError. Un programme qui appelle update() de temps en temps pendant un
+    long calcul (fougère, fractale) n'est pas arrêté."""
     maintenant = time.monotonic()
     if _debut_tranche[0] is None:
-        _debut_tranche[0] = maintenant
-        js.setTimeout(create_once_callable(lambda: _debut_tranche.__setitem__(0, None)), 0)
-    elif maintenant - _debut_tranche[0] > 3:
+        _ouvrir_tranche(maintenant)
+        return
+    if appel:
+        _appels_tranche[0] += 1
+    duree = maintenant - _debut_tranche[0]
+    if (duree > 3 and _appels_tranche[0] >= 50) or duree > 30:
         _debut_tranche[0] = None
         raise RuntimeError(
             "Boucle sans fin avec update() : dans le navigateur, la fenêtre ne peut se redessiner que si le "
@@ -452,6 +474,20 @@ def _rappel(cible, type_, donnees):
     # Appel « promettant » (JSPI) : la page lit ce résultat tout de suite si le rappel n'a pas attendu.
     _ui.retour(r if isinstance(r, str) else None)
     return r
+
+
+_G = globals()
+
+
+def _dans_rappel():
+    """La pile Python courante part-elle d'un rappel de la page (_rappel : événement ; tirer : after ou
+    événement virtuel ; envoyer : event_generate différé) ?"""
+    f = sys._getframe(1)
+    while f is not None:
+        if f.f_globals is _G and f.f_code.co_name in ("_rappel", "tirer", "envoyer"):
+            return True
+        f = f.f_back
+    return False
 
 
 def _python_actif():
@@ -613,6 +649,7 @@ class Variable:
     _noms = itertools.count()
 
     _ecritures = 0
+    _en_trace = False
 
     def __init__(self, master=None, value=None, name=None):
         self._name = name or f"PY_VAR{next(Variable._noms)}"
@@ -648,9 +685,15 @@ class Variable:
             self._ecritures += 1
             if _attentes:
                 _reveiller()  # wait_variable()
-        for nom, (modes, fn) in list(self._traces.items()):
-            if mode in modes or mode[0] in modes:
-                _appeler(fn, self._name, "", mode)
+        if self._en_trace:
+            return  # Tcl : les traces d'une variable sont suspendues pendant qu'une de ses traces s'exécute
+        self._en_trace = True
+        try:
+            for nom, (modes, fn) in list(self._traces.items()):
+                if mode in modes or mode[0] in modes:
+                    _appeler(fn, self._name, "", mode)
+        finally:
+            self._en_trace = False
 
     def trace_add(self, mode, callback):
         modes = (mode,) if isinstance(mode, str) else tuple(mode)
@@ -986,7 +1029,7 @@ def _lzw_gif(data, mcs, total):
     return out
 
 
-def _degif(o):
+def _degif(o, index=0):
     """GIF (première image, entrelacée ou non, transparence) → (l, h, pixels RGBA) ; None si illisible."""
     try:
         if not o or o[:4] != b"GIF8":
@@ -1027,6 +1070,10 @@ def _degif(o):
                         break
                     donnees += o[pos:pos + n]
                     pos += n
+                if index > 0:  # « gif -index N » : images suivantes (sans composition, comme Tk)
+                    index -= 1
+                    transp = None  # l'extension de contrôle ne vaut que pour l'image qui la suit
+                    continue
                 ind = _lzw_gif(donnees, mcs, w * h)
                 lignes = list(range(h))
                 if f2 & 0x40:
@@ -1051,7 +1098,7 @@ def _degif(o):
                 break
     except Exception:
         return None
-    return None
+    return False  # pas d'image à cet index (« gif -index N »)
 
 
 def _deppm(o):
@@ -1113,13 +1160,35 @@ def _decoder_image(o):
 class PhotoImage(Image):
     def __init__(self, name=None, cnf={}, master=None, file=None, data=None, width=None, height=None, format=None, **kw):
         super().__init__("photo", name, cnf, master)
-        opts = {**cnf, **kw, "file": file, "data": data, "width": width, "height": height}
+        opts = {**cnf, **kw, "file": file, "data": data, "width": width, "height": height, "format": format}
         self._charger(opts)
 
+    @staticmethod
+    def _index_gif(o, fmt):
+        """« gif -index N » comme Tk : l'image N seule, figée en PNG ; TclError au-delà de la dernière."""
+        m = re.search(r"-index\s+(\S+)", str(fmt or ""))
+        if not m or o[:4] != b"GIF8":
+            return o
+        try:
+            i = int(m.group(1))
+        except ValueError:
+            raise TclError(f'expected integer but got "{m.group(1)}"') from None
+        d = _degif(o, i) if i >= 0 else False
+        if d is False:
+            raise TclError("no image data for this index")
+        if d is None:
+            raise TclError("couldn't recognize image data")
+        return _png(*d)
+
     def _charger(self, o):
+        fmt = o.get("format")
         if o.get("file"):
-            with open(o["file"], "rb") as f:
-                self._octets(f.read())
+            try:
+                with open(o["file"], "rb") as f:
+                    brut = f.read()
+            except OSError as e:
+                raise TclError(f'couldn\'t open "{o["file"]}": {(e.strerror or "no such file or directory").lower()}') from None
+            self._octets(self._index_gif(brut, fmt))
         elif o.get("data") is not None:
             d = o["data"]
             if isinstance(d, str) and re.match(r"P[2356]\s", d[:3]):
@@ -1128,12 +1197,13 @@ class PhotoImage(Image):
                 bytes(d[:4]) == b"GIF8" or bytes(d[:8]) == b"\x89PNG\r\n\x1a\n" or bytes(d[:2]) == b"\xff\xd8"
                 or re.match(rb"P[2356]\s", bytes(d[:3])) or not bytes(d[:4]).isascii())
             if binaire:
-                self._octets(bytes(d))
+                self._octets(self._index_gif(bytes(d), fmt))
             else:
                 try:
-                    self._octets(base64.b64decode(d))
+                    brut = base64.b64decode(d)
                 except Exception:
-                    raise TclError("couldn't recognize image data")
+                    raise TclError("couldn't recognize image data") from None
+                self._octets(self._index_gif(brut, fmt))
         l, h = o.get("width"), o.get("height")
         if l or h:
             self._taille_fixee = True
@@ -1492,7 +1562,7 @@ class Misc:
     def after_cancel(self, id):
         m = _minuteries.pop(id, None)
         if m is not None:
-            js.clearTimeout(m[0])
+            _ui.annulerMinuterie(m[0])
             try:
                 m[2].destroy()
             except Exception:
@@ -1564,13 +1634,20 @@ class Misc:
         return 0
 
     def option_add(self, pattern, value, priority=None):
-        pass
+        # Base d'options de Tk (une par racine) : seul tearOff des menus est pris en compte —
+        # root.option_add('*tearOff', False) (TkDocs) vaut pour les menus créés ensuite.
+        if str(pattern).replace(".", "*").split("*")[-1] in ("tearOff", "TearOff"):
+            try:
+                _racine_de(self).__dict__.setdefault("_base_options", {})["tearoff"] = 1 if getboolean(value) else 0
+            except TclError:
+                pass
 
     def option_get(self, name, className):
-        return ""
+        bd = getattr(_racine_de(self), "_base_options", {})
+        return str(bd["tearoff"]) if "tearoff" in bd and (name == "tearOff" or className == "TearOff") else ""
 
     def option_clear(self):
-        pass
+        _racine_de(self).__dict__.pop("_base_options", None)
 
     def option_readfile(self, fileName, priority=None):
         pass
@@ -1768,6 +1845,8 @@ class Misc:
         for w in _widgets.values():
             if str(w) == name:
                 return w
+            if name.endswith(".menu") and str(w) == name[:-5] and isinstance(w._o.get("menu"), _MenuOptions):
+                return w._o["menu"]  # om.nametowidget(om.menuname)
         raise KeyError(name)
 
     _nametowidget = nametowidget
@@ -1776,6 +1855,11 @@ class Misc:
         return list(self._o.keys())
 
     def __str__(self):
+        return self._chemin
+
+    @property
+    def _w(self):
+        """Nom Tcl du widget (« . », « .!frame.!button »), comme l'attribut _w de CPython."""
         return self._chemin
 
     def __repr__(self):
@@ -1817,6 +1901,15 @@ class Misc:
             if g and w._gestion == "grid":
                 cols = max(cols, int(g.get("column", 0)) + int(g.get("columnspan", 1)))
                 rows = max(rows, int(g.get("row", 0)) + int(g.get("rowspan", 1)))
+
+        def _conf(o):  # comme Tk : une ligne / colonne configurée compte même sans widget
+            try:
+                return any(float(o.get(k) or 0) for k in ("weight", "minsize", "pad"))
+            except (TypeError, ValueError):
+                return False
+
+        cols = max([cols] + [i + 1 for i, o in getattr(self, "_grille_colonnes", {}).items() if _conf(o)])
+        rows = max([rows] + [i + 1 for i, o in getattr(self, "_grille_lignes", {}).items() if _conf(o)])
         return (cols, rows)
 
     size = grid_size
@@ -2073,17 +2166,25 @@ def _maj_ecoute_partout():
             _maj_ecoute_fenetre(w)
 
 
-def _tout_detruire():
+def _tout_detruire(choisir=None):
+    """Détruit les fenêtres et minuteries des exécutions retenues par choisir(ident) — toutes sans filtre."""
+
+    def garde(w):
+        return choisir is None or choisir(getattr(_racine_de(w), "_execution", None))
+
     for w in list(_widgets.values()):
-        if isinstance(w, Wm) and not w._detruit:
+        if isinstance(w, Wm) and not w._detruit and garde(w):
             try:
                 w.destroy()
             except Exception:
                 pass
     for nom in list(_minuteries):
+        m = _minuteries.get(nom)
+        if m is None or not garde(m[1]):
+            continue
         m = _minuteries.pop(nom, None)
         if m:
-            js.clearTimeout(m[0])
+            _ui.annulerMinuterie(m[0])
             try:
                 m[2].destroy()
             except Exception:
@@ -2637,6 +2738,12 @@ class Tk(Wm, _Base):
 
     def _racine(self):
         return self
+
+    def __getattr__(self, attr):
+        """Comme CPython : root.eval, root.call, root.splitlist… délèguent à l'interpréteur (root.tk)."""
+        if attr.startswith("__"):
+            raise AttributeError(attr)
+        return getattr(_STUB, attr)
 
 
 def Tcl(screenName=None, baseName=None, className="Tk", useTk=0):
@@ -3629,18 +3736,21 @@ class Text(Widget):
     def _decaler(self, p, n, fin=None):
         """Tags et marques après une insertion (n > 0 en p) ou une suppression de [p, fin)."""
         for plages in self._tags.values():
-            for r in plages:
-                if n >= 0:
+            if n >= 0:
+                # Plages triées et disjointes : seules celles qui finissent après p bougent, et une insertion
+                # n'en vide aucune (insertion en fin de texte : rien à parcourir).
+                for i in range(bisect.bisect_right(plages, p, key=lambda r: r[1]), len(plages)):
+                    r = plages[i]
                     if r[0] >= p:
                         r[0] += n
-                    if r[1] > p:
-                        r[1] += n
-                else:
-                    for k in (0, 1):
-                        if r[k] >= fin:
-                            r[k] += n
-                        elif r[k] > p:
-                            r[k] = p
+                    r[1] += n
+                continue
+            for r in plages:
+                for k in (0, 1):
+                    if r[k] >= fin:
+                        r[k] += n
+                    elif r[k] > p:
+                        r[k] = p
             plages[:] = [r for r in plages if r[1] > r[0]]
         for k, v in list(self._marques.items()):
             if v is None:
@@ -4532,6 +4642,7 @@ class OptionMenu(Widget):
         variable._lier(self)
         _ui.configurer(self._id, _js({"valeurs": self._liste, "valeur": str(variable._valeur)}))
         self["menu"] = _MenuOptions(self)
+        self.menuname = str(self) + ".menu"  # comme CPython
 
     def _variable_changee(self, var):
         if var is self._var:
@@ -4583,6 +4694,67 @@ class _MenuOptions:
 
     def __init__(self, om):
         self._om = om
+        self._opts = {"tearoff": 0}
+
+    # Options de style mémorisées sans effet (elles ne touchent que la liste déroulante dans Tk).
+    def configure(self, cnf=None, **kw):
+        if isinstance(cnf, str) and not kw:
+            k = cnf.lstrip("-")
+            return (k, k, k.capitalize(), "", self._opts.get(k, ""))
+        o = {**(cnf or {}), **kw}
+        if not o:
+            return {k: (k, k, k.capitalize(), "", v) for k, v in self._opts.items()}
+        for k, v in o.items():
+            self._opts[str(k).lstrip("-").rstrip("_")] = v
+
+    config = configure
+
+    def cget(self, key):
+        return self._opts.get(str(key).lstrip("-"), "")
+
+    def __getitem__(self, k):
+        return self.cget(k)
+
+    def __setitem__(self, k, v):
+        self.configure({k: v})
+
+    def keys(self):
+        return list(self._opts)
+
+    def __str__(self):
+        return str(self._om) + ".menu"
+
+    def _entree(self, o, coche=False):
+        label, var, cmd = o.get("label", ""), o.get("variable"), o.get("command")
+        if var is None:
+            return label, cmd
+        val = o.get("value", label)
+
+        def choisir():
+            if coche:
+                on, off = o.get("onvalue", 1), o.get("offvalue", 0)
+                var.set(off if str(var.get()) == str(on) else on)
+            else:
+                var.set(val)
+            return cmd() if cmd else None
+
+        return label, choisir
+
+    def add_radiobutton(self, cnf={}, **kw):
+        self._om._ajouter(*self._entree({**cnf, **kw}))
+
+    def add_checkbutton(self, cnf={}, **kw):
+        self._om._ajouter(*self._entree({**cnf, **kw}, coche=True))
+
+    def add(self, itemType, cnf={}, **kw):
+        o = {**cnf, **kw}
+        t = str(itemType)
+        if t == "command":
+            self._om._ajouter(o.get("label", ""), o.get("command"))
+        elif t == "radiobutton":
+            self.add_radiobutton(o)
+        elif t == "checkbutton":
+            self.add_checkbutton(o)
 
     def index(self, i):
         liste = self._om._liste
@@ -4672,7 +4844,11 @@ class Menu(Widget):
         self._chemin = f"{'' if master._chemin == '.' else master._chemin}.{self._name}"
         master.children[self._name] = self
         self._items = []
-        self._o.update(self._normaliser(cnf, kw))
+        o = self._normaliser(cnf, kw)
+        bd = getattr(_racine_de(master), "_base_options", {})
+        if "tearoff" not in o and "tearoff" in bd:
+            o["tearoff"] = bd["tearoff"]  # option_add('*tearOff', …), lu à la création comme Tk
+        self._o.update(o)
 
     def _contenu_dans(self, m, vus=None):
         """Ce menu est-il m ou l'une de ses cascades (à n'importe quelle profondeur, quel que soit le maître) ?"""
@@ -4792,7 +4968,8 @@ class Menu(Widget):
 
     def entrycget(self, index, option):
         i = self._idx(index)
-        return self._items[i].get(option, "") if 0 <= i < len(self._items) else ""
+        option = str(option).lstrip("-")
+        return self._items[i].get(option, "normal" if option == "state" else "") if 0 <= i < len(self._items) else ""
 
     def index(self, index):
         if index in (END, "end", "last"):

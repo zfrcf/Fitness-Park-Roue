@@ -59,6 +59,13 @@ APPELS = []
 def differer(f, ms=0):
     js._file.append(f)
 
+class _Taille:
+    def to_py(self):
+        return [1280, 800]
+
+def ecran():
+    return _Taille()
+
 def __getattr__(nom):
     def f(*a, **k):
         APPELS.append((nom, a))
@@ -337,5 +344,142 @@ import tkinter as tk
 print(tk._couleur("NavyBlue"), tk._couleur("VioletRed3"), tk._couleur("red3"), tk._couleur("gray50"))
 `);
     expect(sortie).toBe("#000080 color-mix(in srgb, #d02090 80%, black) color-mix(in srgb, red 80%, black) rgb(127,127,127)"); // gray50 = #7f7f7f dans X11
+  });
+
+  it("Sans JSPI : update() de temps en temps pendant un long calcul passe, une boucle d'update() est arrêtée", () => {
+    const sortie = executer(String.raw`
+import js, time, tkinter as tk
+root = tk.Tk()
+t = [100.0]
+time.monotonic = lambda: t[0]
+def essai(nombre, pas, appel=True):
+    js.vider()  # la main rendue au navigateur : nouvelle tranche
+    try:
+        for i in range(nombre):
+            t[0] += pas
+            root.update() if appel else tk._surveiller_boucle(appel=False)
+        return "ok"
+    except RuntimeError as e:
+        return "arrêt " + str(e).split(" :")[0]
+print(essai(30, 0.35), essai(80, 0.06), essai(40, 1.0, appel=False))
+`);
+    expect(sortie).toBe("ok arrêt Boucle sans fin avec update() arrêt Boucle sans fin avec update()");
+  });
+
+  it("turtle : le programme dont la fenêtre est fermée par un autre lancement reçoit Terminator", () => {
+    const sortie = executer(String.raw`
+import tkinter, turtle
+cur = [1]
+tkinter._ident_execution = lambda: cur[0]
+turtle.forward(10)          # programme 1 : ouvre la fenêtre
+cur[0] = 2
+turtle._reinitialiser()     # programme 2 lancé : la fenêtre du 1 se ferme
+turtle.forward(5)
+cur[0] = 1
+try:
+    turtle.forward(5)
+    print("dessine encore")
+except turtle.Terminator:
+    print("Terminator")
+cur[0] = 2
+print(len(turtle.Screen().turtles()))
+`);
+    expect(sortie.split("\n")).toEqual(["Terminator", "1"]);
+  });
+
+  it("turtle : clone() garde les attributs du programme (copie indépendante des données)", () => {
+    const sortie = executer(String.raw`
+import turtle
+class Balle(turtle.Turtle):
+    def __init__(self):
+        super().__init__()
+        self.dx, self.trace, self.cible = 3, [1, 2], None
+b = Balle()
+b.cible = b
+c = b.clone()
+c.trace.append(9)
+print(type(c).__name__, c.dx, b.trace, c.trace, c.cible is b)
+`);
+    expect(sortie).toBe("Balle 3 [1, 2] [1, 2, 9] True");
+  });
+
+  it("Variable : une trace qui réécrit sa variable n'est pas relancée (comme Tk)", () => {
+    const sortie = executer(String.raw`
+import tkinter as tk
+root = tk.Tk()
+v = tk.StringVar(root)
+n = [0]
+def maj(*a):
+    n[0] += 1
+    v.set(v.get().upper())
+v.trace_add("write", maj)
+v.set("ab")
+print(n[0], v.get())
+`);
+    expect(sortie).toBe("1 AB");
+  });
+
+  it("PhotoImage : fichier absent → TclError de Tk, format « gif -index N » respecté", () => {
+    const sortie = executer(String.raw`
+import tkinter as tk
+root = tk.Tk()
+try:
+    tk.PhotoImage(file="absent.png")
+except tk.TclError as e:
+    print("TclError", e)
+gif = "R0lGODlhAQABAIAAAP8AAP///ywAAAAAAQABAAACAkQBADs="
+print(tk.PhotoImage(data=gif, format="gif -index 0").get(0, 0))
+try:
+    tk.PhotoImage(data=gif, format="gif -index 1")
+    print("pas d'erreur")
+except tk.TclError:
+    print("TclError index")
+`);
+    expect(sortie.split("\n")).toEqual(['TclError couldn\'t open "absent.png": no such file or directory', "(255, 0, 0)", "TclError index"]);
+  });
+
+  it("option_add('*tearOff', False) s'applique aux menus créés ensuite", () => {
+    const sortie = executer(String.raw`
+import tkinter as tk
+root = tk.Tk()
+print(tk.Menu(root).cget("tearoff"))
+root.option_add("*tearOff", False)
+print(tk.Menu(root).cget("tearoff"))
+`);
+    expect(sortie.split("\n")).toEqual(["1", "0"]);
+  });
+
+  it("Text.insert avec tags : coût linéaire (journal de plusieurs milliers de lignes)", () => {
+    const sortie = executer(String.raw`
+import time, tkinter as tk
+t = tk.Text(tk.Tk())
+debut = time.perf_counter()
+for i in range(4000):
+    t.insert("end", f"ligne {i}\n", ("info" if i % 2 else "alerte",))
+duree = time.perf_counter() - debut
+print(t.index("end-1c"), len(t.tag_ranges("alerte")) // 2, duree < 8)
+`);
+    expect(sortie).toBe("4001.0 2000 True");
+  });
+
+  it("turtle + setworldcoordinates : la flèche garde sa taille en pixels et pointe dans la direction visible", () => {
+    const sortie = executer(String.raw`
+import turtle
+ecran = turtle.Screen()
+ecran.setworldcoordinates(-10, -10, 10, 10)
+t = turtle.Turtle()
+p = t._poly_curseur()
+xs, ys = p[0::2], p[1::2]
+print(round(max(xs) - min(xs)), round(max(ys) - min(ys)))
+ecran.setworldcoordinates(-50, -7.5, 50, 7.5)
+t.setheading(45)
+p = t._poly_curseur()
+cx, cy = t._c(t._x, t._y)
+# Forme classic : pointe sur la position, encoche (0, -7) juste derrière → direction visible = centre - encoche.
+dx, dy = cx - p[4], p[5] - cy
+print(dx > 0 and dy > 0, dy > dx, round(dx * dx + dy * dy))
+`);
+    // Monde 100 × 15 sur un canevas plus large que haut : le cap 45° du monde est visiblement plus raide.
+    expect(sortie.split("\n")).toEqual(["9 10", "True True 49"]);
   });
 });

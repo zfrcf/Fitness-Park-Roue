@@ -2,7 +2,6 @@
 
 import { CheckCircle2, Loader2, UserPlus } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +26,6 @@ function idAppareil(): string {
 }
 
 export function FormulaireInscription() {
-  const routeur = useRouter();
   const [nom, setNom] = useState("");
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
@@ -57,8 +55,7 @@ export function FormulaireInscription() {
         return;
       }
       if (d.mode === "aucune") {
-        routeur.replace("/");
-        routeur.refresh();
+        window.location.replace(new URL("/", window.location.origin)); // rechargement complet, comme à la connexion
         return;
       }
       setFini({ mode: d.mode ?? "admin", info: d.info });

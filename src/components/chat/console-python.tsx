@@ -4,7 +4,7 @@ import { AppWindow, CornerDownLeft, Loader2, Square, Terminal, Trash2, Upload, X
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { lignesAffichees, texteLigne } from "@/lib/execution/ansi";
-import { avecMorceau, grouperMorceaux } from "@/lib/execution/morceaux";
+import { avecMorceaux, grouperMorceaux, tamponMorceaux } from "@/lib/execution/morceaux";
 import { abonnerEtatExecution, arreterExecution, etatExecution, executerPython, importerFichiersConsole, type Morceau } from "@/lib/execution/python-navigateur";
 import { abonnerProjetConsole, projetConsole } from "@/lib/execution/projet-console";
 import { abonnerFenetres, fermerToutesFenetres, nombreFenetres } from "@/lib/execution/ui/fenetres";
@@ -142,9 +142,9 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
 
   const historique = cellules.map((c) => c.code);
 
-  /** Ajoute à une cellule, à la suite, ce que le programme affiche après la fin de son exécution. */
-  function ajouterTardif(id: number, m: Morceau) {
-    setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: avecMorceau(c.morceaux, m) } : c)));
+  /** Ajoute à une cellule, à la suite, ce que le programme affiche (en direct, puis après la fin de son exécution). */
+  function ajouterTardif(id: number, ms: Morceau[]) {
+    setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: avecMorceaux(c.morceaux, ms) } : c)));
   }
 
   async function executer(source: string, remplacer = false) {
@@ -170,14 +170,22 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
     setCode((actuel) => (actuel === source ? "" : actuel));
     let fin: () => void = () => undefined;
     enCours.current = new Promise<void>((ok) => (fin = ok));
+    // Console fermée puis nouvelle saisie demandée (l'EOF de la fermeture a été ignoré, ex. boucle avec
+    // « except: ») : programme tué, comme un terminal fermé (SIGHUP), au lieu de tourner sans fin en arrière-plan.
+    const arretForce = new AbortController();
+    // Une mise à jour d'état par image au plus, pas une par print (boucle de 1 million de lignes).
+    const tampon = tamponMorceaux((ms) => ajouterTardif(id, ms));
     try {
       const r = await executerPython(source, setEtape, {
-        sortieTardive: (m) => ajouterTardif(id, m),
-        enDirect: (m) => ajouterTardif(id, m),
-        saisie: (invite, { masque, finDeFichier, signal }) =>
-          demontee.current
-            ? Promise.resolve(false)
-            : new Promise((ok) => {
+        sortieTardive: tampon.ajouter,
+        enDirect: tampon.ajouter,
+        signal: arretForce.signal,
+        saisie: (invite, { masque, finDeFichier, signal }) => {
+          if (demontee.current) {
+            arretForce.abort();
+            return new Promise<never>(() => undefined);
+          }
+          return new Promise((ok) => {
                 repondre.current = ok;
                 setReponse("");
                 setSaisie({ invite, masque: Boolean(masque), finDeFichier: Boolean(finDeFichier) });
@@ -187,8 +195,10 @@ export function ConsolePython({ onFermer }: { onFermer: () => void }) {
                   repondre.current = null;
                   setSaisie(null);
                 });
-              }),
+              });
+        },
       });
+      tampon.abandonner(); // déjà dans r.morceaux
       setCellules((liste) => liste.map((c) => (c.id === id ? { ...c, morceaux: r.morceaux, enCours: false } : c)));
     } catch (e) {
       const erreur: Morceau = { texte: e instanceof Error ? e.message : "Exécution impossible.", erreur: true };

@@ -602,7 +602,7 @@ class Notebook(_Theme, tkinter.Widget):
         liste = [{"id": t["w"]._id, "texte": str(t.get("text", "")), "etat": str(t.get("state", "normal"))} for t in self._onglets if t.get("state") != "hidden"]
         _ui.configurer(self._id, _js({"onglets": {"liste": liste, "actif": self._actif._id if self._actif is not None else -1}}))
 
-    def _w(self, tab_id):
+    def _onglet(self, tab_id):
         if isinstance(tab_id, tkinter.Misc):
             return tab_id
         if tab_id in ("current",):
@@ -678,7 +678,7 @@ class Notebook(_Theme, tkinter.Widget):
     def select(self, tab_id=None):
         if tab_id is None:
             return str(self._actif) if self._actif is not None else ""
-        w = self._w(tab_id)
+        w = self._onglet(tab_id)
         if any(t["w"] is w and t.get("state") == "disabled" for t in self._onglets):
             return  # Tk ignore la sélection d'un onglet désactivé
         for t in self._onglets:
@@ -692,7 +692,7 @@ class Notebook(_Theme, tkinter.Widget):
     def index(self, tab_id):
         if tab_id == "end":
             return len(self._onglets)
-        w = self._w(tab_id)
+        w = self._onglet(tab_id)
         for i, t in enumerate(self._onglets):
             if t["w"] is w:
                 return i
@@ -711,10 +711,10 @@ class Notebook(_Theme, tkinter.Widget):
         return tuple(str(t["w"]) for t in self._onglets)
 
     def forget(self, tab_id):
-        self._retirer(self._w(tab_id))
+        self._retirer(self._onglet(tab_id))
 
     def hide(self, tab_id):
-        w = self._w(tab_id)
+        w = self._onglet(tab_id)
         self.tab(tab_id, state="hidden")
         if self._actif is w:
             visibles = [t["w"] for t in self._onglets if t.get("state") != "hidden"]

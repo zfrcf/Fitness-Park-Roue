@@ -2,7 +2,7 @@
 
 import { KeyRound, Loader2, LogIn } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,6 @@ function formatDuree(s: number) {
 }
 
 export function FormulaireConnexion() {
-  const routeur = useRouter();
   const params = useSearchParams();
   const [modeAdmin, setModeAdmin] = useState(false);
   const [email, setEmail] = useState("");
@@ -45,8 +44,8 @@ export function FormulaireConnexion() {
       });
       const donnees = (await r.json()) as { ok?: boolean; erreur?: string; reessaiDans?: number; restantes?: number };
       if (r.ok && donnees.ok) {
-        routeur.replace(destinationSure(params.get("suivant")));
-        routeur.refresh();
+        // Rechargement complet : rien de la session précédente (Python, fenêtres) ne passe au nouveau compte.
+        window.location.replace(new URL(destinationSure(params.get("suivant")), window.location.origin));
         return;
       }
       setErreur(donnees.erreur ?? "Connexion impossible.");

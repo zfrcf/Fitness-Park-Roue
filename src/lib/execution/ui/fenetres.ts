@@ -23,6 +23,9 @@ interface CanvasEtat {
   anime: number; // opérations par image (0 = immédiat) : animation de turtle
   file: unknown[][];
   enCours: boolean;
+  /** Tour du navigateur où la file a reçu ses dernières opérations, et nombre d'opérations à dessiner tout de suite. */
+  tourFile?: number;
+  limite?: number;
   /** scrollregion [x1, y1, x2, y2] : le canvas défile (barres natives, molette, xview / yview). */
   zone?: [number, number, number, number] | null;
   espace?: HTMLElement;
@@ -111,9 +114,45 @@ let dansPython = 0;
 /** Sonde Python synchrone : du code Python est-il déjà en cours (appelé hors de moteurFenetres) ? */
 let sondePython: ProxyPy | null = null;
 
+/**
+ * Rappels Python endormis dans time.sleep() : comme Tk, qui ne traite les événements que dans mainloop(),
+ * update() et wait_*(), les événements et minuteries qui arrivent pendant ce sommeil attendent (file FIFO)
+ * la fin du rappel ou son prochain update(), au lieu de lancer un rappel qui s'entrelace avec lui.
+ */
+let rappelsEndormis = 0;
+const fileTk: (() => void)[] = [];
+let vidageProgramme = false;
+let enVidage = false;
+function viderFileTk() {
+  vidageProgramme = false;
+  while (fileTk.length && rappelsEndormis === 0 && dansPython === 0) {
+    const f = fileTk.shift()!;
+    enVidage = true;
+    try {
+      f();
+    } catch (e) {
+      console.error("[fenêtres]", e);
+    } finally {
+      enVidage = false;
+    }
+  }
+  if (fileTk.length && rappelsEndormis === 0 && !vidageProgramme) {
+    vidageProgramme = true;
+    window.setTimeout(viderFileTk, 0);
+  }
+}
+const doitAttendre = () => suspensible && dansPython === 0 && (rappelsEndormis > 0 || (fileTk.length > 0 && !enVidage)) && sondePython?.() !== true;
+
 function appeler(cible: number, type: string, donnees: Opts = {}, apres?: (final: unknown) => void): unknown {
   if (!rappel) return undefined;
   try {
+    if (doitAttendre()) {
+      fileTk.push(() => {
+        const r = appeler(cible, type, donnees, apres);
+        if (r !== EN_ATTENTE && apres) apres(r);
+      });
+      return EN_ATTENTE;
+    }
     if (dansPython > 0 || (suspensible && sondePython?.() === true)) {
       if (type === "focusin" || type === "focusout") {
         queueMicrotask(() => appeler(cible, type, donnees));
@@ -1558,6 +1597,7 @@ function morceauIntegre(sg: Opts): Node | null {
     const k = widgets.get(nb(sg.widget));
     if (!k || k.detruit) return null;
     k.etire = { x: false, y: false };
+    libererPlace(k);
     k.el.style.position = "relative";
     appliquerTaille(k);
     boite.appendChild(k.el);
@@ -1570,6 +1610,13 @@ function morceauIntegre(sg: Opts): Node | null {
   return boite;
 }
 
+/** replaceChildren sans décomposer le tableau en arguments (au-delà de ~120 000 nœuds : « Maximum call stack »). */
+function remplacerEnfants(cible: Element, noeuds: Node[]) {
+  const f = document.createDocumentFragment();
+  for (const n of noeuds) f.appendChild(n);
+  cible.replaceChildren(f);
+}
+
 function dessinerTexte(t: HTMLElement, segments: Opts[]) {
   // Comme Tk : la vue garde sa position (un Text ne suit jamais tout seul les insertions ; see("end") le fait).
   const haut = t.scrollTop;
@@ -1580,7 +1627,7 @@ function dessinerTexte(t: HTMLElement, segments: Opts[]) {
     return j && j !== "left" ? j : "";
   };
   if (!sgs.some((sg) => justif(sg.style))) {
-    t.replaceChildren(...(sgs.map((sg) => (sg.widget !== undefined || sg.image !== undefined ? morceauIntegre(sg) : morceauTexte(texte(sg.texte), (sg.style as Opts) ?? null))).filter(Boolean) as Node[]));
+    remplacerEnfants(t, sgs.map((sg) => (sg.widget !== undefined || sg.image !== undefined ? morceauIntegre(sg) : morceauTexte(texte(sg.texte), (sg.style as Opts) ?? null))).filter(Boolean) as Node[]);
   } else {
     // justify : par ligne logique, selon le tag du premier caractère visible ; la ligne devient un bloc aligné.
     const noeuds: Node[] = [];
@@ -1592,7 +1639,7 @@ function dessinerTexte(t: HTMLElement, segments: Opts[]) {
         const b = el("span");
         b.style.display = "block";
         b.style.textAlign = jl;
-        b.append(...ligne);
+        for (const n of ligne) b.appendChild(n);
         noeuds.push(b);
       } else noeuds.push(...ligne);
       ligne = [];
@@ -1622,7 +1669,7 @@ function dessinerTexte(t: HTMLElement, segments: Opts[]) {
       });
     }
     if (ligne.length) fermer();
-    t.replaceChildren(...noeuds);
+    remplacerEnfants(t, noeuds);
   }
   t.scrollTop = Math.min(haut, Math.max(0, t.scrollHeight - t.clientHeight));
   t.scrollLeft = gauche;
@@ -1711,7 +1758,7 @@ function dessinerArbre(w: Widget, a: Opts) {
     ordre.push(tr);
   }
   const actuelles = [...tbody.rows];
-  if (actuelles.length !== ordre.length || actuelles.some((r, i) => r !== ordre[i])) tbody.replaceChildren(...ordre);
+  if (actuelles.length !== ordre.length || actuelles.some((r, i) => r !== ordre[i])) remplacerEnfants(tbody, ordre);
   w.lignesArbre = nouvelles;
   w.opts.largeurArbre = total;
   w.opts.hauteurLigne = hl;
@@ -1830,10 +1877,21 @@ function geometrie(id: number, gestion: Gestion | null, opts: Opts) {
   if (!w || !w.parent) return;
   if (w.parent.type === "notebook") return; // les pages sont affichées par le Notebook
   const ancienParent = w.parent;
+  const avant = w.geo;
   w.geo = gestion ? { gestion, opts, ordre: w.geo?.gestion === gestion && gestion === "pack" && !opts.nouveau ? w.geo.ordre : ++ordrePack } : null;
   if (gestion === "pack" && (opts.avant !== undefined || opts.apres !== undefined)) {
     const ref = widgets.get(nb(opts.avant ?? opts.apres));
     if (ref?.geo) w.geo!.ordre = ref.geo.ordre + (opts.avant !== undefined ? -0.5 : 0.5);
+  }
+  // Re-placer / re-ranger un widget déjà en place ne doit détacher aucun frère : un nœud retiré du document
+  // entre mousedown et mouseup perd son click (Button, Checkbutton, onglet) et son glissé (Scale).
+  if (gestion && avant?.gestion === gestion && ancienParent.contenu.contains(w.el)) {
+    if (gestion === "place") {
+      disposerPlace(ancienParent, w, new Map([[w, w.el.style.zIndex]]));
+      return;
+    }
+    const sans = (o: Opts) => JSON.stringify({ ...o, nouveau: undefined });
+    if (!opts.nouveau && sans(avant.opts) === sans(opts)) return; // pack() / grid() identique : rien à re-ranger
   }
   if (!gestion) w.el.remove();
   demanderDisposition(ancienParent);
@@ -1855,9 +1913,11 @@ function disposer(c: Widget) {
   const pack = vivants.filter((e) => e.geo!.gestion === "pack").sort((a, b) => a.geo!.ordre - b.geo!.ordre);
   const grid = vivants.filter((e) => e.geo!.gestion === "grid");
   const place = vivants.filter((e) => e.geo!.gestion === "place");
-  for (const n of [...c.contenu.children]) if ((n as HTMLElement).classList.contains("tk-cavite") || (n as HTMLElement).classList.contains("tk-grille") || (n as HTMLElement).dataset.tkid) n.remove();
+  const places = new Set<Element>(place.map((p) => p.el));
+  for (const n of [...c.contenu.children]) if (!places.has(n) && ((n as HTMLElement).classList.contains("tk-cavite") || (n as HTMLElement).classList.contains("tk-grille") || (n as HTMLElement).dataset.tkid)) n.remove();
   if (c.type === "notebook") {
     for (const k of vivants) {
+      libererPlace(k);
       k.el.style.gridArea = "1 / 1";
       k.el.style.position = "relative";
       k.etire = { x: true, y: true };
@@ -1894,6 +1954,12 @@ function interne(k: Widget) {
   }
 }
 
+/** Retire le placement absolu laissé par place() ou create_window quand le widget change de gestionnaire. */
+function libererPlace(k: Widget) {
+  const s = k.el.style;
+  s.position = s.left = s.top = s.transform = "";
+}
+
 function disposerPack(c: Widget, kids: Widget[], z: Map<Widget, string>) {
   let cavite = el("div", "tk-cavite");
   c.contenu.appendChild(cavite);
@@ -1907,6 +1973,7 @@ function disposerPack(c: Widget, kids: Widget[], z: Map<Widget, string>) {
     const parcelle = el("div", "tk-parcelle");
     parcelle.style.zIndex = z.get(k) ?? "";
     k.el.style.zIndex = "";
+    libererPlace(k);
     // Comme Tk : la parcelle garde sa taille demandée ; « expand » ne lui donne que l'espace en plus.
     parcelle.style.flex = expand ? "1 1 auto" : "0 0 auto";
     const [pl, pr] = pad(o.padx);
@@ -1943,6 +2010,10 @@ function disposerGrille(c: Widget, kids: Widget[], z: Map<Widget, string>) {
     nbCol = Math.max(nbCol, nb(o.column) + Math.max(1, nb(o.columnspan, 1)));
     nbLig = Math.max(nbLig, nb(o.row) + Math.max(1, nb(o.rowspan, 1)));
   }
+  // Comme Tk : une ligne / colonne configurée (weight ou minsize non nul) existe même sans widget.
+  const configurees = (m: Map<number, Opts>) => Math.max(0, ...[...m].filter(([, o]) => nb(o.weight) > 0 || nb(o.minsize) > 0).map(([i]) => i + 1));
+  nbCol = Math.max(nbCol, configurees(c.colonnes));
+  nbLig = Math.max(nbLig, configurees(c.lignes));
   const piste = (conf: Opts | undefined) => {
     const poids = nb(conf?.weight);
     const min = nb(conf?.minsize);
@@ -1960,6 +2031,7 @@ function disposerGrille(c: Widget, kids: Widget[], z: Map<Widget, string>) {
     const cell = el("div", "tk-cellule");
     cell.style.zIndex = z.get(k) ?? "";
     k.el.style.zIndex = "";
+    libererPlace(k);
     cell.style.gridColumn = `${nb(o.column) + 1} / span ${Math.max(1, nb(o.columnspan, 1))}`;
     cell.style.gridRow = `${nb(o.row) + 1} / span ${Math.max(1, nb(o.rowspan, 1))}`;
     const [pl, pr] = pad(o.padx);
@@ -1998,7 +2070,7 @@ function disposerPlace(c: Widget, k: Widget, z: Map<Widget, string>) {
   s.transform = tx === "0" && ty === "0" ? "" : `translate(${tx}, ${ty})`;
   k.etire = { x: false, y: false };
   c.contenu.style.position = "relative";
-  c.contenu.appendChild(k.el);
+  if (k.el.parentElement !== c.contenu) c.contenu.appendChild(k.el);
   if (k.type === "frame" || k.type === "labelframe") tailleCadre(k);
 }
 
@@ -2239,7 +2311,12 @@ function dessinerItem(c: CanvasEtat, w: Widget, item: number, kind: string, coor
     e.style.display = o.state === "hidden" ? "none" : "";
   } else if (kind === "window") {
     const cible = widgets.get(nb(o.widget));
+    const ancien = c.fenetres.get(item);
+    if (ancien !== undefined && ancien !== cible?.id) libererFenetreCanvas(c, item);
     if (cible) {
+      const cache = o.state === "hidden";
+      cible.el.style.visibility = cache ? "hidden" : "";
+      cible.el.inert = cache; // ni clic ni focus clavier dans le widget caché
       c.fenetres.set(item, cible.id);
       cible.dansCanvas = w.id;
       const [x, y] = coords;
@@ -2260,10 +2337,23 @@ function dessinerItem(c: CanvasEtat, w: Widget, item: number, kind: string, coor
       if (h > 0) s.height = `${h}px`;
       if (cible.type === "frame" || cible.type === "labelframe") tailleCadre(cible);
       else appliquerTaille(cible);
-      w.el.appendChild(cible.el);
+      if (cible.el.parentElement !== w.el) w.el.appendChild(cible.el);
     }
   }
   if (nouveau) c.svg.appendChild(e);
+}
+
+/** Élément « window » retiré (delete, ou window= remplacé) : le widget quitte le canvas, visible à nouveau. */
+function libererFenetreCanvas(c: CanvasEtat, item: number) {
+  const cw = widgets.get(c.fenetres.get(item) ?? -1);
+  if (cw) {
+    cw.tailleCanvas = undefined;
+    cw.dansCanvas = undefined;
+    cw.el.style.visibility = "";
+    cw.el.inert = false;
+    cw.el.remove();
+  }
+  c.fenetres.delete(item);
 }
 
 function operationCanvas(w: Widget, op: unknown[]) {
@@ -2273,16 +2363,7 @@ function operationCanvas(w: Widget, op: unknown[]) {
   else if (nom === "suppr") {
     c.items.get(item)?.remove();
     c.items.delete(item);
-    const wid = c.fenetres.get(item);
-    if (wid !== undefined) {
-      const cw = widgets.get(wid);
-      if (cw) {
-        cw.tailleCanvas = undefined;
-        cw.dansCanvas = undefined;
-        cw.el.remove();
-      }
-      c.fenetres.delete(item);
-    }
+    libererFenetreCanvas(c, item);
   } else if (nom === "haut") {
     const e = c.items.get(item);
     if (e) c.svg.appendChild(e);
@@ -2305,6 +2386,20 @@ function operationCanvas(w: Widget, op: unknown[]) {
   }
 }
 
+/** Numéro du tour du navigateur (change dès que le JavaScript en cours, programme Python compris, a rendu la main). */
+let tourNavigateur = 0;
+let finDeTourPrevue = false;
+function tourActuel(): number {
+  if (!finDeTourPrevue) {
+    finDeTourPrevue = true;
+    queueMicrotask(() => {
+      tourNavigateur++;
+      finDeTourPrevue = false;
+    });
+  }
+  return tourNavigateur;
+}
+
 function dessin(id: number, ops: unknown[][]) {
   const w = widgets.get(id);
   if (!w?.canvas) return;
@@ -2313,12 +2408,19 @@ function dessin(id: number, ops: unknown[][]) {
     for (const op of ops) operationCanvas(w, op);
     return;
   }
+  // Opérations d'un tour plus récent (rappel ontimer/onkey d'un jeu) alors que la file n'est pas vide : ce qui
+  // attend est dessiné d'un coup à l'image suivante, sinon le retard d'affichage croîtrait sans limite. Un dessin
+  // envoyé en une fois par le programme reste animé à la vitesse demandée.
+  const tour = tourActuel();
+  if (c.file.length && c.tourFile !== tour) c.limite = c.file.length;
+  c.tourFile = tour;
   c.file.push(...ops);
   if (c.enCours) return;
   c.enCours = true;
   const pas = () => {
     if (w.detruit) return;
-    const n = Math.max(1, c.anime || c.file.length);
+    const n = Math.max(1, c.anime || c.file.length, c.limite ?? 0);
+    c.limite = 0;
     for (const op of c.file.splice(0, n)) operationCanvas(w, op);
     if (c.file.length) requestAnimationFrame(pas);
     else c.enCours = false;
@@ -2694,8 +2796,25 @@ function garder<T extends Record<string, unknown>>(o: T, sauf: string[]): T {
 export const moteurFenetres = garder({
   definirRappel(f: Rappel, jspi?: boolean, sonde?: ProxyPy) {
     rappel = f;
+    // Nouveau tkinter (Pyodide rechargé après une panne) : les rappels endormis de l'ancien ne se réveilleront pas.
+    rappelsEndormis = 0;
+    fileTk.length = 0;
     suspensible = !!jspi && typeof f.callPromising === "function";
     sondePython = sonde ?? null;
+  },
+  /** after_cancel / destruction : la minuterie peut déjà attendre dans la file (rappel endormi). */
+  annulerMinuterie(id: number) {
+    window.clearTimeout(id);
+    const i = fileTk.findIndex((f) => (f as { minuterie?: number }).minuterie === id);
+    if (i >= 0) fileTk.splice(i, 1);
+  },
+  /** Un rappel Python entre (+1) ou sort (-1) d'un time.sleep() : voir rappelsEndormis. */
+  occupe(delta: number) {
+    rappelsEndormis = Math.max(0, rappelsEndormis + delta);
+    if (rappelsEndormis === 0 && fileTk.length && !vidageProgramme) {
+      vidageProgramme = true;
+      window.setTimeout(viderFileTk, 0);
+    }
   },
   /** Résultat d'un rappel Python (lu juste après un appel promettant). */
   retour(v: unknown) {
@@ -2703,7 +2822,7 @@ export const moteurFenetres = garder({
   },
   /** Minuterie (after) : la fonction Python est appelée en mode promettant si possible, puis libérée. */
   differer(fn: ProxyPy, ms: number): number {
-    return window.setTimeout(() => {
+    const tirer = () => {
       const liberer = () => {
         try {
           fn.destroy?.();
@@ -2729,7 +2848,12 @@ export const moteurFenetres = garder({
         console.error("[fenêtres]", e);
         liberer();
       }
+    };
+    const id: number = window.setTimeout(() => {
+      if (doitAttendre()) fileTk.push(Object.assign(() => tirer(), { minuterie: id }));
+      else tirer();
     }, Math.max(0, ms));
+    return id;
   },
   creerFenetre,
   creer,

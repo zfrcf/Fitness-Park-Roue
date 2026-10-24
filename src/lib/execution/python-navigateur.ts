@@ -467,6 +467,11 @@ export interface OptionsExecution {
    * Pour le bouton « Exécuter » d'un bloc de code ; la console garde volontairement son état.
    */
   neuf?: boolean;
+  /**
+   * Arrêt forcé de CETTE exécution (console fermée, comme SIGHUP) : ses saisies ne rendent plus jamais la
+   * main (aucun except ne peut l'intercepter) et le résultat est rendu tout de suite.
+   */
+  signal?: AbortSignal;
 }
 
 function resultat(morceaux: Morceau[]): ResultatExecution {
@@ -484,7 +489,7 @@ function finirExecution(py: Pyodide): void {
 
 /**
  * Exécute du code Python et renvoie sa sortie exacte (stdout, stderr, images). Charge les paquets
- * importés (distribution Pyodide, sinon PyPI) ; les commandes pip et « python fichier.py » sont
+ * importés de la distribution Pyodide (PyPI : pip explicite) ; les commandes pip et « python fichier.py » sont
  * traduites ; les fenêtres tkinter/turtle restent ouvertes et actives après la fin.
  */
 export async function executerPython(code: string, onProgres?: (etape: string) => void, options: OptionsExecution = {}): Promise<ResultatExecution> {
@@ -513,6 +518,19 @@ export async function executerPython(code: string, onProgres?: (etape: string) =
   oublierArretSansCible();
   pileSorties.push(active);
   signalerEtat();
+  options.signal?.addEventListener(
+    "abort",
+    () => {
+      // Saisies de cette exécution retirées SANS réponse : son Python reste suspendu pour toujours (tué).
+      for (const d of fileSaisies.filter((x) => x.proprietaire === active)) {
+        fileSaisies.splice(fileSaisies.indexOf(d), 1);
+        d.abandon.abort();
+      }
+      presenterSaisieSuivante();
+      abandonner(new Error("[programme arrêté : console fermée]"));
+    },
+    { once: true },
+  );
   if (options.sortieTardive) {
     sortieTardive = options.sortieTardive;
     tardives.set(active.id, options.sortieTardive);
@@ -522,7 +540,7 @@ export async function executerPython(code: string, onProgres?: (etape: string) =
   synchroniserProjet(py);
   const { code: codeExec, pip } = transformerCommandes(code);
   try {
-    if (options.neuf) py.runPython("import atelier_run\natelier_run._repartir_a_neuf()");
+    if (options.neuf) py.runPython(`import atelier_run\natelier_run._repartir_a_neuf(${active.id})`);
     if (pip) {
       onProgres?.("Installation des paquets…");
       await preparerPip(py);

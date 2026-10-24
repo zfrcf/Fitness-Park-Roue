@@ -85,8 +85,10 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   Testé en CPython avec un faux micropip (`pip-console.test.ts`). Fichiers : `projet-console.ts` — la fenêtre de
   chat publie les fichiers du projet, copiés dans `/home/pyodide` (+ bouton « Importer des fichiers »).
   **Programmes et interfaces** (`src/lib/execution/ui/`) : `python fichier.py` / `-c` / `-m` / `%run` → `atelier_run.lancer`
-  (`lanceur.ts` : cellules via `atelier_run.cellule` — sys.exit() propre —, modules manquants chargés/installés,
-  asyncio.run planifié). **Mode JSPI** (Chrome ≥ 137, `can_run_sync()`) : `mainloop()` attend vraiment la
+  (`lanceur.ts` : cellules via `atelier_run.cellule` — sys.exit() propre —, modules manquants chargés depuis la
+  distribution Pyodide seulement, **jamais d'installation PyPI automatique** (slopsquatting : PyPI uniquement par pip
+  explicite, suggéré à l'erreur d'import), asyncio.run / `loop.run_until_complete` / `asyncio.Runner` bloquants en
+  JSPI sur la boucle de la page). **Mode JSPI** (Chrome ≥ 137, `can_run_sync()`) : `mainloop()` attend vraiment la
   fermeture des fenêtres (ou `quit()`), `update()` / `time.sleep()` / `turtle.update()` rendent la main au navigateur
   (`run_sync`), les rappels (événements, `after`) sont lancés en appel « promettant » (`callPromising`, résultat
   synchrone déposé par `moteurFenetres.retour`), `wait_window` / `wait_variable` / `simpledialog.Dialog` bloquent,
@@ -111,6 +113,19 @@ Next.js 16 App Router (TypeScript), Tailwind v4, shadcn/ui (Base UI, prop `rende
   Notebook : toutes les pages empilées (taille = la plus grande), pages externes (`Frame(root)`) rattachées.
   `update()` lève TclError une fois la racine détruite. Logique Python testée en CPython avec un faux navigateur :
   `tkinter-cpython.test.ts`.
+  **File de Tk en JSPI** : un RAPPEL endormi dans time.sleep (`_ui.occupe(±1)`, `_dans_rappel()` de tk-noyau) met
+  événements et minuteries en file FIFO (`fileTk`, vidée à la fin du rappel ou au prochain update()) au lieu de lancer
+  un rappel entrelacé ; `after_cancel` passe par `annulerMinuterie`. `threading.Lock` remplacé (`_Verrou`) : attente
+  coopérative en JSPI, erreur claire sinon (un verrou pris figerait l'onglet). Console fermée puis nouvelle saisie
+  (EOF ignoré) → exécution tuée comme par SIGHUP (`signal` d'`executerPython`). « Exécuter » d'un bloc (`neuf`) ne
+  ferme que les fenêtres/figures des blocs précédents (`_blocs`, `root._execution`) ; `python x.py` ne ferme pas
+  celles des blocs. Sans JSPI, un programme fini fenêtres ouvertes garde son environnement (flux, sys.path, argv,
+  `__main__`) dans ses rappels (`_env_programmes`). Sans JSPI, garde-fous (`_surveiller_boucle`) : update() en
+  boucle (50 appels en plus de 3 s) ou 30 s sans rendre la main (turtle compris) → RuntimeError plutôt qu'un onglet
+  figé ; la file d'animation du Canvas est vidée d'un coup quand un tour plus récent (rappel ontimer) l'alimente.
+  Sortie bornée (`morceaux.ts` : 200 000 caractères par flux, début masqué) et une mise à jour React par image
+  (`tamponMorceaux`). Connexion / déconnexion = rechargement complet de la page (Pyodide et fenêtres du compte
+  précédent détruits). Limite connue : « Arrêter » vise toutes les exécutions.
   Fichiers .py : bouton « ▶ Lancer » de l'explorateur → événement `atelier:lancer-python` → console.
 - Bons/mauvais points + mémoire de leçons (`src/lib/comptes/lecons.ts` pur/testé, table `lecons`,
   `src/lib/db/lecons.ts`, API `/api/retours`, UI `bouton-retour.tsx` + store `retours.ts`) : 👍/👎 avec note sur

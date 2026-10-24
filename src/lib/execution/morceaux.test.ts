@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ajouterMorceau, avecMorceau, dernierTexte, grouperMorceaux, imagesDe, texteDuFlux, type Morceau } from "./morceaux";
+import { describe, expect, it, vi } from "vitest";
+import { ajouterMorceau, avecMorceau, avecMorceaux, dernierTexte, grouperMorceaux, imagesDe, MARQUE_MASQUE, MAX_MORCEAUX, MAX_TEXTE, tamponMorceaux, texteDuFlux, type Morceau } from "./morceaux";
 
 describe("ajouterMorceau", () => {
   it("garde l'ordre exact des textes, erreurs et images", () => {
@@ -73,5 +73,47 @@ describe("grouperMorceaux", () => {
     expect(r.groupes).toHaveLength(1);
     expect("textes" in r.groupes[0] && r.groupes[0].textes.map((t) => t.texte)).toEqual(["s6", "e7", "s8", "e9"]);
     expect(grouperMorceaux(l, 10).tronque).toBe(false);
+  });
+});
+
+describe("mémoire bornée (programme qui affiche sans fin)", () => {
+  it("garde la fin du texte, marque le début masqué, à coût amorti", () => {
+    const l: Morceau[] = [];
+    for (let i = 0; i < 60_000; i++) ajouterMorceau(l, { texte: `ligne ${i}\n` });
+    const t = texteDuFlux(l);
+    expect(t.length).toBeLessThanOrEqual(2 * MAX_TEXTE + MARQUE_MASQUE.length);
+    expect(t.startsWith(MARQUE_MASQUE)).toBe(true);
+    expect(t.endsWith("ligne 59999\n")).toBe(true);
+    expect(t.slice(MARQUE_MASQUE.length).startsWith("ligne ")).toBe(true); // coupé à une fin de ligne
+  });
+  it("borne le nombre de morceaux quand sortie et erreurs alternent", () => {
+    const l: Morceau[] = [];
+    for (let i = 0; i < 5 * MAX_MORCEAUX; i++) ajouterMorceau(l, i % 2 ? { texte: "e", erreur: true } : { texte: "s" });
+    expect(l.length).toBeLessThanOrEqual(2 * MAX_MORCEAUX);
+    expect(l[0]).toEqual({ texte: MARQUE_MASQUE });
+    expect(l[l.length - 1]).toEqual({ texte: "e", erreur: true });
+  });
+});
+
+describe("tamponMorceaux", () => {
+  it("une rafale d'écritures donne une seule mise à jour, abandonner oublie l'attente", () => {
+    vi.useFakeTimers();
+    try {
+      const recus: Morceau[][] = [];
+      const t = tamponMorceaux((ms) => recus.push(ms));
+      for (let i = 0; i < 1000; i++) t.ajouter({ texte: "x" });
+      t.ajouter({ image: "i" });
+      vi.advanceTimersByTime(20);
+      expect(recus).toEqual([[{ texte: "x".repeat(1000) }, { image: "i" }]]);
+      t.ajouter({ texte: "perdu" });
+      t.abandonner();
+      vi.advanceTimersByTime(20);
+      t.ajouter({ texte: "tardif" });
+      vi.advanceTimersByTime(20);
+      expect(recus.slice(1)).toEqual([[{ texte: "tardif" }]]);
+      expect(avecMorceaux([{ texte: "a" }], [{ texte: "b" }, { image: "i" }])).toEqual([{ texte: "ab" }, { image: "i" }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

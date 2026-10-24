@@ -60,14 +60,40 @@ def _ident():
     return _execution.get()
 
 
+# Programme lancé (python x.py) terminé fenêtres ouvertes (sans JSPI, mainloop() rend la main) : ses rappels
+# retrouvent son environnement (flux, sys.path, argv, module __main__), la console garde le sien.
+_env_programmes = {}  # ident de l'exécution → environnement du programme
+
+
+def _echanger_env(env):
+    avant = {"argv": sys.argv, "path": sys.path[:], "flux": (sys.stdin, sys.stdout, sys.stderr),
+             "main": sys.modules.get("__main__")}
+    sys.argv = env["argv"]
+    sys.path[:] = env["path"]
+    sys.stdin, sys.stdout, sys.stderr = env["flux"]
+    if env["main"] is not None:
+        sys.modules["__main__"] = env["main"]
+    return avant
+
+
 def dans_execution(ident, fn, *args):
     """Appelle fn(*args) au nom de l'exécution « ident » (rappel de fenêtre, minuterie, relevé par _ident()
     à la création) : sa sortie, ses images et ses saisies vont à cette exécution, même si une autre a
     démarré depuis. Contexte copié à chaque appel : aucun effet sur l'appelant, rappels imbriqués permis."""
+    env = _env_programmes.get(ident)
 
     def _appel():
         _execution.set(ident)
-        return fn(*args)
+        if env is None or env.get("actif"):
+            return fn(*args)
+        env["actif"] = True
+        console = _echanger_env(env)
+        try:
+            return fn(*args)
+        finally:
+            _vider_flux()
+            env.update(_echanger_env(console))  # le rappel a pu changer sys.stdout, sys.path…
+            env["actif"] = False
 
     return contextvars.copy_context().run(_appel)
 
@@ -435,9 +461,15 @@ def _sleep(secondes):
         compteur = getattr(tk, "_dans_ceder", None)
         if compteur is not None:
             compteur[0] += 1
+        # Dans un rappel tkinter (commande, bind, after) : comme Tk, les événements attendent la fin du sommeil.
+        dans_rappel = bool(getattr(tk, "_dans_rappel", lambda: False)())
+        if dans_rappel:
+            _ui.occupe(1)
         try:
             _attendre(_ui.dormir(s * 1000))
         finally:
+            if dans_rappel:
+                _ui.occupe(-1)
             if compteur is not None:
                 compteur[0] -= 1
         relancer = getattr(tk, "_relancer_sortie", None)
@@ -454,6 +486,62 @@ def _sleep(secondes):
 
 
 time.sleep = _sleep
+
+# ─── threading.Lock : pas de fils d'exécution dans le navigateur ───
+# Un acquire() bloquant sur un verrou déjà pris tournerait sans fin et figerait tout l'onglet (le rappel ou
+# le programme qui le tient ne peut plus reprendre). Avec JSPI, l'attente rend la main à la page (le
+# détenteur finit et relâche le verrou ; « Arrêter » l'interrompt) ; sinon, erreur claire plutôt qu'un gel.
+
+import _thread
+import threading
+
+
+class _Verrou:
+    __slots__ = ("_v", "__weakref__")
+
+    def __init__(self):
+        self._v = _thread.allocate_lock()
+
+    def acquire(self, blocking=True, timeout=-1):
+        if not blocking and timeout != -1:
+            raise ValueError("can't specify a timeout for a non-blocking call")
+        if timeout is not None and timeout < 0 and timeout != -1:
+            raise ValueError("timeout value must be a non-negative number")
+        if self._v.acquire(False):
+            return True
+        if not blocking:
+            return False
+        if not _peut_attendre():
+            if timeout == -1:
+                raise RuntimeError(
+                    "interblocage : ce verrou est déjà pris et rien ne peut le relâcher "
+                    "(pas de fils d'exécution dans le navigateur)"
+                )
+            return self._v.acquire(True, timeout)
+        fin = None if timeout == -1 else time.monotonic() + timeout
+        while not self._v.acquire(False):
+            if fin is not None and time.monotonic() >= fin:
+                return False
+            _attendre(_ui.dormir(10))
+        return True
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, *exc):
+        self._v.release()
+
+    def release(self):
+        self._v.release()
+
+    def locked(self):
+        return self._v.locked()
+
+    def _at_fork_reinit(self):
+        self._v._at_fork_reinit()
+
+
+threading.Lock = _Verrou
 
 # ─── asyncio : la page a déjà une boucle d'événements ───
 
@@ -484,10 +572,10 @@ def interrompre():
     _annuler_taches(lambda t: getattr(t, "_fut_waiter", None) is not None and _contexte(t).get(_execution) is not None)
 
 
-def _run_bloquant(main):
+def _run_bloquant(main, annuler_restantes=True):
     """asyncio.run() avec JSPI : bloque jusqu'à la fin de main(), renvoie sa valeur ou propage son exception,
     comme CPython. « Arrêter » annule main (CancelledError) puis lève KeyboardInterrupt ; les tâches créées
-    par main et encore en cours à la fin sont annulées."""
+    par main et encore en cours à la fin sont annulées (sauf pour run_until_complete, comme CPython)."""
     from pyodide.ffi import run_sync
 
     jeton = object()
@@ -512,7 +600,9 @@ def _run_bloquant(main):
     finally:
         # Comme CPython : les tâches créées par main et encore en cours sont annulées, et leur nettoyage
         # (except CancelledError, finally) a lieu avant le retour (attente bornée à 1 s).
-        restantes = _annuler_taches(lambda t: t is not tache and _contexte(t).get(_jeton_run) is jeton)
+        restantes = (
+            _annuler_taches(lambda t: t is not tache and _contexte(t).get(_jeton_run) is jeton) if annuler_restantes else []
+        )
         if restantes:
             try:
                 run_sync(asyncio.wait(restantes, timeout=1.0))
@@ -555,6 +645,66 @@ def _run(main, *, debug=None, loop_factory=None):
 
 asyncio.run = _run
 
+try:
+    from pyodide.webloop import WebLoop as _WebLoop
+except ImportError:
+    _WebLoop = None
+
+if _WebLoop is not None and not getattr(_WebLoop.run_until_complete, "_atelier", False):
+    _ruc_pyodide = _WebLoop.run_until_complete
+
+    def _run_until_complete(self, future):
+        # CPython bloque jusqu'au résultat ; la boucle de Pyodide renverrait une tâche encore en cours.
+        # Contrairement à asyncio.run, les autres tâches ne sont pas annulées à la fin.
+        if _peut_attendre():
+            return _run_bloquant(future, annuler_restantes=False)
+        print(
+            "Avertissement : sans JSPI (navigateur autre que Chrome récent), loop.run_until_complete() ne peut "
+            "pas attendre ; la coroutine tourne en arrière-plan et l'appel renvoie une tâche, pas son résultat.",
+            file=sys.stderr,
+        )
+        return _ruc_pyodide(self, future)
+
+    _run_until_complete._atelier = True
+    _WebLoop.run_until_complete = _run_until_complete
+
+if hasattr(asyncio, "Runner") and not getattr(asyncio.Runner, "_atelier", False):
+
+    class _Runner(asyncio.Runner):
+        """with asyncio.Runner() as r: r.run(main()) — la boucle de la page tourne déjà : même attente que
+        asyncio.run (JSPI) au lieu de « cannot be called from a running event loop »."""
+
+        _atelier = True
+
+        def _sur_la_page(self):
+            return self._loop_factory is None and _peut_attendre()
+
+        def _lazy_init(self):
+            # Pas de nouvelle boucle (elle remplacerait celle de la page) : celle de la page sert.
+            if not self._sur_la_page() or self._state is not asyncio.runners._State.CREATED:
+                return super()._lazy_init()
+            self._loop = asyncio.get_event_loop()
+            self._page = True
+            self._context = contextvars.copy_context()
+            self._state = asyncio.runners._State.INITIALIZED
+
+        def run(self, coro, *, context=None):
+            if not self._sur_la_page():
+                return super().run(coro, context=context)
+            if not asyncio.iscoroutine(coro):
+                raise ValueError(f"a coroutine was expected, got {coro!r}")
+            self._lazy_init()
+            return _run_bloquant(coro, annuler_restantes=False)
+
+        def close(self):
+            if getattr(self, "_page", False):
+                self._loop = None
+                self._state = asyncio.runners._State.CLOSED
+                return
+            super().close()
+
+    asyncio.Runner = asyncio.runners.Runner = _Runner
+
 # ─── matplotlib : images dans le terminal ───
 
 os.environ.setdefault("MPLBACKEND", "module://atelier_mpl")
@@ -588,7 +738,7 @@ if not any(isinstance(f, _Cales) for f in sys.meta_path):
     sys.meta_path.insert(0, _Cales())
 
 
-# ─── Modules manquants : chargés depuis Pyodide, sinon installés depuis PyPI ───
+# ─── Modules manquants : chargés depuis la distribution Pyodide (PyPI seulement via pip) ───
 
 
 def _locaux():
@@ -621,10 +771,23 @@ def _imports(sources):
     return noms
 
 
+def _modules_du_projet():
+    noms = set()
+    for f in _fichiers_python():
+        noms.update(p for p in os.path.splitext(f)[0].split(os.sep) if p not in ("", ".", ".."))
+    return noms
+
+
 async def preparer_imports(*sources):
-    """Charge les paquets importés par le code : distribution Pyodide d'abord, PyPI ensuite (micropip)."""
-    noms = _imports(sources) - _locaux() - set(sys.builtin_module_names)
-    manquants = sorted(n for n in noms if n and importlib.util.find_spec(n) is None)
+    """Charge les paquets de la distribution Pyodide importés par le code.
+
+    Jamais d'installation automatique depuis PyPI : un nom importé (souvent un module local, ou un
+    paquet inventé par l'IA) pourrait y être déposé par n'importe qui et s'exécuterait sur l'origine
+    de la page. PyPI passe uniquement par une commande pip explicite (suggérée à l'erreur d'import)."""
+    noms = _imports(sources) - set(sys.builtin_module_names)
+    manquants = {n for n in noms if n and importlib.util.find_spec(n) is None}
+    if manquants:
+        manquants = sorted(manquants - _locaux() - _modules_du_projet())
     if not manquants:
         return
     import pyodide_js
@@ -634,40 +797,6 @@ async def preparer_imports(*sources):
     except Exception:
         pass
     importlib.invalidate_caches()
-    encore = [n for n in manquants if importlib.util.find_spec(n) is None]
-    if not encore:
-        return
-    try:
-        await pyodide_js.loadPackage("micropip")
-        import micropip
-    except Exception:
-        return
-    for n in encore:
-        paquet = PAQUETS.get(n, n)
-        try:
-            await micropip.install(paquet)
-        except Exception as e:
-            print(f"(module « {n} » : installation automatique de « {paquet} » impossible — {_raison_echec(e)})", file=sys.stderr)
-            continue
-        importlib.invalidate_caches()
-        # « installé » seulement si le module s'importe vraiment (un paquet peut s'installer sans fournir ce nom).
-        try:
-            importlib.import_module(n)
-        except (Exception, SystemExit) as e:
-            detail = f"{type(e).__name__}: {e}".strip().splitlines()[0][:200]
-            print(f"(module « {n} » : le paquet « {paquet} » s'est installé mais « import {n} » échoue — {detail})", file=sys.stderr)
-        else:
-            print(f"(module « {n} » installé automatiquement : {paquet})")
-    importlib.invalidate_caches()
-
-
-def _raison_echec(e):
-    texte = str(e).strip()
-    if "pure Python 3 wheel" in texte or "pure python 3 wheel" in texte.lower():
-        return "il contient du code compilé (C, Rust…) sans version pour le navigateur"
-    if "Can't fetch metadata" in texte or "No matching distribution" in texte or "404" in texte:
-        return "paquet introuvable sur PyPI (ou réseau indisponible)"
-    return (texte.splitlines()[0] if texte else type(e).__name__)[:200]
 
 
 # ─── Lancement ───
@@ -710,15 +839,22 @@ def _oublier_modules_du_projet():
             sys.modules.pop(nom, None)
 
 
-def _fermer_fenetres_precedentes():
+_blocs = set()  # exécutions lancées par le bouton « Exécuter » d'un bloc du chat (option « neuf »)
+
+
+def _fermer_fenetres_precedentes(choisir=None):
+    """Ferme les fenêtres (tkinter, turtle) des exécutions retenues par choisir(ident) — toutes sans filtre."""
+    for ident in list(_env_programmes):
+        if choisir is None or choisir(ident):
+            del _env_programmes[ident]
     if "turtle" in sys.modules:
         try:
-            sys.modules["turtle"]._reinitialiser()
+            sys.modules["turtle"]._reinitialiser(choisir)
         except Exception:
             pass
     if "tkinter" in sys.modules:
         try:
-            sys.modules["tkinter"]._tout_detruire()
+            sys.modules["tkinter"]._tout_detruire(choisir)
         except Exception:
             pass
 
@@ -745,14 +881,23 @@ def _retablir_dossier():
             pass
 
 
-def _repartir_a_neuf():
-    """Bouton « Exécuter » d'un bloc de code : repart d'un état propre (fenêtres, tortue, figures, dossier)."""
+def _repartir_a_neuf(ident=None):
+    """Bouton « Exécuter » d'un bloc de code : repart d'un état propre (fenêtres, tortue, figures, dossier).
+    Seul ce qu'ont ouvert les blocs précédents est fermé : un programme de la console continue (comme deux
+    processus distincts)."""
+    choisir = _blocs.__contains__
     _retablir_dossier()
-    _fermer_fenetres_precedentes()
+    _fermer_fenetres_precedentes(choisir)
+    if ident is not None:
+        _blocs.add(ident)
     plt = sys.modules.get("matplotlib.pyplot")
     if plt is not None:
         try:
-            plt.close("all")
+            from matplotlib._pylab_helpers import Gcf
+
+            for n, m in list(Gcf.figs.items()):
+                if choisir(getattr(m.canvas.figure, "_atelier_execution", None)):
+                    plt.close(n)
         except Exception:
             pass
 
@@ -843,6 +988,19 @@ if hasattr(runpy, "_ModifiedArgv0") and not getattr(runpy._ModifiedArgv0, "_atel
 
     runpy._ModifiedArgv0 = _Argv0
 
+_main_programme = [None]  # module __main__ temporaire de runpy (pickle, shelve le cherchent dans sys.modules)
+if hasattr(runpy, "_TempModule") and not getattr(runpy._TempModule, "_atelier", False):
+
+    class _ModuleTemp(runpy._TempModule):
+        _atelier = True
+
+        def __enter__(self):
+            if self.mod_name == "__main__":
+                _main_programme[0] = self.module
+            return super().__enter__()
+
+    runpy._TempModule = _ModuleTemp
+
 
 def _afficher_erreur():
     exc, val, tb = sys.exc_info()
@@ -897,7 +1055,7 @@ async def lancer(ligne=""):
         chemin = _trouver_script(script)
         if chemin is None:
             return
-    _fermer_fenetres_precedentes()
+    _fermer_fenetres_precedentes(lambda i: i not in _blocs)  # pas celles d'un bloc « Exécuter » du chat
     _oublier_modules_du_projet()
     sources = []
     if code is not None:
@@ -939,10 +1097,15 @@ async def lancer(ligne=""):
     except BaseException:
         _afficher_erreur()
     finally:
+        _vider_flux()
+        programme = {"argv": sys.argv, "path": sys.path[:], "flux": (sys.stdin, sys.stdout, sys.stderr),
+                     "main": _main_programme[0]}
+        _main_programme[0] = None
         sys.argv = ancien_argv
         sys.path[:] = ancien_path
-        _vider_flux()
         sys.stdin, sys.stdout, sys.stderr = anciens_flux
+        if _fenetres_ouvertes():
+            _env_programmes[_ident()] = programme
         try:
             change = os.getcwd() != ancien_cwd
         except OSError:
@@ -1019,6 +1182,12 @@ def vider():
 
 
 class FigureCanvasAtelier(FigureCanvasAgg):
+    def __init__(self, figure=None):
+        super().__init__(figure)
+        lanceur = sys.modules.get("atelier_run")
+        # Exécution qui a créé la figure : « Exécuter » d'un bloc ne ferme que les figures des blocs précédents.
+        self.figure._atelier_execution = lanceur._ident() if hasattr(lanceur, "_ident") else None
+
     def draw_idle(self, *args, **kwargs):
         """Rien à redessiner « plus tard » : l'image est rendue au moment où elle s'affiche (show, pause, fin)."""
 

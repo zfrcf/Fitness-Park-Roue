@@ -4,7 +4,7 @@ import { Loader2, Play, Square, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SortieOrdonnee } from "@/components/chat/console-python";
-import { avecMorceau } from "@/lib/execution/morceaux";
+import { avecMorceaux, tamponMorceaux } from "@/lib/execution/morceaux";
 import { arreterExecution, executerPython, type Morceau } from "@/lib/execution/python-navigateur";
 
 /**
@@ -19,15 +19,14 @@ export function ExecuterPython({ code }: { code: string }) {
   const [etape, setEtape] = useState("");
   const [morceaux, setMorceaux] = useState<Morceau[]>([]);
 
-  function ajouter(m: Morceau) {
-    setMorceaux((l) => avecMorceau(l, m));
-  }
-
   async function lancer() {
     setEtat("charge");
     setMorceaux([]);
+    // Une mise à jour d'état par image au plus, pas une par print.
+    const tampon = tamponMorceaux((ms) => setMorceaux((l) => avecMorceaux(l, ms)));
     try {
-      const r = await executerPython(code, setEtape, { sortieTardive: ajouter, enDirect: ajouter, neuf: true });
+      const r = await executerPython(code, setEtape, { sortieTardive: tampon.ajouter, enDirect: tampon.ajouter, neuf: true });
+      tampon.abandonner(); // déjà dans r.morceaux
       setMorceaux(r.morceaux);
     } catch (e) {
       setMorceaux((l) => [...l, { texte: e instanceof Error ? e.message : "Exécution impossible.", erreur: true }]);

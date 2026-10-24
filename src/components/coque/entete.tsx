@@ -2,7 +2,7 @@
 
 import { Activity, Home, ListChecks, LogOut, MessageSquare, Terminal, ThumbsDown, ThumbsUp, Users } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ReglagesDialogue } from "@/components/chat/reglages-dialogue";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -21,7 +21,6 @@ const LIENS = [
 
 export function Entete({ children, consoleOuverte, onBasculerConsole }: { children?: React.ReactNode; consoleOuverte?: boolean; onBasculerConsole?: () => void }) {
   const chemin = usePathname();
-  const routeur = useRouter();
   const moi = useMoi();
   const admin = moi?.utilisateur.admin ?? false;
   const q = moi?.quota;
@@ -29,8 +28,9 @@ export function Entete({ children, consoleOuverte, onBasculerConsole }: { childr
 
   async function deconnecter() {
     await fetch("/api/deconnexion", { method: "POST" });
-    routeur.replace("/connexion");
-    routeur.refresh();
+    // Rechargement complet, pas une navigation client : l'interpréteur Python, ses fenêtres tkinter et ses
+    // minuteries (données et rappels du compte qui part) ne doivent pas survivre au changement de compte.
+    window.location.replace(new URL("/connexion", window.location.origin));
   }
 
   return (

@@ -7,6 +7,7 @@
  */
 export const TURTLE = String.raw`
 """turtle pour la console Python du navigateur."""
+import copy
 import itertools
 import math
 import re
@@ -208,6 +209,13 @@ class TurtleScreen:
             return (llx + x * (urx - llx) / self._l, ury - y * (ury - lly) / self._h)
         return (x - self._l / 2, self._h / 2 - y)
 
+    def _echelles(self):
+        """Pixels par unité du monde (x, y) : 1 sans setworldcoordinates."""
+        if self._monde:
+            llx, lly, urx, ury = self._monde
+            return (self._l / (urx - llx), self._h / (ury - lly))
+        return (1.0, 1.0)
+
     def _regler_animation(self):
         """File d'animation du moteur (opérations dessinées par image), utilisée sans JSPI. Quand le programme
         peut attendre le navigateur (JSPI), c'est Python qui donne le rythme (_cadence) : chaque opération est
@@ -241,7 +249,19 @@ class TurtleScreen:
         « Arrêter », fermeture) puis le programme attend delay() ms ; avec tracer(n > 1), la page se redessine
         toutes les n mises à jour, sans attente. Python reste ainsi au rythme de l'affichage, et une boucle
         « while True: t.forward(…) » ne fige pas l'onglet. Sans JSPI, le moteur étale l'animation (file « anime »)."""
-        if self._tracer == 0 or not tkinter._peut_attendre():
+        if not tkinter._peut_attendre():
+            # Sans JSPI, une boucle « while True: t.forward(…) » ne rend jamais la main : arrêtée au bout de 30 s
+            # plutôt que de figer l'onglet pour toujours.
+            try:
+                tkinter._surveiller_boucle(appel=False)
+            except RuntimeError:
+                raise RuntimeError(
+                    "Programme arrêté après 30 s sans rendre la main : dans ce navigateur (sans JSPI), la fenêtre "
+                    "turtle ne se redessine qu'une fois le programme fini. Pour une animation sans fin, utilisez une "
+                    "fonction qui se reprogramme avec écran.ontimer(fonction, millisecondes), ou un Chrome récent."
+                ) from None
+            return
+        if self._tracer == 0:
             return
         if self._anime:
             self._anime = 0
@@ -549,6 +569,17 @@ _LECTURES = {"pencolor", "fillcolor", "color", "pensize", "pen"}  # sans argumen
 _ETAT_ANNUL = ("_x", "_y","_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_visible", "_remplit", "_rempl_premier")
 
 
+
+def _donnee_simple(v, n=0):
+    """Donnée copiable sans risque (pas de tortue, d'écran ni d'objet du navigateur à l'intérieur)."""
+    if isinstance(v, (int, float, complex, str, bytes, bool, type(None))):
+        return True
+    if n < 5 and isinstance(v, (list, tuple, set, frozenset)):
+        return all(_donnee_simple(x, n + 1) for x in v)
+    if n < 5 and isinstance(v, dict):
+        return all(_donnee_simple(k, n + 1) and _donnee_simple(x, n + 1) for k, x in v.items())
+    return False
+
 class RawTurtle:
     def __init__(self, canvas=None, shape="classic", undobuffersize=1000, visible=True):
         if isinstance(canvas, TurtleScreen):
@@ -649,15 +680,19 @@ class RawTurtle:
         forme = self.screen._formes.get(self._forme, _FORMES["classic"])
         if isinstance(forme, tuple) and forme and forme[0] == "image":
             return None
+        # Comme _polytrafo de CPython : la forme garde sa taille en pixels et pointe dans la direction visible,
+        # même quand setworldcoordinates étire le monde.
         a = math.radians(self._cap)
         e0, e1 = math.cos(a), math.sin(a)
+        xs, ys = self.screen._echelles()
+        n = math.hypot(e0, e1 * ys / xs) or 1.0
+        e0, e1 = e0 / n, e1 * ys / xs / n
+        cx, cy = self._c(self._x, self._y)
         sw, sl, _ = self._etirement
         pts = []
         for x, y in forme:
             x, y = x * sw, y * sl
-            wx = self._x + (e1 * x + e0 * y)
-            wy = self._y + (-e0 * x + e1 * y)
-            pts.extend(self._c(wx, wy))
+            pts.extend((cx + (e1 * x + e0 * y), cy - (-e0 * x + e1 * y)))
         return pts
 
     def _dessiner_curseur(self, force=False):
@@ -1130,6 +1165,10 @@ class RawTurtle:
         RawTurtle.__init__(t, self.screen, self._forme, self._annul_max, visible=self._visible)
         for k in ("_x", "_y", "_cap", "_baisse", "_crayon", "_remplissage", "_crayon_css", "_remplissage_css", "_epaisseur", "_vitesse", "_etirement", "_unite"):
             setattr(t, k, getattr(self, k))
+        # Comme le deepcopy de CPython : les attributs posés par le programme (dx, direction…) suivent le clone.
+        for k, v in self.__dict__.items():
+            if k not in t.__dict__:
+                t.__dict__[k] = copy.deepcopy(v) if _donnee_simple(v) else v
         t._dessiner_curseur(force=True)
         return t
 
@@ -1217,11 +1256,18 @@ def _tortue_defaut():
     return t
 
 
-def _reinitialiser():
-    """Nouveau lancement (lanceur) : la fenêtre turtle précédente se ferme, sans que le nouveau programme reçoive
-    le Terminator de cette fermeture."""
+_executions_fermees = set()  # programmes dont la fenêtre turtle a été fermée par le lancement d'un autre
+
+
+def _reinitialiser(choisir=None):
+    """Nouveau lancement (lanceur) : la fenêtre turtle précédente se ferme (si choisir(ident) la retient), sans
+    que le nouveau programme reçoive le Terminator de cette fermeture. Le programme qui l'avait ouverte, s'il
+    tourne encore (time.sleep, input), recevra Terminator au lieu de dessiner dans la fenêtre du nouveau."""
     e = _ecran[0]
-    if e is not None:
+    if e is not None and (choisir is None or choisir(getattr(e._root, "_execution", None))):
+        ident = getattr(e._root, "_execution", None)
+        if ident is not None:
+            _executions_fermees.add(ident)
         e.bye()
     TurtleScreen._RUNNING = True
 
@@ -1229,6 +1275,8 @@ def _reinitialiser():
 def _verifier_fonctionnement():
     """Comme les fonctions du module de CPython : après la fermeture de la fenêtre, le premier appel lève
     turtle.Terminator (le programme s'arrête au lieu de rouvrir une fenêtre) ; l'appel suivant en rouvre une."""
+    if _executions_fermees and tkinter._ident_execution() in _executions_fermees:
+        raise Terminator(_FERMEE)
     if not TurtleScreen._RUNNING:
         TurtleScreen._RUNNING = True
         raise Terminator(_FERMEE)

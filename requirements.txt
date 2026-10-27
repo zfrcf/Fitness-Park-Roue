@@ -1,0 +1,15 @@
+pyautogui
+numpy
+keyboard
+pillow
+requests
+# pywin32 is Windows-only, not needed on Linux
+# For Linux keyboard support, you may need: sudo apt-get install python3-dev libudev-dev
+=======
+pyautogui
+numpy
+keyboard
+pillow
+requests
+# pywin32 is Windows-only, not needed on Linux
+# For Linux keyboard support, you may need: sudo apt-get install python3-dev libudev-dev
